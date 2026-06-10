@@ -1,0 +1,24 @@
+# Top-level config which composes smaller configs via Hydra defaults
+defaults:
+  - model_adapter: default
+  - token_locator_config: default
+  - feature_processor: hiddens
+  - detector: probing
+  - pipeline: probing
+  - train_args: default
+
+# Runtime params
+cuda_visible_devices: "0"
+cache_dir: "./cache"
+use_cache: true
+task_type: null
+log_level: DEBUG
+
+random_seed: 42
+change_nested_random_seeds: true
+
+train_dataset_path: ???
+eval_dataset_path: ???
+
+hf_token : null
+openai_api_key: null

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sirin"
+version = "0.1.0"
+description = "Python library for detecting and analyzing contextual inconsistencies in LLM-based systems"
+authors = [
+    {name = "LLMTech", email = "llmtech@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "transformers (>=4.56.0,<5.0.0)",
+    "accelerate (>=1.12.0,<2.0.0)",
+    "tqdm (>=4.67.1,<5.0.0)",
+    "pandas (>=2.2.3,<3.0.0)",
+    "datasets (>=3.5.0,<4.0.0)",
+    "unsloth (<2025.3.19) ; sys_platform == 'linux'",
+    "hydra-core (>=1.3.2,<2.0.0)",
+    "joblib (>=1.4.2,<2.0.0)",
+    "faiss-cpu (>=1.10.0,<2.0.0)",
+    "scikit-learn (>=1.6.1,<2.0.0)",
+    "llvmlite (>=0.44.0,<0.45.0)",
+    "numba (>=0.61.0,<0.62.0)",
+    "scikit-dimension (>=0.3.4,<0.4.0)",
+    "numpy (==1.26.4)",
+    "mtopdiv @ git+https://github.com/IlyaTrofimov/MTopDiv.git",
+    "cmake (==3.24.2)",
+    "scipy (>=1.15.2,<2.0.0)",
+    "ripserplusplus @ git+https://github.com/simonzhang00/ripser-plusplus.git ; sys_platform == 'linux'",
+    "nltk (>=3.9.1,<4.0.0)",
+    "ipykernel (>=6.29.5,<7.0.0)",
+    "catboost (>=1.2.8,<2.0.0)",
+    "num2words (>=0.5.14,<0.6.0)",
+    "selfcheckgpt (>=0.1.7,<0.2.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "sentence-transformers (>=5.1.1,<6.0.0)",
+    "rouge-score (>=0.1.2,<0.2.0)",
+    "sacrebleu (>=2.5.1,<3.0.0)",
+    "evaluate (>=0.4.6,<0.5.0)",
+    "gputil (>=1.4.0,<2.0.0)",
+    "pydantic-settings (>=2.11.0,<3.0.0)",
+    "diskcache (>=5.6.3,<6.0.0)",
+    "tabpfn (>=2.1.3,<3.0.0)",
+    "openai (>=2.6.1,<3.0.0)",
+    "vllm (>=0.11.0,<0.12.0) ; sys_platform == 'linux'",
+    "peft (>=0.17.1,<0.18.0)",
+    "pytest",
+    "lm-polygraph @ ./sirin/detection/lm-polygraph",
+]
+
+[tool.ruff]
+select = ["Q"]
+
+[tool.ruff.flake8-quotes]
+inline-quotes = "single"
+docstring-quotes = "double"

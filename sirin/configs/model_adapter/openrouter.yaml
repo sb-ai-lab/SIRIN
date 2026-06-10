@@ -1,0 +1,15 @@
+# OpenRouter adapter (OpenAI-compatible API)
+# Use this for accessing various models through OpenRouter
+
+_target_: sirin.inference.adapters.OpenAIModelAdapter
+config:
+  model_path: "meta-llama/llama-2-70b-chat"  # Or any OpenRouter model
+  base_url: "https://openrouter.ai/api/v1"
+  
+  # API parameters
+  max_retries: 3
+  timeout: 60
+  proxy_url: null  # Optional: HTTP proxy
+  
+  # Note: Parallel processing via use_async=True in sample() call
+  # adapter.sample(inputs, use_async=True, max_concurrent=5)

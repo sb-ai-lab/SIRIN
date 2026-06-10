@@ -1,0 +1,16 @@
+# OpenAI adapter with parallel async processing
+# Processes multiple requests concurrently for 10x speedup
+
+_target_: sirin.inference.adapters.OpenAIModelAdapter
+config:
+  model_path: "gpt-4"
+  base_url: "https://api.openai.com/v1"
+  # batch_size: null  # Not used for OpenAI (uses async instead)
+  
+  # API parameters
+  max_retries: 3
+  timeout: 60
+  
+  # Note: Use use_async=True and max_concurrent in sample() call
+  # Example:
+  #   adapter.sample(inputs, use_async=True, max_concurrent=10)

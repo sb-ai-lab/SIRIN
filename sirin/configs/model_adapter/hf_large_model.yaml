@@ -1,0 +1,17 @@
+# HuggingFace adapter for large models (7B+)
+# Small batch size + multi-GPU support
+
+_target_: sirin.inference.adapters.HfModelAdapter
+config:
+  model_path: "meta-llama/Llama-2-7b-chat-hf"
+  device: "cuda"
+  batch_size: 4  # Small batch size for large models
+  
+  # Memory optimization
+  max_length: 1024
+  model_dtype: "bf16"
+  low_cpu_mem_usage: true
+  
+  # Multi-GPU distribution
+  device_map: "auto"  # Automatically distribute across GPUs
+  # max_memory: {0: "20GiB", 1: "20GiB"}  # Uncomment to set per-GPU limits

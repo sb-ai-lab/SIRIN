@@ -1,0 +1,18 @@
+# HuggingFace adapter with automatic batch processing
+# Use this config for memory-efficient inference with large batches
+
+_target_: sirin.inference.adapters.HfModelAdapter
+config:
+  model_path: "Qwen/Qwen2.5-3B-Instruct"
+  device: "cuda"
+  batch_size: 8  # Process 8 samples at a time to prevent OOM
+  
+  # Optional: Additional HF-specific parameters
+  max_length: 2048
+  model_dtype: "bf16"
+  padding: "max_length"
+  truncation: true
+  
+  # Optional: Multi-GPU support
+  # device_map: "auto"  # Uncomment for multi-GPU inference
+  # max_memory: {0: "20GiB", 1: "20GiB"}  # Per-GPU memory limits

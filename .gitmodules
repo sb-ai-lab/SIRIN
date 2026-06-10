@@ -1,0 +1,3 @@
+[submodule "sirin/detection/tabpfn_wide"]
+	path = sirin/detection/tabpfn_wide
+	url = https://github.com/pfeiferAI/TabPFN-Wide.git

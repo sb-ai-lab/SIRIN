@@ -1,0 +1,20 @@
+HF_TOKEN_ENV = "HF_TOKEN"
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+
+INPUT_COL = "input"
+INPUT_PROC_COL = "processed_input"
+REFERENCE_COL = "reference"
+TARGET_COL = "target"
+ANSWER_INDICES = "answer_indices"
+OFFSETS_COL = "offsets"
+GROUP_ID_COL = "group_id"
+
+GENERATED_DSET_KEY = "generated_dataset"
+CLEANED_DSET_KEY = "cleaned_dataset"
+DSET_KEY = "dataset"
+METRICS_KEY = "metrics"
+TORCH_MODULE_KEY = "torch_module"
+HIDDENS_FILE_KEY = "hidden_file"
+
+ARTIFACTS_YAML = "artifacts.yaml"
+SAVE_FEAT_TEMPLATE = "{feature_type}_{sample_hash}_layer_{layer_idx}.pkl"

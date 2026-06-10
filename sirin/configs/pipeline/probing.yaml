@@ -1,0 +1,23 @@
+_target_: sirin.detection.probing.ProbingPipeline
+config:
+  save_dir: "./outputs"
+  sampling:
+    temperature: 1.0
+    top_p: 1.0
+    top_k: 50
+    max_length: 512
+    do_sample: true
+  model_manager:
+    max_active_models: 3
+    memory_threshold: 0.8
+    max_retries: 3
+    retry_delay: 1.0
+  save_intermediate: true
+  experiment_name: "example_probe"
+  f_beta: 1.0
+  train_args: ${train_args}
+    
+task_type: ${task_type}
+target_approximator: null
+experiment_logger: null
+# detector, train_dataset, eval_dataset, and generator_adapter will be passed during instantiation

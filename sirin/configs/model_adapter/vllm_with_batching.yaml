@@ -1,0 +1,18 @@
+# vLLM adapter with batch processing
+# vLLM provides high-throughput inference with efficient batching
+
+_target_: sirin.inference.adapters.VllmModelAdapter
+config:
+  model_path: "meta-llama/Llama-2-7b-chat-hf"
+  device: "cuda"
+  batch_size: 16  # vLLM can handle larger batches efficiently
+  
+  # vLLM-specific parameters
+  max_length: 2048
+  enforce_eager: true
+  gpu_memory_utilization: 0.85  # Use 85% of GPU memory
+  
+  # Optional: Additional model kwargs
+  # model_kwargs:
+  #   tensor_parallel_size: 2  # For multi-GPU
+  #   dtype: "bfloat16"

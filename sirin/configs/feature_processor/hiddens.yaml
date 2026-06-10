@@ -1,0 +1,7 @@
+_target_: sirin.detection.processors.hidden.HiddensProcessor
+config:
+  feature_cache_dir: "${oc.env:HOME}/.cache/feature_cache"
+  token_locator_config: ${token_locator_config}
+  layers: null
+  separate: false
+cache_dir: ${cache_dir}
