@@ -1,0 +1,43 @@
+hydra:
+  run:
+    dir: ${cache_path}/${experiment_name}/${task}/${model.path}/${dataset}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+defaults:
+  - model: mistral-7b-instruct-v0.2
+  - _self_
+
+cache_path: ./workdir/output
+save_path: '${hydra:run.dir}'
+
+task: qa
+instruct: true
+experiment_name:
+
+text_column: input
+label_column: output
+train_split: train
+eval_split: test
+load_from_disk: false
+generation_params: {}
+
+train_dataset: null
+train_test_split: false
+test_split_size: 1
+
+subsample_train_dataset: 1000
+subsample_eval_dataset: -1
+
+use_density_based_ue: false
+use_seq_ue: false
+use_tok_ue: false
+use_ens_ue: false
+generation_metrics: null
+ens_type: 
+
+ignore_exceptions: false
+
+batch_size: 1
+deberta_batch_size: 10
+
+seed:
+    - 1
