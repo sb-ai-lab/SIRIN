@@ -58,10 +58,16 @@ class LookbacksProcessor(HiddensProcessor):
                 :, tok_idx, context_length : tok_idx + 1
             ].mean(-1)
 
-            denom = attn_on_context + attn_on_new_tokens
+            denom = attn_on_context + attn_on_new_tokens + 1e-10
             lookback_ratio[:, tok_idx] = attn_on_context / denom
 
         lookback_ratio = lookback_ratio.transpose(0, 1)  # (seq_len, num_heads)
+
+        # Filter to selected attention heads (e.g., one per KV group in GQA models)
+        if hasattr(self.config, 'attention_heads') and self.config.attention_heads is not None:
+            head_indices = self.config.attention_heads
+            lookback_ratio = lookback_ratio[:, head_indices]
+
         return lookback_ratio.cpu().to(dtype=torch.float32)
 
     def generate_features(self, samples: List[List[Dict]]) -> Dict[str, Any]:

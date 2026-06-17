@@ -1,5 +1,5 @@
 import joblib
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -7,17 +7,14 @@ from pathlib import Path
 from loguru import logger as lg
 
 from sirin.definitions import BASIC_METRICS, INPUT_COL, TARGET_COL, DetectionLevel
-from sirin.detection.base import DetectorBase
+from sirin.detection.base import DetectorBase, LoggerBase
 from sirin.detection.processors import (
     SequenceUncertaintyFeatureProcessor,
     TokenUncertaintyFeatureProcessor,
     FeatureProcessorBase,
 )
-from sirin.detection.probing.detectors.utils.detection import (
-    rearrange_token_predictions,
-)
+from sirin.detection.utils.token import rearrange_token_predictions, convert_spans_to_labels, get_answer_offsets
 from sirin.detection.utils.basic import calibrate_threshold
-from sirin.detection.utils.token import convert_spans_to_labels, get_answer_offsets
 from sirin.detection.utils.torch import InputsDataset
 from sirin.metrics import calculate_classification_metrics
 from sirin.models.detection import DetectionResult, UncertaintyDetectorConfig
@@ -129,43 +126,32 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         self,
         train_data: InputsDataset,
         val_data: Optional[InputsDataset] = None,
-        logger: Any = None,
+        logger: Optional[LoggerBase] = None,
     ) -> DetectionResult:
         """Fit the detector using uncertainty features"""
 
-        train_inputs = train_data[INPUT_COL]
-        train_targets = np.array(train_data[TARGET_COL])
+        # only threshold calibration
+        inputs = val_data[INPUT_COL] if val_data is not None else train_data[INPUT_COL]
+        targets = val_data[TARGET_COL] if val_data is not None else train_data[TARGET_COL]
+        metrics_config = self._get_classification_metrics_config()
 
-        train_features, _ = self.feature_processor(train_data[INPUT_COL])
-        train_features = np.array(train_features[0].flatten(start_dim=1))
-
-        aggregated_scores = self._aggregate_uncertainties(train_features)
+        probs, preds, _ = self.detect(inputs)
+        val_targets = np.array(targets)
         self.threshold = calibrate_threshold(
-            aggregated_scores,
-            train_targets,
+            probs,
+            targets,
             self.config.threshold_method,
             self.config.threshold_percentile,
             self.config.fixed_threshold,
         )
-
         lg.info(f"Set detection threshold to: {self.threshold}")
-
-        train_probs, train_preds = self.detect(train_inputs)
-        metrics_config = self._get_classification_metrics_config()
-        train_metrics = calculate_classification_metrics(
-            train_targets, train_probs, train_preds, metrics=metrics_config
+        result_metrics = calculate_classification_metrics(
+            val_targets, probs, preds, metrics=metrics_config
         )
+        result_probs = probs.tolist()
 
-        result_metrics = train_metrics
-        result_probs = train_probs.tolist()
-
-        if val_data is not None:
-            val_probs, val_preds = self.detect(val_data[INPUT_COL])
-            val_targets = np.array(val_data[TARGET_COL])
-            result_metrics = calculate_classification_metrics(
-                val_targets, val_probs, val_preds, metrics=metrics_config
-            )
-            result_probs = val_probs.tolist()
+        if logger:
+            logger.log_metrics(result_metrics, -1, prefix="/train")
 
         return DetectionResult(
             metrics=result_metrics,
@@ -216,97 +202,40 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         self,
         train_data: InputsDataset,
         val_data: Optional[InputsDataset] = None,
-        logger: Any = None,
+        logger: Optional[LoggerBase] = None,
     ) -> DetectionResult:
         """Fit the detector using token-level uncertainty features"""
 
-        train_inputs = train_data[INPUT_COL]
-        train_targets = train_data[TARGET_COL]  # Should be token-level labels
+        # only threshold calibration
+        inputs = val_data[INPUT_COL] if val_data is not None else train_data[INPUT_COL]
+        targets = val_data[TARGET_COL] if val_data is not None else train_data[TARGET_COL]
+        metrics_config = self._get_classification_metrics_config()
 
-        # Extract token-level features
-        train_features, _ = self.feature_processor(train_data[INPUT_COL])
-
-        # Extract and flatten all token scores for threshold calibration
-        all_token_scores, all_token_labels = self._extract_token_level_data(
-            train_features[0], train_targets
+        probs, preds, _ = self.detect(inputs)
+        flat_probs, flat_preds, flat_labels = self._flatten_token_predictions(
+            probs, preds, targets
         )
-
-        # Calibrate threshold on token level
         self.threshold = calibrate_threshold(
-            all_token_scores,
-            all_token_labels,
+            flat_probs,
+            flat_labels,
             self.config.threshold_method,
             self.config.threshold_percentile,
             self.config.fixed_threshold,
         )
-
         lg.info(f"Set detection threshold to: {self.threshold}")
-
-        # Detect and evaluate on token level
-        train_probs, train_preds, _ = self.detect(train_inputs)
-        flat_train_probs, flat_train_preds, flat_train_labels = (
-            self._flatten_token_predictions(train_probs, train_preds, train_targets)
+        result_metrics = calculate_classification_metrics(
+            flat_labels, flat_probs, flat_preds, metrics=metrics_config
         )
+        result_probs = flat_probs.tolist()
 
-        metrics_config = self._get_classification_metrics_config()
-        train_metrics = calculate_classification_metrics(
-            flat_train_labels,
-            flat_train_probs,
-            flat_train_preds,
-            metrics=metrics_config,
-        )
-
-        result_metrics = train_metrics
-        result_probs = flat_train_probs.tolist()
-
-        if val_data is not None:
-            val_probs, val_preds, _ = self.detect(val_data[INPUT_COL])
-            val_targets = val_data[TARGET_COL]
-
-            flat_val_probs, flat_val_preds, flat_val_labels = (
-                self._flatten_token_predictions(val_probs, val_preds, val_targets)
-            )
-
-            result_metrics = calculate_classification_metrics(
-                flat_val_labels, flat_val_probs, flat_val_preds, metrics=metrics_config
-            )
-            result_probs = flat_val_probs.tolist()
+        if logger:
+            logger.log_metrics(result_metrics, -1, prefix="/train")
 
         return DetectionResult(
             metrics=result_metrics,
             probs=result_probs,
             threshold=self.threshold,
         )
-
-    def _extract_token_level_data(
-        self,
-        features: List[torch.Tensor],
-        targets: List,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract and flatten token-level scores and labels from features for threshold calibration."""
-        all_token_scores = []
-        all_token_labels = []
-
-        for sample_idx, sample_features in enumerate(features):
-            sample_features = torch.tensor(sample_features)
-
-            # Aggregate across layers if needed
-            if len(sample_features.shape) == 3:
-                sample_features = sample_features.mean(dim=0)
-
-            # Aggregate across features per token
-            token_scores = self._aggregate_uncertainties(sample_features.numpy())
-            all_token_scores.extend(token_scores.tolist())
-
-            # Flatten labels
-            target = targets[sample_idx]
-            if isinstance(target, list):
-                all_token_labels.extend(target)
-            else:
-                # Replicate sequence-level label for all tokens
-                all_token_labels.extend([target] * len(token_scores))
-
-        return np.array(all_token_scores), np.array(all_token_labels)
 
     def _flatten_token_predictions(
         self, probs: List[List[float]], preds: List[List[int]], targets: List

@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import sirin.detection._lm_polygraph_compat  # noqa: F401 — must be before lm-polygraph imports
 from lm_polygraph import estimators
 from lm_polygraph.defaults.register_default_stat_calculators import (
     register_default_stat_calculators,
@@ -27,6 +28,16 @@ from sirin.inference.adapters import (
 from sirin.models.detection import UncertaintyFeatureProcessorConfig
 from sirin.utils.config_manager import validate_hydra_config
 
+_ATTENTION_METHODS = frozenset({'RAUQ', 'Focus', 'AttentionScore'})
+
+
+def _needs_attention(config: UncertaintyFeatureProcessorConfig) -> bool:
+    """Check if any configured uncertainty method needs attention weights."""
+    if getattr(config, 'output_attentions', False):
+        return True
+    methods = getattr(config, 'uncertainty_methods', None) or []
+    return bool(_ATTENTION_METHODS & set(methods))
+
 
 def estimate_uncertainty(
     model: Model,
@@ -35,7 +46,13 @@ def estimate_uncertainty(
     user_inputs: List[str],
     assistant_outputs: List[str],
     batch_size: int = 1,
+    output_attentions: bool = False,
+    top_logprobs: int = 5,
+    max_new_tokens: int = 100,
 ) -> Tuple[List[np.ndarray], List[str], List[List[int]]]:
+    blackbox_supports_logprobs = (
+        getattr(model, 'supports_logprobs', False) if model_type == 'Blackbox' else False
+    )
     man = UEManager(
         Dataset(user_inputs, assistant_outputs, batch_size=batch_size),
         model,
@@ -43,6 +60,9 @@ def estimate_uncertainty(
         available_stat_calculators=register_default_stat_calculators(
             model_type=model_type,
             output_hidden_states=not isinstance(model, WhiteboxModelvLLM),
+            output_attentions=output_attentions,
+            blackbox_supports_logprobs=blackbox_supports_logprobs,
+            top_logprobs=top_logprobs,
         ),
         builder_env_stat_calc=BuilderEnvironmentStatCalculator(model),
         generation_metrics=[],
@@ -50,6 +70,7 @@ def estimate_uncertainty(
         processors=[],
         ignore_exceptions=False,
         verbose=True,
+        max_new_tokens=max_new_tokens,
     )
     man()
     ue = [man.estimations[estimator.level, str(estimator)] for estimator in estimators]
@@ -81,7 +102,8 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
 
         if isinstance(self._extractor, OpenAIModelAdapter):
             self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=self._extractor.config.openai_api_key,
+                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
+                or getattr(self._extractor.config, 'api_key', None),
                 model_path=self._extractor.config.model_path,
                 supports_logprobs=self.config.supports_logprobs,
                 base_url=self._extractor.config.base_url,
@@ -157,13 +179,17 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
             *[(sample[0]['content'], sample[1]['content']) for sample in samples]
         )
 
+        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
         uncertainty, generation_texts, generation_tokens = estimate_uncertainty(
-            model=self.model_wrapper,
-            model_type=self.model_type,
-            estimators=self.uncertainty_methods,
-            user_inputs=user_inputs,
-            assistant_outputs=assistant_outputs,
-            batch_size=self._extractor.config.batch_size,
+            self.model_wrapper,
+            self.model_type,
+            self.uncertainty_methods,
+            list(user_inputs),
+            list(assistant_outputs),
+            batch_size=batch_size,
+            output_attentions=_needs_attention(self.config),
+            top_logprobs=getattr(self.config, 'top_logprobs', 5),
+            max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
         )
 
         token_features = [
@@ -235,6 +261,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'AttentionScore': estimators.AttentionScore,
             'PTrue': estimators.PTrue,
             'FisherRao': estimators.FisherRao,
+            'SelfCertainty': estimators.SelfCertainty,
         }
 
         methods = [
@@ -249,7 +276,8 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
 
         if isinstance(self._extractor, OpenAIModelAdapter):
             self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=self._extractor.config.openai_api_key,
+                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
+                or getattr(self._extractor.config, 'api_key', None),
                 model_path=self._extractor.config.model_path,
                 supports_logprobs=self.config.supports_logprobs,
                 base_url=self._extractor.config.base_url,
@@ -259,6 +287,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             self.model_wrapper = WhiteboxModel(
                 self._extractor.model,
                 self._extractor.tokenizer,
+                **self.config.model_kwargs,
             )
             self.model_type = 'Whitebox'
         elif isinstance(self._extractor, VllmModelAdapter):
@@ -364,14 +393,17 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
         user_inputs, assistant_outputs = zip(
             *[(sample[0]['content'], sample[1]['content']) for sample in samples]
         )
-
+        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
         uncertainty, _, _ = estimate_uncertainty(
-            model=self.model_wrapper,
-            model_type=self.model_type,
-            estimators=self.uncertainty_methods,
-            user_inputs=user_inputs,
-            assistant_outputs=assistant_outputs,
-            batch_size=self._extractor.config.batch_size,
+            self.model_wrapper,
+            self.model_type,
+            self.uncertainty_methods,
+            list(user_inputs),
+            list(assistant_outputs),
+            batch_size=batch_size,
+            output_attentions=_needs_attention(self.config),
+            top_logprobs=getattr(self.config, 'top_logprobs', 5),
+            max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
         )
 
         sequence_features = torch.tensor(

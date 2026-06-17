@@ -133,6 +133,7 @@ class FeatureCompressorBase(ABC):
             filepath,
         )
 
+    @classmethod
     def load(cls, filepath: str) -> "FeatureCompressorBase":
         """Load a fitted compressor."""
         data = joblib.load(filepath)
@@ -146,11 +147,7 @@ class FeatureCompressorBase(ABC):
             # Create compressor instance using the class method
             compressor_instance = instance._create_compressor()
             compressor_instance.__dict__.update(
-                {
-                    k: v
-                    for k, v in compressor_data["compressor"].__dict__.items()
-                    if hasattr(compressor_instance, k)
-                }
+                compressor_data["compressor"].__dict__
             )
             instance._compressors.append(compressor_instance)
 

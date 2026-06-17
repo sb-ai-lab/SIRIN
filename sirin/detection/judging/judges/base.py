@@ -216,9 +216,6 @@ class HfJudgeBase(JudgeBase):
         else:
             raise ValueError(f'Invalid data_collator_type: {self.data_collator_type}')
         
-        if getattr(self, 'class_token_ids', False):
-            kwargs['class_token_ids'] = self.class_token_ids
-        
         trainer = self.trainer(
             model=self.model_adapter.model,
             data_collator=data_collator,

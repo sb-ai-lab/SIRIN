@@ -7,8 +7,7 @@ from sirin.definitions import INPUT_COL, TARGET_COL
 
 class FeaturesDataset(torch.utils.data.Dataset):
     def __init__(self, data_dict):
-        print(data_dict)
-        self.data = {key: torch.tensor(value) for key, value in data_dict.items()}
+        self.data = {key: value.detach().clone() if isinstance(value, torch.Tensor) else torch.tensor(value) for key, value in data_dict.items()}
         self.length = len(next(iter(data_dict.values())))
 
     def __len__(self):
