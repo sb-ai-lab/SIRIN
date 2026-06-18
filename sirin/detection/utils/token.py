@@ -1,9 +1,59 @@
 from typing import Dict, List, Tuple
 
 import numpy as np
+import torch
 from loguru import logger as lg
 
 from sirin.inference.adapters import ModelAdapterBase
+
+
+def rearrange_token_predictions(
+    probs: np.ndarray,
+    preds: np.ndarray,
+    offsets: torch.Tensor | np.ndarray,
+    all_lengths: List[int],
+) -> Tuple[List[List[float]], List[List[int]]]:
+    """
+    Rearrange flat token-level predictions back to character-level per sample.
+    
+    Token-level models predict on compressed tokens, but we need character-level
+    predictions. This function repeats each token's prediction across its character span.
+    
+    Used by all token-level probing detectors (tabpfn, catboost, linear) and uncertainty detector.
+    
+    Args:
+        probs: Flat array of probabilities [total_tokens]
+        preds: Flat array of predictions [total_tokens]
+        offsets: Character offsets for each token (start, end) [total_tokens, 2]
+        all_lengths: Cumulative token counts per sample [0, len1, len1+len2, ...]
+    
+    Returns:
+        tuple of (probs_per_sample, preds_per_sample) where each is a list of lists
+    """
+    # Convert offsets to numpy if needed
+    if isinstance(offsets, torch.Tensor):
+        offsets = offsets.numpy()
+    
+    # Calculate character span length for each token
+    repeats = offsets[:, 1] - offsets[:, 0]
+    
+    # Rearrange probabilities: slice by sample and repeat by character spans
+    probs_list = [
+        probs[all_lengths[i] : all_lengths[i + 1]]
+        .repeat(repeats[all_lengths[i] : all_lengths[i + 1]])
+        .tolist()
+        for i in range(len(all_lengths) - 1)
+    ]
+    
+    # Rearrange predictions: slice by sample and repeat by character spans
+    preds_list = [
+        preds[all_lengths[i] : all_lengths[i + 1]]
+        .repeat(repeats[all_lengths[i] : all_lengths[i + 1]])
+        .tolist()
+        for i in range(len(all_lengths) - 1)
+    ]
+    
+    return probs_list, preds_list
 
 
 def get_answer_offsets(

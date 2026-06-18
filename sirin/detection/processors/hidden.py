@@ -144,6 +144,17 @@ class HiddensProcessor(FeatureProcessorBase):
                     new_features,
                     locations if locations else [None] * len(new_features),
                 ):
+                    if isinstance(features, (tuple, list)) and len(features) != len(self.layers):
+                        # Attention-based subclasses (AttentionsProcessor,
+                        # LookbacksProcessor) on MoE/hybrid-attention models
+                        # may receive fewer tensors than requested layers —
+                        # the adapter filters out-of-range attention indices.
+                        # Skip caching to avoid mapping features to wrong layers.
+                        lg.warning(
+                            f'Feature count ({len(features)}) != configured layers '
+                            f'({len(self.layers)}). Skipping cache for this sample.'
+                        )
+                        continue
                     self.cache_saver.save_sample_features(
                         sample,
                         features,

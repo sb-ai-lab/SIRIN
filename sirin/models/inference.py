@@ -55,6 +55,7 @@ class HFConfig(ModelAdapterBaseConfig):
     max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None  # e.g., {0: "20GiB", 1: "20GiB"}
     offload_folder: Optional[str] = None  # For CPU offloading
     low_cpu_mem_usage: bool = True  # Recommended for large models
+    attn_implementation: str = 'eager'  # 'eager', 'sdpa', 'flash_attention_2'
 
 
 @dataclass

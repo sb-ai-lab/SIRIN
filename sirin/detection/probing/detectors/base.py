@@ -72,7 +72,15 @@ class ProbingDetectorBase(DetectorBase):
         self.config.num_features = num_features
 
         if self.config.compression.method != CompressionMethod.NONE:
-            n_features = sum(torch.tensor(feature[0]).shape[-1] for feature in features)
+            if self.detection_level == DetectionLevel.SEQUENCE:
+                # (batch, num_layers, max_length, emb_dim)
+                n_features = sum(torch.tensor(f[0]).numel() for f in features)
+            else:
+                # (total_tokens, num_layers, 1, emb_dim) after unsqueeze
+                n_features = sum(
+                    torch.tensor(f[0]).shape[0] * torch.tensor(f[0]).shape[-1]
+                    for f in features
+                )
             dims = []
             for feature in features:
                 num_layers, num_tokens, emb_dim = torch.tensor(feature[0]).shape

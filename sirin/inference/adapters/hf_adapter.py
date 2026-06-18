@@ -42,28 +42,32 @@ class HfModelAdapter(ModelAdapterBase):
         super().__init__(config, model, tokenizer)
 
     def _get_primary_device(self) -> Optional[str]:
-        """Get the primary device for inputs when using device_map."""
-        if hasattr(self, 'model') and hasattr(self.model, 'hf_device_map') and self.model.hf_device_map:
-            # Model is loaded with device_map, get first device from hf_device_map
-            device_map_dict = self.model.hf_device_map
-            if device_map_dict:
-                first_device = next(iter(device_map_dict.values()))
-                if isinstance(first_device, (int, str)):
-                    return f'cuda:{first_device}' if isinstance(first_device, int) else first_device
-        
+        """Get the device where the input embedding lives.
+
+        Inputs must be on the same device as ``model.get_input_embeddings()``
+        for the first ``F.embedding`` call to succeed.
+        """
+        if hasattr(self, 'model') and self.model is not None:
+            try:
+                embed = self.model.get_input_embeddings()
+                if embed is not None:
+                    embed_device = next(embed.parameters()).device
+                    return str(embed_device)
+            except (StopIteration, AttributeError):
+                pass
+
         if hasattr(self, 'config') and hasattr(self.config, 'device_map') and self.config.device_map is not None:
-            if isinstance(self.config.device_map, str):
-                # For string device_map like 'auto', 'balanced', use first CUDA device
-                if torch.cuda.is_available():
-                    return 'cuda:0'
-                return 'cpu'
-            elif isinstance(self.config.device_map, dict):
-                # Custom device_map dictionary
-                if self.config.device_map:
-                    first_device = next(iter(self.config.device_map.values()))
-                    if isinstance(first_device, (int, str)):
-                        return f'cuda:{first_device}' if isinstance(first_device, int) else first_device
-        
+            dm = self.config.device_map
+            if isinstance(dm, str):
+                if dm.startswith('cuda:') or dm == 'cpu':
+                    return dm
+            elif isinstance(dm, dict) and dm:
+                first_device = next(iter(dm.values()))
+                if isinstance(first_device, int):
+                    return f'cuda:{first_device}'
+                if isinstance(first_device, str):
+                    return first_device
+
         return self.device
 
     def load(
@@ -136,20 +140,20 @@ class HfModelAdapter(ModelAdapterBase):
         if self.config.model_type == ModelType.CAUSAL:
             model = AutoModelForCausalLM.from_pretrained(
                 self.config.model_path,
-                attn_implementation='eager',
+                attn_implementation=self.config.attn_implementation,
                 **model_kwargs,
             )
         elif self.config.model_type == ModelType.BASE:
             model = AutoModel.from_pretrained(
                 self.config.model_path,
-                attn_implementation='eager',
+                attn_implementation=self.config.attn_implementation,
                 **model_kwargs,
             )
         elif self.config.model_type == ModelType.TOKEN_CLASSIFICATION:
             model = AutoModelForTokenClassification.from_pretrained(
                 self.config.model_path,
                 num_labels=self.config.num_labels,
-                attn_implementation='eager',
+                attn_implementation=self.config.attn_implementation,
                 problem_type='single_label_classification',
                 **model_kwargs,
             )
@@ -157,7 +161,7 @@ class HfModelAdapter(ModelAdapterBase):
             model = AutoModelForSequenceClassification.from_pretrained(
                 self.config.model_path,
                 num_labels=self.config.num_labels,
-                attn_implementation='eager',
+                attn_implementation=self.config.attn_implementation,
                 problem_type='single_label_classification',
                 **model_kwargs,
             )
@@ -175,7 +179,11 @@ class HfModelAdapter(ModelAdapterBase):
             tokenizer.max_length = min(self.config.max_length, tokenizer.model_max_length)
 
         if self.config.padding and self.config.padding_side != 'right':
-            lg.warning("Due to unexpected behavior when padding use `padding_side='right'")
+            lg.warning("Due to unexpected behavior when padding, use `padding_side='right'` instead")
+            tokenizer.padding = self.config.padding
+
+        tokenizer.padding_side = self.config.padding_side or 'right'
+        lg.info(f'Using padding_side={tokenizer.padding_side} for padding')
 
         return model, tokenizer
 
@@ -308,6 +316,27 @@ class HfModelAdapter(ModelAdapterBase):
             return responses, logprobs_for_responses
         
         return responses
+
+    @manage_active_model
+    def probe_num_attention_layers(self) -> int:
+        """Run a single dummy forward pass to count attention tensors.
+
+        Hybrid-attention models (e.g. Qwen3.5) return fewer attention
+        tensors than ``num_hidden_layers`` because only a subset of
+        blocks use standard full attention.  This method returns the
+        actual count so callers can choose valid layer indices.
+        """
+        if not self._is_loaded:
+            self.load()
+
+        dummy_input = self.tokenizer(
+            'probe', return_tensors='pt', add_special_tokens=True,
+        ).to(self._get_primary_device())
+
+        with torch.no_grad():
+            outputs = self.model(**dummy_input, output_attentions=True)
+
+        return len(outputs.attentions)
 
     @manage_active_model
     def generate_hiddens(
@@ -465,7 +494,26 @@ class HfModelAdapter(ModelAdapterBase):
                 attentions = outputs.attentions
                 if layers:
                     # Move each attention to CPU (handles multi-device models)
-                    selected_attentions = [attentions[i].cpu() if hasattr(attentions[i], 'device') else attentions[i] for i in layers]
+                    n_attn = len(attentions)
+                    attn_layers = [i for i in layers if -n_attn <= i < n_attn]
+                    if len(attn_layers) < len(layers):
+                        skipped = [i for i in layers if i not in attn_layers]
+                        if not attn_layers:
+                            raise ValueError(
+                                f'All requested attention layers {layers} are out of range. '
+                                f'Model returns only {n_attn} attention tensors '
+                                f'(valid range: [-{n_attn}, {n_attn - 1}]). '
+                                f'For hybrid-attention models, compute layer indices '
+                                f'relative to the attention block count, not num_hidden_layers.'
+                            )
+                        lg.warning(
+                            f'Model returned {n_attn} attention tensors, but layers={layers} were requested. '
+                            f'Requested indices are applied to outputs.attentions (valid range: '
+                            f'[-{n_attn}, {n_attn - 1}]), so indices {skipped} were skipped as out of range. '
+                            f'In hybrid-attention models, outputs.attentions may include only the subset of '
+                            f'blocks that use standard full attention.'
+                        )
+                    selected_attentions = [attentions[i].cpu() if hasattr(attentions[i], 'device') else attentions[i] for i in attn_layers]
                 else:
                     last_attn = attentions[-1]
                     selected_attentions = [last_attn.cpu() if hasattr(last_attn, 'device') else last_attn]

@@ -83,7 +83,7 @@ class JudgePipeline(PipelineBase):
             if self.experiment_logger:
                 self.experiment_logger.log_dataset_info("validation", val_data)
 
-        if hasattr(self.judge, 'class_token_ids'):
+        if getattr(self.judge, 'class_token_ids', False):
             kwargs['class_token_ids'] = self.judge.class_token_ids
 
         lg.info("Starting model training...")

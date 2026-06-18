@@ -145,6 +145,10 @@ class EnsembleProcessor(FeatureProcessorBase):
         requirements = self._analyze_processor_requirements()
         args = self._unify_processor_args()
 
+        # Store unified layers so _extract_processor_features_subset can
+        # filter per-processor features from the shared model output.
+        self._unified_layers = args['layers']
+
         model_states = self.extractor.generate_hiddens(
             samples,
             return_hiddens=requirements['need_hiddens'],
@@ -170,6 +174,19 @@ class EnsembleProcessor(FeatureProcessorBase):
 
         state_attr = ProcessorRegistry.get_state_attribute(processor._feature_type)
 
+        # Build index mapping from unified layers to this processor's layers.
+        # The model was called with _unified_layers (union of all processors),
+        # but each processor only needs its own subset.
+        unified_layers = getattr(self, '_unified_layers', None)
+        proc_layers = getattr(processor, 'layers', None)
+        layer_indices = None
+        if unified_layers and proc_layers:
+            layer_indices = [
+                unified_layers.index(ly)
+                for ly in proc_layers
+                if ly in unified_layers
+            ]
+
         for global_idx in sample_indices:
             local_idx = sample_index_map[global_idx]
 
@@ -182,11 +199,21 @@ class EnsembleProcessor(FeatureProcessorBase):
                 locations = shared_model_states.locations[processor_idx][local_idx]
                 proc_locations_subset.append(locations)
 
-            # Handle features
+            # Handle features — filter to processor's layers from unified output
             if hasattr(shared_model_states, state_attr):
                 features = getattr(shared_model_states, state_attr)
                 if features is not None:
-                    proc_features_subset.append(features[local_idx])
+                    sample_features = features[local_idx]
+                    if layer_indices is not None and isinstance(sample_features, (tuple, list)):
+                        if max(layer_indices) >= len(sample_features):
+                            raise ValueError(
+                                f'{type(processor).__name__} layer_indices {layer_indices} '
+                                f'exceed feature count {len(sample_features)} for '
+                                f'state "{state_attr}". Ensure ensemble sub-processor '
+                                f'layers are within the model\'s {state_attr} output range.'
+                            )
+                        sample_features = tuple(sample_features[i] for i in layer_indices)
+                    proc_features_subset.append(sample_features)
             
             # Handle masks
             if hasattr(shared_model_states, 'masks') and shared_model_states.masks is not None:

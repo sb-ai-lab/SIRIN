@@ -5,6 +5,7 @@ _private_*.yaml
 outputs
 outputs_debug
 __pycache__
+*.egg-info/
 /data
 .idea
 .venv/

@@ -13,9 +13,8 @@ from sirin.detection.probing.detectors.utils.detection import (
     check_features_for_nan_with_indices,
     compute_token_cumulative_lengths,
     handle_binary_multiclass_probs,
-    rearrange_token_predictions,
 )
-from sirin.detection.utils.token import convert_spans_to_labels
+from sirin.detection.utils.token import rearrange_token_predictions, convert_spans_to_labels
 from sirin.detection.probing.detectors.utils.training import (
     calibrate_and_evaluate,
     preprocess_dataloader_to_numpy,

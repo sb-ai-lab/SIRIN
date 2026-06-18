@@ -253,6 +253,10 @@ class FeaturePreprocessor:
         instance.feature_shapes = config['feature_shapes']
         instance.feature_n_features = config['feature_n_features']
         instance._scaling_stats_list = config.get('scaling_stats_list', [])
+        # Recompute runtime flag (set in fit() but not persisted in save())
+        instance._needs_compression = (
+            sum(instance.feature_n_features) > instance.compression_threshold
+        )
 
         # Load scalers
         instance.scalers = []

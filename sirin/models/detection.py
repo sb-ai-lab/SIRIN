@@ -177,7 +177,7 @@ class DetectorBaseConfig:
     use_multiprocessing: bool = True
     batch_size: int = 1
     kwargs: Dict[str, Any] = field(default_factory=dict)
-    threshold_method: Literal["percentile", "fixed", "optimal"] = "optimal"
+    threshold_method: Literal["percentile", "fixed", "optimal", "f1_optimal", "prior"] = "optimal"
     threshold_percentile: float = 0.5
     fixed_threshold: float = 0.5
     num_classification_heads: int = 1
@@ -400,7 +400,9 @@ class UncertaintyFeatureProcessorConfig(FeatureProcessorBaseConfig):
     max_new_tokens: int = 256
     openai_api_key: Optional[str] = None
     supports_logprobs: bool = True
+    top_logprobs: int = 5
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
+    output_attentions: bool = False  # Auto-enabled when RAUQ/Focus/AttentionScore in methods
 
 
 @dataclass

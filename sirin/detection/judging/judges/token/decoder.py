@@ -37,6 +37,7 @@ class TokenDecoderJudge(HfJudgeBase):
         self.model_adapter.tokenizer.add_tokens(['[SPAN]', '[/SPAN]'], special_tokens=True)
         self.model_adapter.model.resize_token_embeddings(len(self.model_adapter.tokenizer))
         self.assistant_prefix = get_assistant_prefix(self.model_adapter._model_name)
+        self.class_token_ids = None
 
     def detect(
         self, samples: Union[List[str], List[List[Dict]]], labels: Optional[np.ndarray] = None, **kwargs
