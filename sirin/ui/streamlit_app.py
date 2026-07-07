@@ -22,6 +22,11 @@ def _cache_resource(func):
         return func
 
 
+@_cache_resource
+def _logo_data_uri() -> str:
+    return 'data:image/png;base64,' + base64.b64encode(LOGO_PATH.read_bytes()).decode()
+
+
 def build_sample(prompt: str, answer: str) -> list[dict[str, str]]:
     return [
         {'role': 'user', 'content': prompt},
@@ -622,10 +627,9 @@ def main() -> None:
     st.set_page_config(page_title='SIRIN', page_icon=str(LOGO_PATH), layout='wide')
     motion = str(st.session_state.get('bg_motion', 'Subtle')).lower()
     styles.inject_global_styles(st, motion=motion)
-    logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode()
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'
-        f'<img src="data:image/png;base64,{logo_b64}" width="48" style="display:block;"/>'
+        f'<img src="{_logo_data_uri()}" width="48" style="display:block;" alt="" aria-hidden="true"/>'
         f'<h1 style="margin:0;font-size:2.5rem;font-weight:700;line-height:1;">SIRIN</h1>'
         f'</div>',
         unsafe_allow_html=True,
