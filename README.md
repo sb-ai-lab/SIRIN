@@ -1,4 +1,4 @@
-# 🕊️ SIRIN: Semantic Inconsistency Recognition and Inspection Nexus
+# <img src="sirin/ui/assets/logo.png" width="40" align="left" style="margin-right:8px" alt="SIRIN logo"/> SIRIN: Semantic Inconsistency Recognition and Inspection Nexus
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -12,7 +12,7 @@ Both tasks are supported at **sequence-level** and **token-level** granularities
 
 ## 📑 Table of Contents
 
-- [🕊️ SIRIN: Semantic Inconsistency Recognition and Inspection Nexus](#️-sirin-semantic-inconsistency-recognition-and-inspection-nexus)
+- [SIRIN: Semantic Inconsistency Recognition and Inspection Nexus](#sirin-semantic-inconsistency-recognition-and-inspection-nexus)
   - [📑 Table of Contents](#-table-of-contents)
   - [🌟 Key Features](#-key-features)
   - [🧩 Architecture \& Overview](#-architecture--overview)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import math
 import os
 import shlex
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from sirin.ui.styles import PALETTE
+
+LOGO_PATH = Path(__file__).parent / 'assets' / 'logo.png'
 
 
 def _cache_resource(func):
@@ -616,10 +619,17 @@ def main() -> None:
 
     from sirin.ui import styles, visualizers
 
-    st.set_page_config(page_title='SIRIN', page_icon='🕊️', layout='wide')
+    st.set_page_config(page_title='SIRIN', page_icon=str(LOGO_PATH), layout='wide')
     motion = str(st.session_state.get('bg_motion', 'Subtle')).lower()
     styles.inject_global_styles(st, motion=motion)
-    st.title('🕊️ SIRIN')
+    logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode()
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'
+        f'<img src="data:image/png;base64,{logo_b64}" width="48" style="display:block;"/>'
+        f'<h1 style="margin:0;font-size:2.5rem;font-weight:700;line-height:1;">SIRIN</h1>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         'Semantic Inconsistency Recognition & Inspection Nexus — '
         'chat, then inspect hallucination & answerability signals.'
@@ -645,7 +655,7 @@ def main() -> None:
             st.rerun()
 
     for message in st.session_state.messages:
-        avatar = '🕊️' if message['role'] == 'assistant' else None
+        avatar = str(LOGO_PATH) if message['role'] == 'assistant' else None
         with st.chat_message(message['role'], avatar=avatar):
             st.markdown(message['content'])
             if message['role'] == 'assistant':
@@ -659,7 +669,7 @@ def main() -> None:
         st.session_state.messages.append({'role': 'user', 'content': incoming})
         with st.chat_message('user'):
             st.markdown(incoming)
-        with st.chat_message('assistant', avatar='🕊️'):
+        with st.chat_message('assistant', avatar=str(LOGO_PATH)):
             message = _run_turn(st, incoming, cfg, visualizers)
         st.session_state.messages.append(message)
 
