@@ -12,6 +12,8 @@ __pycache__
 notebooks/
 /src/notebooks
 .trunk
+.claude
+.agents
 *.csv
 poetry.lock
 nohup.out
