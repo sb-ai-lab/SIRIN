@@ -49,7 +49,12 @@ dependencies = [
     "vllm (>=0.11.0,<0.12.0) ; sys_platform == 'linux'",
     "peft (>=0.17.1,<0.18.0)",
     "pytest",
-    "lm-polygraph @ ./sirin/detection/lm-polygraph",
+    "lm-polygraph @ file:./sirin/detection/lm-polygraph",
+]
+
+[project.optional-dependencies]
+ui = [
+    "streamlit>=1,<2",
 ]
 
 [tool.ruff]

@@ -1,0 +1,13 @@
+[theme]
+base = "dark"
+primaryColor = "#e562a8"
+backgroundColor = "#0d0819"
+secondaryBackgroundColor = "#16101f"
+textColor = "#f4f0fb"
+linkColor = "#afdedd"
+baseRadius = "14px"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+[browser]
+gatherUsageStats = false

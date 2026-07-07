@@ -95,6 +95,8 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
         self.uncertainty_methods = self._initialize_uncertainty_methods()
         self.model_wrapper = None
         self.model_type = None
+        self.last_generated_text: str | None = None
+        self.last_method_scores: dict[str, float] | None = None
 
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
@@ -141,6 +143,7 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
         )
 
         pooled_features = self.postprocess(features)
+        self._set_last_debug(features=pooled_features, answer_indices=answer_indices)
         return [pooled_features], answer_indices
 
     def _initialize_uncertainty_methods(self) -> Dict[str, Any]:
@@ -191,6 +194,8 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
         )
+        self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
+        self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.
 
         token_features = [
             np.stack([ue[i] for ue in uncertainty]).astype(float)
@@ -236,6 +241,8 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
         )
         self.uncertainty_methods = self._initialize_uncertainty_methods()
         self.model_wrapper = None
+        self.last_generated_text: str | None = None
+        self.last_method_scores: dict[str, float] | None = None
 
     def _initialize_uncertainty_methods(self) -> Dict[str, Any]:
         """Initialize uncertainty estimation methods"""
@@ -311,6 +318,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
         )
 
         padded_features, masks = self.postprocess(features)
+        self._set_last_debug(features=padded_features, masks=masks)
         return [padded_features], [masks]
 
     def postprocess(self, features) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -394,7 +402,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             *[(sample[0]['content'], sample[1]['content']) for sample in samples]
         )
         batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
-        uncertainty, _, _ = estimate_uncertainty(
+        uncertainty, generation_texts, _ = estimate_uncertainty(  # keep scored text for UI.
             self.model_wrapper,
             self.model_type,
             self.uncertainty_methods,
@@ -405,6 +413,8 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
         )
+        self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
+        self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.
 
         sequence_features = torch.tensor(
             np.array(uncertainty).astype(float),

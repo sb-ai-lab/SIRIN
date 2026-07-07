@@ -44,8 +44,11 @@ class OpenAIModelAdapter(ModelAdapterBase):
         else:
             client_kwargs = {
                 'http_client': httpx.Client(proxy=self.config.proxy_url),
-                # 'api_key': self.config.api_key,
             }
+            # honor an explicit api_key (e.g. an OpenRouter key) but keep the
+            # SDK's OPENAI_API_KEY env fallback when config.api_key is None.
+            if self.config.api_key:
+                client_kwargs['api_key'] = self.config.api_key
 
             if self.config.base_url:
                 client_kwargs['base_url'] = self.config.base_url
@@ -95,7 +98,7 @@ class OpenAIModelAdapter(ModelAdapterBase):
                     else:
                         return generated_text, []
                 else:
-                    return generated_text, [] if return_logprobs else generated_text
+                    return (generated_text, []) if return_logprobs else generated_text
                 
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
@@ -136,7 +139,7 @@ class OpenAIModelAdapter(ModelAdapterBase):
                     else:
                         return generated_text, []
                 else:
-                    return generated_text, [] if return_logprobs else generated_text
+                    return (generated_text, []) if return_logprobs else generated_text
                 
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')

@@ -35,6 +35,8 @@ class UncertaintyDetectorBase(DetectorBase):
         self.feature_processor = feature_processor
         self.feature_processor.setup_extractor()
         self.feature_stats = {}
+        self.last_generated_text: str | None = None
+        self.last_method_scores: dict[str, float] | None = None
 
     def setup_model(self):
         """Setup detector model (uncertainty-based detection doesn't need additional models)"""
@@ -169,6 +171,8 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         samples, group_ids = self._split_context_samples(samples)
 
         uncertainty_scores, _ = self.feature_processor(samples)
+        self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
+        self.last_method_scores = getattr(self.feature_processor, 'last_method_scores', None)
 
         uncertainty_scores = np.array(uncertainty_scores[0].flatten(start_dim=1))
         aggregated_scores = self._aggregate_uncertainties(uncertainty_scores)
@@ -267,6 +271,8 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         samples, group_ids = self._split_context_samples(samples)
 
         uncertainty_scores, _ = self.feature_processor(samples)
+        self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
+        self.last_method_scores = getattr(self.feature_processor, 'last_method_scores', None)
 
         # Get answer offsets from the reference answer tokens — these define the
         # character-level output space and drive all_lengths.

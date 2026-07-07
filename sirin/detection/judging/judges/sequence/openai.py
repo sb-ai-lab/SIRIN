@@ -11,7 +11,7 @@ from sirin.inference.adapters import ModelAdapterBase
 class SequenceOpenAIJudge(OpenAIJudgeBase):
     """
     OpenAI API judge implementation for sequence-level hallucination detection.
-    
+
     Architecture: Uses OpenAI API (e.g., GPT-4) instead of local HuggingFace models.
     No training support - inference only via API calls.
     """
@@ -19,6 +19,7 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
 
     def __init__(self, config: OpenAIJudgeConfig, model_adapter: ModelAdapterBase):
         super().__init__(config=config, model_adapter=model_adapter)
+        self.last_generations: list[str] | None = None
 
     def detect(
         self,
@@ -42,16 +43,20 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
             top_logprobs=2,
             **kwargs
         )
+        self.last_generations = list(results)
 
         probs = []
         preds = []
-        
-        for logprob_result in logprobs_results:
-            most_likely_logprob = -1*logprob_result[0][0]
-            probs.append(most_likely_logprob)
-            
-            pred = int(results[logprobs_results.index(logprob_result)]) if results[logprobs_results.index(logprob_result)].isdigit() else 0
-            preds.append(pred)
+
+        for idx, logprob_result in enumerate(logprobs_results):
+            # Some models omit logprobs: score becomes nan (not a crash); the verdict still holds.
+            if logprob_result and logprob_result[0]:
+                probs.append(-1 * logprob_result[0][0])
+            else:
+                probs.append(float('nan'))
+
+            text = str(results[idx]).strip()
+            preds.append(int(text) if text.isdigit() else 0)
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)

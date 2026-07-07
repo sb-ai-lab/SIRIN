@@ -45,6 +45,7 @@ class HiddensProcessor(FeatureProcessorBase):
         )
 
         features = self.postprocess(features)
+        self._set_last_debug(features=features, answer_indices=answer_indices)
         return [features], answer_indices
 
     def postprocess(self, features) -> Tuple[torch.Tensor, torch.Tensor]:

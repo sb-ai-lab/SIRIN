@@ -8,6 +8,7 @@ from sirin.detection.judging.judges.base import OpenAIJudgeBase
 from sirin.detection.judging.judges.utils import (
     build_prompt_messages,
     calculate_character_probabilities,
+    find_span_segments,
 )
 from sirin.detection.utils.token import convert_spans_to_labels
 from sirin.inference.adapters import OpenAIModelAdapter
@@ -17,7 +18,7 @@ from sirin.models.detection import OpenAIJudgeConfig
 class TokenOpenAIJudge(OpenAIJudgeBase):
     """
     OpenAI API judge implementation for token-level hallucination detection.
-    
+
     Architecture: Uses OpenAI API with multiple generations to identify character-level spans.
     Similar to TokenDecoderJudge but uses API instead of local model.
     No training support - inference only via API calls.
@@ -25,8 +26,10 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
     detection_level = DetectionLevel.TOKEN
 
     def __init__(self, config: OpenAIJudgeConfig, model_adapter: OpenAIModelAdapter):
-        super().__init__(config=config, model_adapter=model_adapter)   
+        super().__init__(config=config, model_adapter=model_adapter)
         self.class_token_ids = None
+        self.last_generations: list[str] | None = None
+        self.last_spans: list[list[tuple[int, int]]] | None = None
 
     def detect(
         self,
@@ -48,7 +51,8 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
             top_p=self.config.top_p,
             n=self.config.num_beams,
         )
-        
+        self.last_generations = list(generated_texts)
+        self.last_spans = [find_span_segments(text) for text in generated_texts]
         sample_sequences = []
         for _ in range(self.config.num_beams):
             sample_sequences.append(generated_texts[0])

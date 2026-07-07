@@ -35,6 +35,7 @@ class SequenceDecoderJudge(HfJudgeBase):
     def __init__(self, config: HfJudgeConfig, model_adapter: HfModelAdapter):
         super().__init__(config=config, model_adapter=model_adapter)
         self.assistant_prefix = get_assistant_prefix(self.model_adapter._model_name)
+        self.last_generations: list[str] | None = None  # generated text is not locally decoded here.
 
     def detect(
         self,

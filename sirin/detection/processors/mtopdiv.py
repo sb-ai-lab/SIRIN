@@ -60,6 +60,7 @@ class MTopDivFeatureProcessor(FeatureProcessorBase):
         )
         
         features = self.postprocess(features)
+        self._set_last_debug(features=features)
         
         return [features], [None] # not returning labels because no token level detection
 

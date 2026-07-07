@@ -75,16 +75,15 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
         probs = []
         preds = []
 
-        for logprob_result in logprobs_results:
-            most_likely_logprob = -1 * logprob_result[0][0]
-            probs.append(most_likely_logprob)
+        for idx, logprob_result in enumerate(logprobs_results):
+            # models that omit logprobs get a nan score (not a crash); the verdict still holds.
+            if logprob_result and logprob_result[0]:
+                probs.append(-1 * logprob_result[0][0])
+            else:
+                probs.append(float('nan'))
 
-            pred = (
-                int(results[logprobs_results.index(logprob_result)])
-                if results[logprobs_results.index(logprob_result)].isdigit()
-                else 0
-            )
-            preds.append(pred)
+            text = str(results[idx]).strip()
+            preds.append(int(text) if text.isdigit() else 0)
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)
