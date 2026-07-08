@@ -98,9 +98,9 @@ def _render_gauge(st: Any, view: dict[str, Any]) -> None:
             '<div title="threshold" style="position:absolute;top:0;'
             f"left:{threshold_pct:.2f}%;transform:translateX(-50%);"
             'display:flex;flex-direction:column;align-items:center;pointer-events:none;">'
-            f'<span style="color:{PALETTE["sheen"]};font-size:0.6rem;line-height:1;">&#9662;</span>'
-            f'<span style="width:2px;height:16px;background:{PALETTE["sheen"]};'
-            'box-shadow:0 0 0 1px rgba(13,8,25,0.55);"></span></div></div>'
+            '<span style="color:var(--sirin-text);opacity:0.85;font-size:0.6rem;line-height:1;">&#9662;</span>'
+            '<span style="width:2px;height:16px;background:var(--sirin-text);opacity:0.85;'
+            'box-shadow:0 0 0 1px var(--sirin-shadow);"></span></div></div>'
             '<div style="margin-top:0.4rem;font-size:0.8rem;'
             f'color:var(--sirin-muted);{_MONO}">threshold {threshold_pct:.1f}%</div></div>'
         ),
@@ -118,7 +118,7 @@ def _render_raw(st: Any, view: dict[str, Any]) -> None:
             'flex-wrap:wrap;padding:0.75rem 0;">'
             '<span style="display:inline-flex;gap:0.45rem;align-items:baseline;'
             'padding:0.42rem 0.7rem;border-radius:0.6rem;'
-            f'background:{PALETTE["surface_2"]};border:1px solid {PALETTE["border"]};">'
+            'background:var(--sirin-surface-2);border:1px solid var(--sirin-border);">'
             '<strong>Raw score</strong>'
             f'<span style="{_MONO}">{raw:.4g}</span>'
             f'<span style="color:var(--sirin-muted);{_MONO}">threshold {html.escape(threshold_text)}</span>'
@@ -198,6 +198,39 @@ def _scores(value: Any) -> list[float]:
     return scores
 
 
+def token_strip(
+    cells: list[str],
+    scores: list[float],
+    *,
+    invert: bool = False,
+    color: str | None = None,
+    titles: list[str] | None = None,
+) -> str:
+    """One row of per-token cells tinted by score in [0, 1] — the shared primitive behind the
+    per-token visualizers. ``invert`` colours LOW scores hot (e.g. a lookback ratio: little
+    attention to context => higher hallucination risk). ``color`` overrides the tint hue.
+    ``titles`` gives per-cell hover text (e.g. the RAW value), else the shown intensity is used.
+    A cell with no matching score renders NEUTRAL (not hot), so a length mismatch never
+    masquerades as risk."""
+    hue = color or PALETTE['risk']
+    out = []
+    for index, cell in enumerate(cells):
+        if index < len(scores):
+            score = _clamp01(scores[index])
+            shown = 1.0 - score if invert else score
+        else:
+            shown = 0.5  # missing score => neutral, never max-risk
+        title = titles[index] if titles and index < len(titles) else f"{shown:.2f}"
+        text = html.escape(cell) if cell and cell.strip() else '&nbsp;'
+        out.append(
+            f'<span title="{html.escape(title)}" style="display:inline-block;margin:0.09rem;'
+            f'padding:0.1rem 0.3rem;border-radius:0.35rem;{_MONO}font-size:0.86rem;'
+            f'color:var(--sirin-text);background:{_tint(hue, 0.10 + shown * 0.75)};'
+            f'border:1px solid {_tint(hue, 0.18 + shown * 0.42)};">{text}</span>'
+        )
+    return '<div class="sirin-token-strip" style="line-height:2.2;">' + ''.join(out) + '</div>'
+
+
 def _render_token(st: Any, view: dict[str, Any]) -> None:
     if score_heatmap is None:
         st.info("Token heatmap is unavailable because UI helpers could not be imported.")
@@ -254,7 +287,7 @@ def _render_claim(st: Any, view: dict[str, Any]) -> None:
         )
         pred = claim.get('pred')
         cards.append(
-            f'<div style="background:{PALETTE["surface_2"]};border:1px solid {PALETTE["border"]};'
+            '<div style="background:var(--sirin-surface-2);border:1px solid var(--sirin-border);'
             'border-radius:12px;padding:0.7rem 0.85rem;margin:0.5rem 0;">'
             '<div style="margin-bottom:0.4rem;line-height:1.5;">'
             f"{fact}</div>"
@@ -309,7 +342,7 @@ def render_result(st: Any, view: dict[str, Any]) -> None:
             '<span style="font-size:0.75rem;color:var(--sirin-faint);">/</span>'
             f'<span style="font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;'
             f'color:var(--sirin-muted);">{level_label}</span>'
-            f'<span style="font-size:0.68rem;border:1px solid {PALETTE["border"]};'
+            '<span style="font-size:0.68rem;border:1px solid var(--sirin-border);'
             'border-radius:999px;padding:0.08rem 0.45rem;color:var(--sirin-muted);'
             'text-transform:uppercase;letter-spacing:0.06em;">'
             f"{calibration}</span></div>"

@@ -10,6 +10,35 @@ def test_presets_registry():
         if 'zero-shot' in preset.name:
             assert preset.requires_checkpoint is False
     assert 'Probing — Answerability TabPFN (checkpoint)' in presets.PRESETS
+    assert 'Judge — API Token (zero-shot)' in presets.PRESETS
+
+
+def test_openai_token_judge_preset_describes_as_token_heatmap(monkeypatch):
+    detector = _build_openai_token_judge_with_fakes(monkeypatch)
+    info = presets.describe_detector(detector)
+    assert info['level'] == 'token'
+    assert info['display_mode'] == 'heatmap'
+
+
+def _build_openai_token_judge_with_fakes(monkeypatch):
+    import sirin.detection.judging as judging
+    import sirin.inference.adapters as adapters
+
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'test-key')
+
+    class FakeAdapter:
+        def __init__(self, config):
+            self.config = config
+
+    class FakeJudge:
+        def __init__(self, config, model_adapter):
+            self.config = config
+            self.model_adapter = model_adapter
+
+    monkeypatch.setattr(adapters, 'OpenAIModelAdapter', FakeAdapter)
+    monkeypatch.setattr(judging, 'TokenOpenAIJudge', FakeJudge)
+
+    return presets._build_openai_token_judge()
 
 
 def test_answerability_preset_uses_env_checkpoint(monkeypatch, tmp_path):

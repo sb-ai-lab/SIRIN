@@ -437,33 +437,24 @@ SUGGESTIONS = [
 
 def _hero(st: Any) -> None:
     st.html(
-        (
-            '<div style="background:{surface};border:1px solid {border};border-radius:18px;'
-            'padding:1.5rem 1.7rem;margin:0.2rem 0 1.1rem;box-shadow:0 20px 50px {shadow};'
-            'backdrop-filter:blur(18px) saturate(135%);-webkit-backdrop-filter:blur(18px) saturate(135%);">'
-            '<div style="font-family:var(--sirin-mono);font-size:0.72rem;letter-spacing:0.16em;'
-            'text-transform:uppercase;color:{hot};margin-bottom:0.55rem;">'
-            'Hallucination &amp; answerability detection</div>'
-            '<div style="font-size:1.55rem;font-weight:700;letter-spacing:-0.015em;'
-            'margin-bottom:0.45rem;">Chat with a model — then see what SIRIN sees.</div>'
-            '<div style="color:var(--sirin-muted);max-width:62ch;line-height:1.6;">'
-            'Give a question together with its context. SIRIN generates the answer, then flags '
-            'unfaithful or unanswerable content at the sequence, token, or claim level.</div>'
-            '<div style="margin-top:1.1rem;display:inline-flex;flex-direction:column;gap:0.2rem;'
-            'font-family:var(--sirin-mono);font-size:0.82rem;background:{surface2};'
-            'border:1px solid {border};border-radius:10px;padding:0.65rem 0.85rem;'
-            'color:var(--sirin-muted);">'
-            '<span><span style="color:{mint};">Context:</span> The Eiffel Tower is in Paris.</span>'
-            '<span><span style="color:{mint};">Question:</span> In which city is the Eiffel Tower?</span>'
-            '</div></div>'
-        ).format(
-            surface=PALETTE['surface'],
-            surface2=PALETTE['surface_2'],
-            border=PALETTE['border'],
-            shadow=PALETTE['shadow'],
-            hot=PALETTE['hot'],
-            mint=PALETTE['mint'],
-        )
+        '<div style="background:var(--sirin-surface);border:1px solid var(--sirin-border);border-radius:18px;'
+        'padding:1.5rem 1.7rem;margin:0.2rem 0 1.1rem;box-shadow:0 20px 50px var(--sirin-shadow);'
+        'backdrop-filter:blur(18px) saturate(135%);-webkit-backdrop-filter:blur(18px) saturate(135%);">'
+        '<div style="font-family:var(--sirin-mono);font-size:0.72rem;letter-spacing:0.16em;'
+        'text-transform:uppercase;color:var(--sirin-hot);margin-bottom:0.55rem;">'
+        'Hallucination &amp; answerability detection</div>'
+        '<div style="font-size:1.55rem;font-weight:700;letter-spacing:-0.015em;'
+        'margin-bottom:0.45rem;">Chat with a model — then see what SIRIN sees.</div>'
+        '<div style="color:var(--sirin-muted);max-width:62ch;line-height:1.6;">'
+        'Give a question together with its context. SIRIN generates the answer, then flags '
+        'unfaithful or unanswerable content at the sequence, token, or claim level.</div>'
+        '<div style="margin-top:1.1rem;display:inline-flex;flex-direction:column;gap:0.2rem;'
+        'font-family:var(--sirin-mono);font-size:0.82rem;background:var(--sirin-surface-2);'
+        'border:1px solid var(--sirin-border);border-radius:10px;padding:0.65rem 0.85rem;'
+        'color:var(--sirin-muted);">'
+        '<span><span style="color:var(--sirin-mint);">Context:</span> The Eiffel Tower is in Paris.</span>'
+        '<span><span style="color:var(--sirin-mint);">Question:</span> In which city is the Eiffel Tower?</span>'
+        '</div></div>'
     )
 
 
@@ -519,15 +510,6 @@ def _sidebar(st: Any) -> dict[str, Any]:
                 value='train_dataset_path=null eval_dataset_path=null',
             )
             hydra_checkpoint = st.text_input('Hydra checkpoint directory', value='')
-
-        st.divider()
-        st.header(':material/palette: Appearance')
-        st.selectbox(
-            'Background motion',
-            ['Subtle', 'Static', 'Lively'],
-            key='bg_motion',
-            help='Silk backdrop animation. Static is lightest for low-power devices.',
-        )
 
     return {
         'backend': backend,
@@ -621,6 +603,24 @@ def _render_analysis(st: Any, message: dict[str, Any], visualizers: Any) -> None
             st.json(message['debug'])
 
 
+def _view_switch(st: Any) -> str:
+    with st.sidebar:
+        return st.radio('View', ['Chat', 'Explorer'], key='ui_view', horizontal=True)
+
+
+def _appearance_sidebar(st: Any) -> None:
+    with st.sidebar:
+        st.divider()
+        st.header(':material/palette: Appearance')
+        st.selectbox('Theme', ['Dark', 'Light'], key='ui_theme')
+        st.selectbox(
+            'Background motion',
+            ['Subtle', 'Static', 'Lively'],
+            key='bg_motion',
+            help='Silk backdrop animation. Static is lightest for low-power devices.',
+        )
+
+
 def main() -> None:
     import streamlit as st
 
@@ -628,7 +628,8 @@ def main() -> None:
 
     st.set_page_config(page_title='SIRIN', page_icon=str(LOGO_PATH), layout='wide')
     motion = str(st.session_state.get('bg_motion', 'Subtle')).lower()
-    styles.inject_global_styles(st, motion=motion)
+    theme = str(st.session_state.get('ui_theme', 'Dark')).lower()
+    styles.inject_global_styles(st, motion=motion, theme=theme)
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'
         f'<img src="{_logo_data_uri()}" width="48" style="display:block;" alt="" aria-hidden="true"/>'
@@ -641,7 +642,16 @@ def main() -> None:
         'chat, then inspect hallucination & answerability signals.'
     )
 
+    view_mode = _view_switch(st)
+    if view_mode == 'Explorer':
+        from sirin.ui import attention_explorer
+
+        attention_explorer.render(st)
+        _appearance_sidebar(st)
+        return
+
     cfg = _sidebar(st)
+    _appearance_sidebar(st)
 
     if 'messages' not in st.session_state:
         st.session_state.messages = []

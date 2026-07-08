@@ -178,6 +178,30 @@ def _build_openai_judge(
     return _tag(judge, 'judge', 'sequence', calibrated=False, display_mode='verdict')
 
 
+def _build_openai_token_judge(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    judge_model: str | None = None,
+    judge_api_key: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    from sirin.detection.judging import TokenOpenAIJudge
+    from sirin.inference.adapters import OpenAIModelAdapter
+    from sirin.models.detection import OpenAIJudgeConfig
+    from sirin.models.inference import OpenAIConfig
+
+    model_path, api_key = _resolve_judge(judge_model, judge_api_key)
+    model = OpenAIModelAdapter(OpenAIConfig(model_path=model_path, api_key=api_key))
+    judge = TokenOpenAIJudge(
+        # temperature 0 keeps span tags deterministic across the sampled generations.
+        config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.0),
+        model_adapter=model,
+    )
+    return _tag(judge, 'judge', 'token', calibrated=False, display_mode='heatmap')
+
+
 def _build_probing_sequence_tabpfn(
     *,
     device: str = 'cuda',
@@ -303,6 +327,17 @@ PRESETS: dict[str, Preset] = {
         description="LLM-as-judge verdict via the OpenAI/OpenRouter API. No training.",
         build=_build_openai_judge,
         display_mode='verdict',
+        is_judge=True,
+    ),
+    "Judge — API Token (zero-shot)": Preset(
+        name="Judge — API Token (zero-shot)",
+        family='judge',
+        level='token',
+        calibrated=False,
+        requires_checkpoint=False,
+        description="Per-character hallucination heatmap via the OpenAI/OpenRouter API (span-tag agreement across generations). No training.",
+        build=_build_openai_token_judge,
+        display_mode='heatmap',
         is_judge=True,
     ),
     "Probing — Answerability TabPFN (checkpoint)": Preset(
