@@ -75,7 +75,7 @@ class JudgePipeline(PipelineBase):
             train_data = self.train_dataset
             val_data = None
 
-        train_data, _ = self._load_dataset(train_data)
+        train_data, _ = self._load_dataset(train_data, split='train')
         if self.experiment_logger:
             self.experiment_logger.log_dataset_info('train', train_data)
         if val_data:

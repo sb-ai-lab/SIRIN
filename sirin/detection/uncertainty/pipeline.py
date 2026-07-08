@@ -42,7 +42,13 @@ class UncertaintyPipeline(PipelineBase):
             experiment_logger=experiment_logger,
         )
 
-        # Log hyperparameters if logger is available
+        # propagate pipeline classification_metrics to the detector only when set (don't clobber a detector-level config with None)
+        if (
+            self.config.classification_metrics is not None
+            and getattr(self.detector, 'config', None) is not None
+        ):
+            self.detector.config.classification_metrics = self.config.classification_metrics
+
         if self.experiment_logger:
             self.experiment_logger.log_hyperparameters(config)
 
@@ -62,7 +68,7 @@ class UncertaintyPipeline(PipelineBase):
             val_data = None
 
 
-        train_data, _ = self._load_dataset(train_data)
+        train_data, _ = self._load_dataset(train_data, split='train')
         if self.experiment_logger:
             self.experiment_logger.log_dataset_info('train', train_data)
         if val_data:

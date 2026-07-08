@@ -187,6 +187,7 @@ class DetectorBaseConfig:
     fixed_threshold: float = 0.5
     num_classification_heads: int = 1
     context_split_config: Optional[SplitConfig] = None
+    classification_metrics: Optional[List[ClassificationMetric]] = None
 
 
 @dataclass

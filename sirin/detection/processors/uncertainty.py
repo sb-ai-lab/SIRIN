@@ -32,11 +32,17 @@ _ATTENTION_METHODS = frozenset({'RAUQ', 'Focus', 'AttentionScore'})
 
 
 def _split_prompt_and_answer(sample: list[dict]) -> tuple[str, str]:
-    non_assistant = [m for m in sample if m['role'] != 'assistant']
-    answer = next((m['content'] for m in sample if m['role'] == 'assistant'), '')
-    if len(non_assistant) == 1:
-        return non_assistant[0]['content'], answer
-    return '\n\n'.join(m['content'] for m in non_assistant), answer
+    last_assistant = next(
+        (i for i in range(len(sample) - 1, -1, -1) if sample[i]['role'] == 'assistant'),
+        None,
+    )
+    if last_assistant is None:
+        return '\n\n'.join(m['content'] for m in sample), ''
+    answer = sample[last_assistant]['content']
+    prompt_messages = sample[:last_assistant]
+    if len(prompt_messages) == 1:
+        return prompt_messages[0]['content'], answer
+    return '\n\n'.join(m['content'] for m in prompt_messages), answer
 
 
 def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:

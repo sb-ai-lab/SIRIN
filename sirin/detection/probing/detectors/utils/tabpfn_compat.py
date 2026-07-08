@@ -10,7 +10,6 @@ import tempfile
 import types
 
 import joblib
-import numpy as np
 import torch
 from loguru import logger as lg
 from tabpfn import model_loading
@@ -39,10 +38,15 @@ for module_name in (
         importlib.import_module(f"tabpfn.preprocessors.{module_name}"),
     )
 
-if 'tabpfn.preprocessing.steps.squashing_scaler_transformer' not in sys.modules:
-    squashing_mod = types.ModuleType(
-        'tabpfn.preprocessing.steps.squashing_scaler_transformer'
-    )
+_SQUASHING_MODULE = 'tabpfn.preprocessing.steps.squashing_scaler_transformer'
+try:
+    import_module(_SQUASHING_MODULE)
+except ModuleNotFoundError as exc:
+    if exc.name is None or not (
+        exc.name == _SQUASHING_MODULE or _SQUASHING_MODULE.startswith(exc.name + '.')
+    ):
+        raise
+    squashing_mod = types.ModuleType(_SQUASHING_MODULE)
 
     class SquashingScaler:
         def __init__(
@@ -57,15 +61,18 @@ if 'tabpfn.preprocessing.steps.squashing_scaler_transformer' not in sys.modules:
             return self
 
         def transform(self, X):
-            return np.clip(X, -self.max_absolute_value, self.max_absolute_value)
+            raise RuntimeError(
+                "tabpfn SquashingScaler is unavailable in this tabpfn build, so its "
+                "transform cannot be reproduced faithfully. Refusing to silently substitute "
+                "a clip-only approximation (predictions would differ) — retrain the TabPFN "
+                "detector, or install a tabpfn version that ships SquashingScaler."
+            )
 
         def fit_transform(self, X, y=None):
-            return self.fit(X, y).transform(X)
+            return self.transform(X)
 
     squashing_mod.SquashingScaler = SquashingScaler
-    sys.modules['tabpfn.preprocessing.steps.squashing_scaler_transformer'] = (
-        squashing_mod
-    )
+    sys.modules[_SQUASHING_MODULE] = squashing_mod
 
 if 'tabpfn.inference_config' not in sys.modules:
     inference_config_mod = types.ModuleType('tabpfn.inference_config')

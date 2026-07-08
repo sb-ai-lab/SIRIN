@@ -79,7 +79,8 @@ class UncertaintyDetectorBase(DetectorBase):
 
     def _get_classification_metrics_config(self):
         """Get classification metrics from config or use defaults"""
-        return BASIC_METRICS
+        metrics = getattr(self.config, 'classification_metrics', None)
+        return BASIC_METRICS if metrics is None else metrics
 
     def _flatten_samples(self, samples: List) -> List:
         """Flatten nested list of samples"""
