@@ -17,9 +17,9 @@ _SEQ_UNC_METHODS = ['MeanTokenEntropy', 'Perplexity']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
 _DEFAULT_HF_MODEL = 'Qwen/Qwen2.5-3B-Instruct'
 _JUDGE_PROMPT = (
-    'You verify whether the assistant response is faithful to the provided context. '
-    'Reply with 1 if it contains hallucinated, unsupported, or contradicted claims, '
-    'otherwise reply with 0.'
+    "You verify whether the assistant response is faithful to the provided context. "
+    "Reply with 1 if it contains hallucinated, unsupported, or contradicted claims, "
+    "otherwise reply with 0."
 )
 
 
@@ -65,7 +65,7 @@ def _tag(
 def _resolve_judge(judge_model: str | None, judge_api_key: str | None) -> tuple[str, str]:
     api_key = judge_api_key or os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
     if not api_key:
-        raise ValueError('Set OPENROUTER_API_KEY (or OPENAI_API_KEY) to use the API judge.')
+        raise ValueError("Set OPENROUTER_API_KEY (or OPENAI_API_KEY) to use the API judge.")
     model_path = judge_model or 'openai/gpt-3.5-turbo'  # valid OpenRouter slug for the default
     return model_path, api_key
 
@@ -188,7 +188,7 @@ def _build_probing_sequence_tabpfn(
     **kwargs: Any,
 ) -> Any:
     if not checkpoint_dir:
-        raise ValueError('This preset needs a trained checkpoint directory.')
+        raise ValueError("This preset needs a trained checkpoint directory.")
 
     from sirin.detection.probing import SequenceTabPFNProbingDetector
     from sirin.detection.processors import HiddensProcessor
@@ -229,6 +229,7 @@ def _build_probing_answerability(
 
     checkpoint_dir = (
         checkpoint_dir
+        or os.getenv('SIRIN_ANSWERABILITY_CKPT')
         or '/home/jovyan/parchiev/magistr/trust_assistant/checkpoints/probing/answerability_tabpfn/Hiddens_L_TabPFN'
     )
     extractor = HfModelAdapter(
@@ -271,57 +272,57 @@ def _build_probing_answerability(
 
 
 PRESETS: dict[str, Preset] = {
-    'Uncertainty — Sequence (zero-shot)': Preset(
-        name='Uncertainty — Sequence (zero-shot)',
+    "Uncertainty — Sequence (zero-shot)": Preset(
+        name="Uncertainty — Sequence (zero-shot)",
         family='uncertainty',
         level='sequence',
         calibrated=False,
         requires_checkpoint=False,
-        description='Local white-box uncertainty over the whole answer (mean token entropy + perplexity). No training.',
+        description="Local white-box uncertainty over the whole answer (mean token entropy + perplexity). No training.",
         build=_build_uncertainty_sequence,
         display_mode='raw',
         is_judge=False,
     ),
-    'Uncertainty — Token (zero-shot)': Preset(
-        name='Uncertainty — Token (zero-shot)',
+    "Uncertainty — Token (zero-shot)": Preset(
+        name="Uncertainty — Token (zero-shot)",
         family='uncertainty',
         level='token',
         calibrated=False,
         requires_checkpoint=False,
-        description='Per-token uncertainty highlighting over the generated answer. No training.',
+        description="Per-token uncertainty highlighting over the generated answer. No training.",
         build=_build_uncertainty_token,
         display_mode='heatmap',
         is_judge=False,
     ),
-    'Judge — API Sequence (zero-shot)': Preset(
-        name='Judge — API Sequence (zero-shot)',
+    "Judge — API Sequence (zero-shot)": Preset(
+        name="Judge — API Sequence (zero-shot)",
         family='judge',
         level='sequence',
         calibrated=False,
         requires_checkpoint=False,
-        description='LLM-as-judge verdict via the OpenAI/OpenRouter API. No training.',
+        description="LLM-as-judge verdict via the OpenAI/OpenRouter API. No training.",
         build=_build_openai_judge,
         display_mode='verdict',
         is_judge=True,
     ),
-    'Probing — Answerability TabPFN (checkpoint)': Preset(
-        name='Probing — Answerability TabPFN (checkpoint)',
+    "Probing — Answerability TabPFN (checkpoint)": Preset(
+        name="Probing — Answerability TabPFN (checkpoint)",
         family='probing',
         level='sequence',
         calibrated=True,
         requires_checkpoint=True,
-        description='Answerability TabPFN probe on Qwen3.5-4B hidden states. Uses the fixed trust_assistant checkpoint by default.',
+        description="Answerability TabPFN probe on Qwen3.5-4B hidden states. Uses the fixed trust_assistant checkpoint by default.",
         build=_build_probing_answerability,
         display_mode='gauge',
         is_judge=False,
     ),
-    'Probing — Sequence TabPFN (checkpoint)': Preset(
-        name='Probing — Sequence TabPFN (checkpoint)',
+    "Probing — Sequence TabPFN (checkpoint)": Preset(
+        name="Probing — Sequence TabPFN (checkpoint)",
         family='probing',
         level='sequence',
         calibrated=True,
         requires_checkpoint=True,
-        description='TabPFN probe on hidden states — calibrated [0,1]. Needs a trained checkpoint directory.',
+        description="TabPFN probe on hidden states — calibrated [0,1]. Needs a trained checkpoint directory.",
         build=_build_probing_sequence_tabpfn,
         display_mode='gauge',
         is_judge=False,
@@ -391,16 +392,3 @@ def describe_detector(detector: Any) -> dict[str, Any]:
         'display_mode': display_mode,
         'threshold': getattr(detector, 'threshold', None),
     }
-
-
-def demo() -> None:
-    assert PRESETS
-    assert [p for p in list_presets()]
-    for preset in list_presets():
-        if 'zero-shot' in preset.name:
-            assert preset.requires_checkpoint is False
-    assert 'Probing — Answerability TabPFN (checkpoint)' in PRESETS
-
-
-if __name__ == '__main__':
-    demo()

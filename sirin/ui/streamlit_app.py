@@ -36,7 +36,7 @@ def build_sample(prompt: str, answer: str) -> list[dict[str, str]]:
 
 def _hex_rgb(hex_color: str) -> str:
     h = hex_color.lstrip('#')
-    return f'{int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}'
+    return f"{int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}"
 
 
 _RISK_RGB = _hex_rgb(PALETTE['risk'])
@@ -148,7 +148,9 @@ def _describe(detector: Any) -> dict[str, Any]:
             'threshold': info.get('threshold', getattr(detector, 'threshold', None)),
             'display_mode': info.get('display_mode'),
         }
-    except Exception:
+    except (KeyError, AttributeError) as e:
+        from loguru import logger as lg
+        lg.debug(f"Detector metadata lookup failed: {e}")
         return {
             'family': 'unknown',
             'calibrated': True,
@@ -356,7 +358,7 @@ def load_generator(
         from sirin.models.inference import VLLMConfig
 
         return VllmModelAdapter(VLLMConfig(model_path=model_path, device=device))
-    raise ValueError(f'Unknown backend: {backend}')
+    raise ValueError(f"Unknown backend: {backend}")
 
 
 def generate_answer(
@@ -580,7 +582,7 @@ def _run_turn(st: Any, prompt: str, cfg: dict[str, Any], visualizers: Any) -> di
                 cfg['temperature'],
             )
     except Exception as error:  # noqa: BLE001 - surface any backend failure to the user
-        answer = f'Generation failed: {error}'
+        answer = f"Generation failed: {error}"
         message['content'] = answer
         st.error(answer)
         return message
@@ -598,7 +600,7 @@ def _run_turn(st: Any, prompt: str, cfg: dict[str, Any], visualizers: Any) -> di
             processor = getattr(detector, 'feature_processor', None)
             message['debug'] = debug_summary(getattr(processor, 'last_debug', None))
     except Exception as error:  # noqa: BLE001 - detector loading/running can fail many ways
-        st.error(f'Detection failed: {error}')
+        st.error(f"Detection failed: {error}")
         return message
 
     _render_analysis(st, message, visualizers)
@@ -631,7 +633,7 @@ def main() -> None:
         f'<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'
         f'<img src="{_logo_data_uri()}" width="48" style="display:block;" alt="" aria-hidden="true"/>'
         f'<h1 style="margin:0;font-size:2.5rem;font-weight:700;line-height:1;">SIRIN</h1>'
-        f'</div>',
+        f"</div>",
         unsafe_allow_html=True,
     )
     st.caption(
