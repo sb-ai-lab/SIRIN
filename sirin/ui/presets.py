@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sirin.ui.providers import OPENROUTER_PROVIDER, provider_models, resolve_api_provider
+
 # default zero-shot uncertainty methods that need no attention maps (sdpa-safe).
 _SEQ_UNC_METHODS = ['MeanTokenEntropy', 'Perplexity']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
@@ -62,12 +64,14 @@ def _tag(
     return detector
 
 
-def _resolve_judge(judge_model: str | None, judge_api_key: str | None) -> tuple[str, str]:
-    api_key = judge_api_key or os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        raise ValueError("Set OPENROUTER_API_KEY (or OPENAI_API_KEY) to use the API judge.")
-    model_path = judge_model or 'openai/gpt-3.5-turbo'  # valid OpenRouter slug for the default
-    return model_path, api_key
+def _resolve_judge(
+    judge_model: str | None,
+    judge_api_key: str | None,
+    api_provider: str = OPENROUTER_PROVIDER,
+) -> tuple[str, str, str]:
+    provider = resolve_api_provider(api_provider, api_key=judge_api_key)
+    model_path = judge_model or provider_models(api_provider)[0]
+    return model_path, provider.api_key, provider.base_url
 
 
 def _build_uncertainty(
@@ -78,6 +82,7 @@ def _build_uncertainty(
     generator_adapter: Any = None,
     judge_model: str | None = None,
     judge_api_key: str | None = None,
+    api_provider: str = OPENROUTER_PROVIDER,
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.processors import (
@@ -161,6 +166,7 @@ def _build_openai_judge(
     generator_adapter: Any = None,
     judge_model: str | None = None,
     judge_api_key: str | None = None,
+    api_provider: str = OPENROUTER_PROVIDER,
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.judging import SequenceOpenAIJudge
@@ -168,8 +174,10 @@ def _build_openai_judge(
     from sirin.models.detection import OpenAIJudgeConfig
     from sirin.models.inference import OpenAIConfig
 
-    model_path, api_key = _resolve_judge(judge_model, judge_api_key)
-    model = OpenAIModelAdapter(OpenAIConfig(model_path=model_path, api_key=api_key))
+    model_path, api_key, base_url = _resolve_judge(judge_model, judge_api_key, api_provider)
+    model = OpenAIModelAdapter(
+        OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
+    )
     judge = SequenceOpenAIJudge(
         # temperature 0 keeps the single-token verdict deterministic.
         config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.0),
@@ -185,6 +193,7 @@ def _build_openai_token_judge(
     generator_adapter: Any = None,
     judge_model: str | None = None,
     judge_api_key: str | None = None,
+    api_provider: str = OPENROUTER_PROVIDER,
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.judging import TokenOpenAIJudge
@@ -192,8 +201,10 @@ def _build_openai_token_judge(
     from sirin.models.detection import OpenAIJudgeConfig
     from sirin.models.inference import OpenAIConfig
 
-    model_path, api_key = _resolve_judge(judge_model, judge_api_key)
-    model = OpenAIModelAdapter(OpenAIConfig(model_path=model_path, api_key=api_key))
+    model_path, api_key, base_url = _resolve_judge(judge_model, judge_api_key, api_provider)
+    model = OpenAIModelAdapter(
+        OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
+    )
     judge = TokenOpenAIJudge(
         # temperature 0 keeps span tags deterministic across the sampled generations.
         config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.0),

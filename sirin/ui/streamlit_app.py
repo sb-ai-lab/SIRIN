@@ -8,6 +8,19 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from sirin.ui.path_policy import (
+    is_trusted_local,
+    require_checkpoint_path,
+)
+from sirin.ui.providers import (
+    ANTHROPIC_PROVIDER,
+    CUSTOM_PROVIDER,
+    OPENAI_PROVIDER,
+    OPENROUTER_PROVIDER,
+    API_PROVIDER_KEY_ENVS,
+    provider_models,
+    resolve_api_provider,
+)
 from sirin.ui.styles import PALETTE
 
 LOGO_PATH = Path(__file__).parent / 'assets' / 'logo.png'
@@ -327,6 +340,9 @@ JUDGE_MODELS = [
     'openai/gpt-3.5-turbo',
     'nvidia/nemotron-3-super-120b-a12b:free',
 ]
+HF_MODELS = ['Qwen/Qwen2.5-3B-Instruct']
+LOCAL_DEVICES = ['cuda', 'cpu']
+API_BACKENDS = (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, CUSTOM_PROVIDER)
 
 
 @_cache_resource
@@ -334,23 +350,24 @@ def load_generator(
     backend: str,
     model_path: str,
     device: str,
-    base_url: str,
+    custom_base_url: str = '',
 ) -> Any:
     if backend == 'HF':
         from sirin.inference.adapters.hf_adapter import HfModelAdapter
         from sirin.models.inference import HFConfig
 
         return HfModelAdapter(HFConfig(model_path=model_path, device=device))
-    if backend == 'OpenAI':
+    if backend in API_BACKENDS:
         from sirin.inference.adapters.openai_adapter import OpenAIModelAdapter
         from sirin.models.inference import OpenAIConfig
 
+        provider = resolve_api_provider(backend, custom_base_url)
         return OpenAIModelAdapter(
             OpenAIConfig(
                 model_path=model_path,
                 device='cpu',
-                base_url=base_url or None,
-                api_key=os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY'),
+                base_url=provider.base_url,
+                api_key=provider.api_key,
             )
         )
     if backend == 'vLLM':
@@ -385,6 +402,8 @@ def load_detector(
     overrides: tuple[str, ...],
     checkpoint_dir: str,
 ) -> Any:
+    if not is_trusted_local():
+        raise ValueError('Hydra detector UI requires SIRIN_UI_TRUSTED_LOCAL=1.')
     import hydra
     from hydra import compose, initialize_config_dir
 
@@ -398,7 +417,7 @@ def load_detector(
     processor = hydra.utils.instantiate(cfg.feature_processor, extractor=adapter)
     detector = hydra.utils.instantiate(cfg.detector, feature_processor=processor)
     if checkpoint_dir:
-        detector.load(str(Path(checkpoint_dir).expanduser()))
+        detector.load(require_checkpoint_path(checkpoint_dir))
     return detector
 
 
@@ -411,6 +430,7 @@ def build_preset_detector(
     gen_model: str,
     gen_base_url: str,
     judge_model: str,
+    judge_provider: str,
     judge_api_key: str,
 ) -> Any:
     from sirin.ui import presets
@@ -418,13 +438,15 @@ def build_preset_detector(
     preset = presets.PRESETS[preset_name]
     generator_adapter = None
     if gen_backend == 'HF' and preset.family in ('uncertainty', 'probing'):
-        generator_adapter = load_generator('HF', gen_model, device, gen_base_url)
+        generator_adapter = load_generator('HF', gen_model, device)
+    checkpoint_dir = require_checkpoint_path(checkpoint_dir) if checkpoint_dir else ''
     return preset.build(
         device=device,
         checkpoint_dir=checkpoint_dir or None,
         generator_adapter=generator_adapter,
         judge_model=judge_model or None,
         judge_api_key=judge_api_key or None,
+        api_provider=judge_provider,
     )
 
 
@@ -471,14 +493,23 @@ def _sidebar(st: Any) -> dict[str, Any]:
         st.caption(preset.description)
 
         is_judge = bool(getattr(preset, 'is_judge', False)) or preset.family == 'judge'
+        judge_provider = OPENROUTER_PROVIDER
         judge_model = JUDGE_MODELS[0]
         if is_judge:
-            judge_model = st.selectbox('Judge model', JUDGE_MODELS)
-            has_key = bool(os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY'))
+            judge_provider = st.selectbox(
+                'Judge provider',
+                [OPENROUTER_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER],
+            )
+            judge_model = st.text_input(
+                'Judge model',
+                value=provider_models(judge_provider)[0],
+            )
+            key_env = API_PROVIDER_KEY_ENVS[judge_provider]
+            has_key = bool(os.getenv(key_env))
             if has_key:
-                st.caption(':material/key: API key detected (OpenRouter/OpenAI).')
+                st.caption(f':material/key: {key_env} detected.')
             else:
-                st.caption(':red[:material/key_off: Set OPENROUTER_API_KEY to use the API judge.]')
+                st.caption(f':red[:material/key_off: Set {key_env} to use the API judge.]')
 
         checkpoint_dir = ''
         if preset.requires_checkpoint:
@@ -490,35 +521,53 @@ def _sidebar(st: Any) -> dict[str, Any]:
 
         st.divider()
         st.header(':material/smart_toy: Generator')
-        backend = st.selectbox('Backend', ['HF', 'OpenAI', 'vLLM'])
-        default_model = 'gpt-4o-mini' if backend == 'OpenAI' else 'Qwen/Qwen2.5-3B-Instruct'
-        model_path = st.text_input('Model', value=default_model)
-        device = st.text_input('Device', value='cuda')
-        base_url = st.text_input(
-            'API base URL',
-            value='https://api.openai.com/v1' if backend == 'OpenAI' else '',
-        )
+        backends = ['HF', OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, 'vLLM']
+        if is_trusted_local():
+            backends.append(CUSTOM_PROVIDER)
+        backend = st.selectbox('Backend', backends)
+        custom_base_url = ''
+        if backend in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER):
+            model_path = st.text_input('Model', value=provider_models(backend)[0])
+            device = 'cpu'
+        elif backend == CUSTOM_PROVIDER:
+            model_path = st.text_input('Model', value='')
+            custom_base_url = st.text_input('API base URL', value='')
+            device = 'cpu'
+        else:
+            if is_trusted_local():
+                model_path = st.text_input('Model', value=HF_MODELS[0])
+                device = st.text_input('Device', value='cuda')
+            else:
+                model_path = st.selectbox('Model', HF_MODELS)
+                device = st.selectbox('Device', LOCAL_DEVICES)
         max_tokens = st.number_input('Max tokens', min_value=1, value=256)
         temperature = st.slider('Temperature', min_value=0.0, max_value=2.0, value=0.7)
 
-        with st.expander('Advanced: Hydra detector', icon=':material/build:'):
-            use_hydra = st.checkbox('Use Hydra config instead of preset', value=False)
-            config_dir = st.text_input('Config directory', value=_default_config_dir())
-            config_name = st.text_input('Config name', value='train')
-            overrides_text = st.text_area(
-                'Hydra overrides',
-                value='train_dataset_path=null eval_dataset_path=null',
-            )
-            hydra_checkpoint = st.text_input('Hydra checkpoint directory', value='')
+        use_hydra = False
+        config_dir = _default_config_dir()
+        config_name = 'train'
+        overrides_text = 'train_dataset_path=null eval_dataset_path=null'
+        hydra_checkpoint = ''
+        if is_trusted_local():
+            with st.expander('Advanced: Hydra detector', icon=':material/build:'):
+                use_hydra = st.checkbox('Use Hydra config instead of preset', value=False)
+                config_dir = st.text_input('Config directory', value=_default_config_dir())
+                config_name = st.text_input('Config name', value='train')
+                overrides_text = st.text_area(
+                    'Hydra overrides',
+                    value='train_dataset_path=null eval_dataset_path=null',
+                )
+                hydra_checkpoint = st.text_input('Hydra checkpoint directory', value='')
 
     return {
         'backend': backend,
         'model_path': model_path,
         'device': device,
-        'base_url': base_url,
+        'custom_base_url': custom_base_url,
         'max_tokens': int(max_tokens),
         'temperature': float(temperature),
         'preset_name': preset_name,
+        'judge_provider': judge_provider,
         'judge_model': judge_model,
         'checkpoint_dir': checkpoint_dir,
         'use_hydra': use_hydra,
@@ -543,10 +592,27 @@ def _build_detector(cfg: dict[str, Any]) -> Any:
         cfg['checkpoint_dir'],
         cfg['backend'],
         cfg['model_path'],
-        cfg['base_url'],
+        cfg.get('custom_base_url', ''),
         cfg['judge_model'],
-        '',  # preset resolves the key from OPENROUTER_API_KEY/OPENAI_API_KEY env.
+        cfg.get('judge_provider', OPENROUTER_PROVIDER),
+        '',  # preset resolves the provider-specific API key from the environment.
     )
+
+
+def requires_external_confirmation(cfg: dict[str, Any]) -> bool:
+    return cfg.get('backend') in API_BACKENDS or str(cfg.get('preset_name', '')).startswith('Judge — API')
+
+
+def _external_confirmed(st: Any, cfg: dict[str, Any]) -> bool:
+    if not requires_external_confirmation(cfg):
+        return True
+    with st.sidebar:
+        return st.checkbox(
+            'Allow external API calls',
+            value=False,
+            key='external_api_consent',
+            help='Context, questions, generated answers, and judge prompts may be sent to the selected external API provider.',
+        )
 
 
 def _run_turn(st: Any, prompt: str, cfg: dict[str, Any], visualizers: Any) -> dict[str, Any]:
@@ -554,7 +620,10 @@ def _run_turn(st: Any, prompt: str, cfg: dict[str, Any], visualizers: Any) -> di
     try:
         with st.spinner('Generating answer...'):
             adapter = load_generator(
-                cfg['backend'], cfg['model_path'], cfg['device'], cfg['base_url']
+                cfg['backend'],
+                cfg['model_path'],
+                cfg['device'],
+                cfg.get('custom_base_url', ''),
             )
             answer = generate_answer(
                 adapter,
@@ -651,6 +720,7 @@ def main() -> None:
         return
 
     cfg = _sidebar(st)
+    external_confirmed = _external_confirmed(st, cfg)
     _appearance_sidebar(st)
 
     if 'messages' not in st.session_state:
@@ -682,6 +752,11 @@ def main() -> None:
         incoming = st.session_state.pop('pending')
 
     if incoming:
+        if not external_confirmed:
+            st.warning(
+                'External API calls are disabled until you confirm the sidebar disclosure.'
+            )
+            return
         st.session_state.messages.append({'role': 'user', 'content': incoming})
         with st.chat_message('user'):
             st.markdown(incoming)

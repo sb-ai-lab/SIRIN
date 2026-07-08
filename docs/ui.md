@@ -16,15 +16,17 @@ python -m streamlit run sirin/ui/streamlit_app.py
 
 Open the URL Streamlit prints (usually `http://localhost:8501`).
 
-For the OpenAI/OpenRouter judge preset, set the API key first:
+For API-backed generation or judge presets, set the matching provider key first:
 
 ```bash
-export OPENAI_API_KEY=...
+export OPENAI_API_KEY=...      # OpenAI provider
+export OPENROUTER_API_KEY=...  # OpenRouter provider
+export ANTHROPIC_API_KEY=...   # Anthropic provider
 ```
 
 ## Use
 
-1. In the sidebar, pick a **generator** backend (`HF`, `OpenAI`, `vLLM`), model, and device.
+1. In the sidebar, pick a **generator** backend (`HF`, `OpenAI`, `OpenRouter`, `Anthropic`, `vLLM`), model, and device.
 2. Pick a **detector preset** (see below). Checkpoint-based presets show a
    *Checkpoint directory* field.
 3. Type a message in the chat box — put the context and question together, e.g.
@@ -41,14 +43,47 @@ Hydra `train` config cannot:
 |--------|---------------------------|--------|
 | **Uncertainty — Sequence (zero-shot)** | ✅ local HF model | raw uncertainty score + threshold |
 | **Uncertainty — Token (zero-shot)** | ✅ local HF model | per-token uncertainty highlight over the answer |
-| **Judge — OpenAI (zero-shot)** | ✅ API (needs `OPENAI_API_KEY`) | verdict + confidence + reasoning |
+| **Judge — API (zero-shot)** | ✅ API (needs provider key) | verdict + confidence + reasoning |
 | **Probing — Sequence TabPFN (checkpoint)** | ❌ needs a trained checkpoint dir | calibrated probability gauge |
 
 Uncertainty and OpenAI-judge scores are **not** calibrated probabilities, so they are
 shown as a raw score against the detector's threshold — never as a 0–100% gauge. The
 checkpoint presets light up once you point them at a trained SIRIN checkpoint directory
-(`config.joblib` + `model.tabpfn_fit`). An **Advanced: Hydra detector** expander keeps the
-original config-directory/overrides path for power users.
+(`config.joblib` + `model.tabpfn_fit`).
+
+## Shared-Safe Defaults
+
+The UI defaults to shared-safe controls:
+
+- OpenAI uses only `OPENAI_API_KEY` and `https://api.openai.com/v1`.
+- OpenRouter uses only `OPENROUTER_API_KEY` and `https://openrouter.ai/api/v1`.
+- Anthropic uses only `ANTHROPIC_API_KEY` and `https://api.anthropic.com/v1/`.
+- API keys never fall back across providers.
+- External API calls require a per-session sidebar confirmation because prompts, generated
+  answers, and judge prompts may leave the server.
+- Provider base URLs, device, tokenizer, Hydra, and raw path controls are limited by
+  default; API model names remain editable.
+- Set `SIRIN_OPENAI_MODEL`, `SIRIN_OPENROUTER_MODEL`, or `SIRIN_ANTHROPIC_MODEL`
+  to choose API model defaults without editing code.
+- `Max tokens` remains user-controlled and uncapped.
+
+For single-user local development, trusted mode restores the sharp controls:
+
+```bash
+export SIRIN_UI_TRUSTED_LOCAL=1
+```
+
+Trusted mode allows custom OpenAI-compatible generator endpoints, arbitrary local
+model/device/tokenizer fields, raw Explorer paths, checkpoint paths, and the Advanced
+Hydra detector expander.
+Use it only when the Streamlit server is not exposed to untrusted users.
+
+In shared-safe mode, local files must be under explicit roots:
+
+```bash
+export SIRIN_UI_DATA_ROOTS=/path/to/datasets:/path/to/feature_caches
+export SIRIN_UI_CHECKPOINT_ROOTS=/path/to/checkpoints
+```
 
 ## Visualizations
 

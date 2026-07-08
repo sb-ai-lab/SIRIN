@@ -103,3 +103,11 @@ def test_token_strip_titles_and_missing_score():
     # a cell with no matching score renders NEUTRAL (0.50), never max-risk under invert
     out = token_strip(['a', 'b'], [1.0], invert=True)
     assert 'title="0.00"' in out and 'title="0.50"' in out
+
+
+def test_heads_grid_escapes_token_labels():
+    out = ax._heads_grid(np.ones((2, 1)), ['<img src=x onerror=alert(1)>', '&'])
+
+    assert '<img' not in out
+    assert '&lt;img' in out
+    assert '&amp;' in out

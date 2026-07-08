@@ -16,6 +16,7 @@ against a tiny synthetic pkl — see tests/test_ui_attention.py.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from sirin.ui.path_policy import is_trusted_local, require_data_path
 from sirin.ui.visualizers import _badge, _html, _tint, token_strip
 
 # Fixture defaults (LongMemEval / Qwen3.5-35B-A3B). Data is NOT committed — these are just the
@@ -179,7 +181,8 @@ def _heads_grid(ans: np.ndarray, cells: list[str]) -> str:
     norm = normalize01(ans)  # over the whole (tokens, heads) matrix
     n_tokens, n_heads = ans.shape
     header = ''.join(
-        f'<td style="font-size:0.58rem;color:var(--sirin-faint);padding:1px 3px;text-align:center;">{c}</td>'
+        '<td style="font-size:0.58rem;color:var(--sirin-faint);padding:1px 3px;text-align:center;">'
+        f'{html.escape(str(c))}</td>'
         for c in cells
     )
     rows = [f'<tr><td style="font-size:0.58rem;color:var(--sirin-faint);">h\\t</td>{header}</tr>']
@@ -267,15 +270,19 @@ def render(st: Any) -> None:
         st.header(':material/dataset: Explorer data')
         cache_dir = st.text_input('Feature cache dir', value=DEFAULT_CACHE_DIR)
         parquet_path = st.text_input('Dataset parquet', value=DEFAULT_PARQUET)
-        tokenizer_name = st.text_input(
-            'Tokenizer (optional)', value='',
-            help='HF name/path to label cells with real tokens; blank = positional indices.',
-        )
+        tokenizer_name = ''
+        if is_trusted_local():
+            tokenizer_name = st.text_input(
+                'Tokenizer (optional)', value='',
+                help='HF name/path to label cells with real tokens; blank = positional indices.',
+            )
 
     st.subheader('Attention explorer')
     st.caption('Per-token signals read from the offline feature cache (LookbackLens attention + hidden proxy).')
 
     try:
+        parquet_path = require_data_path(parquet_path)
+        cache_dir = require_data_path(cache_dir)
         rows = _index_cached(parquet_path, cache_dir)
     except Exception as error:  # noqa: BLE001 - bad path / unreadable parquet -> friendly message
         st.error(f'Could not load dataset/cache: {error}')

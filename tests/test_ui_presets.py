@@ -1,5 +1,10 @@
 """Tests moved from sirin/ui/presets.py demo block."""
 
+import sys
+import types
+
+import pytest
+
 from sirin.ui import presets
 
 
@@ -20,11 +25,34 @@ def test_openai_token_judge_preset_describes_as_token_heatmap(monkeypatch):
     assert info['display_mode'] == 'heatmap'
 
 
-def _build_openai_token_judge_with_fakes(monkeypatch):
-    import sirin.detection.judging as judging
-    import sirin.inference.adapters as adapters
+def test_openai_judge_uses_provider_specific_base_url_and_key(monkeypatch):
+    detector = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenAI')
 
-    monkeypatch.setenv('OPENROUTER_API_KEY', 'test-key')
+    assert detector.model_adapter.config.base_url == 'https://api.openai.com/v1'
+    assert detector.model_adapter.config.api_key == 'openai-key'
+
+
+def test_openrouter_judge_does_not_use_openai_key(monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'openai-key')
+    monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+
+    with pytest.raises(ValueError, match='OPENROUTER_API_KEY'):
+        _build_openai_token_judge_with_fakes(
+            monkeypatch, provider='OpenRouter', set_provider_key=False
+        )
+
+
+def _build_openai_token_judge_with_fakes(
+    monkeypatch, provider='OpenRouter', set_provider_key=True
+):
+    if provider == 'OpenAI':
+        if set_provider_key:
+            monkeypatch.setenv('OPENAI_API_KEY', 'openai-key')
+        monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+    else:
+        if set_provider_key:
+            monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+        monkeypatch.delenv('OPENAI_API_KEY', raising=False)
 
     class FakeAdapter:
         def __init__(self, config):
@@ -35,10 +63,35 @@ def _build_openai_token_judge_with_fakes(monkeypatch):
             self.config = config
             self.model_adapter = model_adapter
 
-    monkeypatch.setattr(adapters, 'OpenAIModelAdapter', FakeAdapter)
-    monkeypatch.setattr(judging, 'TokenOpenAIJudge', FakeJudge)
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
 
-    return presets._build_openai_token_judge()
+    monkeypatch.setitem(sys.modules, 'sirin.detection', types.ModuleType('sirin.detection'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.judging',
+        types.SimpleNamespace(TokenOpenAIJudge=FakeJudge),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.inference', types.ModuleType('sirin.inference'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.inference.adapters',
+        types.SimpleNamespace(OpenAIModelAdapter=FakeAdapter),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.models', types.ModuleType('sirin.models'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.detection',
+        types.SimpleNamespace(OpenAIJudgeConfig=FakeConfig),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.inference',
+        types.SimpleNamespace(OpenAIConfig=FakeConfig),
+    )
+
+    return presets._build_openai_token_judge(api_provider=provider)
 
 
 def test_answerability_preset_uses_env_checkpoint(monkeypatch, tmp_path):
@@ -54,10 +107,6 @@ def test_answerability_preset_has_nonempty_fallback_checkpoint(monkeypatch):
 
 
 def _build_answerability_with_fakes(monkeypatch, env_value):
-    import sirin.detection.probing as probing
-    import sirin.detection.processors as processors
-    import sirin.inference.adapters as adapters
-
     if env_value is None:
         monkeypatch.delenv('SIRIN_ANSWERABILITY_CKPT', raising=False)
     else:
@@ -81,8 +130,48 @@ def _build_answerability_with_fakes(monkeypatch, env_value):
         def load(self, checkpoint_dir):
             self.loaded_path = checkpoint_dir
 
-    monkeypatch.setattr(adapters, 'HfModelAdapter', FakeAdapter)
-    monkeypatch.setattr(processors, 'HiddensProcessor', FakeProcessor)
-    monkeypatch.setattr(probing, 'SequenceTabPFNProbingDetector', FakeDetector)
+    class FakeSide:
+        LEFT = 'left'
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.definitions',
+        types.SimpleNamespace(SideType=FakeSide),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.detection', types.ModuleType('sirin.detection'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.probing',
+        types.SimpleNamespace(SequenceTabPFNProbingDetector=FakeDetector),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.processors',
+        types.SimpleNamespace(HiddensProcessor=FakeProcessor),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.inference', types.ModuleType('sirin.inference'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.inference.adapters',
+        types.SimpleNamespace(HfModelAdapter=FakeAdapter),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.models', types.ModuleType('sirin.models'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.detection',
+        types.SimpleNamespace(
+            HiddensProcessorConfig=FakeConfig,
+            ProbingDetectorConfig=FakeConfig,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.inference',
+        types.SimpleNamespace(HFConfig=FakeConfig, TokenLocatorConfig=FakeConfig),
+    )
 
     return presets._build_probing_answerability(device='cpu')

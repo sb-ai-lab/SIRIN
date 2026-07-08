@@ -1,3 +1,5 @@
+import pytest
+
 from sirin.ui import streamlit_app as ui
 
 
@@ -16,6 +18,197 @@ def test_score_heatmap_escapes_text_and_handles_short_scores():
     assert '&gt;' in html
     assert '&amp;' in html
     assert html.count(f'background: rgba({ui._RISK_RGB},') == len('<bad>&ok')
+
+
+def test_external_provider_resolver_uses_matching_key_only(monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'openai-key')
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'anthropic-key')
+
+    openai = ui.resolve_api_provider('OpenAI')
+    assert openai.base_url == 'https://api.openai.com/v1'
+    assert openai.api_key == 'openai-key'
+
+    openrouter = ui.resolve_api_provider('OpenRouter')
+    assert openrouter.base_url == 'https://openrouter.ai/api/v1'
+    assert openrouter.api_key == 'openrouter-key'
+
+    anthropic = ui.resolve_api_provider('Anthropic')
+    assert anthropic.base_url == 'https://api.anthropic.com/v1/'
+    assert anthropic.api_key == 'anthropic-key'
+
+
+def test_external_provider_resolver_never_cross_falls_back(monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'openai-key')
+    monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+    with pytest.raises(ValueError, match='OPENROUTER_API_KEY'):
+        ui.resolve_api_provider('OpenRouter')
+
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+    with pytest.raises(ValueError, match='OPENAI_API_KEY'):
+        ui.resolve_api_provider('OpenAI')
+
+    monkeypatch.setenv('OPENAI_API_KEY', 'openai-key')
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    with pytest.raises(ValueError, match='ANTHROPIC_API_KEY'):
+        ui.resolve_api_provider('Anthropic')
+
+
+def test_custom_provider_requires_trusted_local(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    with pytest.raises(ValueError, match='trusted local'):
+        ui.resolve_api_provider('Custom OpenAI-compatible', 'http://localhost:11434/v1')
+
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.delenv('SIRIN_CUSTOM_OPENAI_API_KEY', raising=False)
+    custom = ui.resolve_api_provider('Custom OpenAI-compatible', 'http://localhost:11434/v1')
+    assert custom.api_key == 'EMPTY'
+    assert custom.base_url == 'http://localhost:11434/v1'
+
+
+def test_hydra_detector_is_blocked_unless_trusted(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    with pytest.raises(ValueError, match='SIRIN_UI_TRUSTED_LOCAL'):
+        ui._build_detector({
+            'use_hydra': True,
+            'config_dir': '/tmp',
+            'config_name': 'train',
+            'overrides_text': '',
+            'hydra_checkpoint': '',
+        })
+
+
+def test_external_confirmation_required_for_api_paths():
+    assert ui.requires_external_confirmation({'backend': 'OpenAI', 'preset_name': 'x'})
+    assert ui.requires_external_confirmation({'backend': 'OpenRouter', 'preset_name': 'x'})
+    assert ui.requires_external_confirmation({'backend': 'Anthropic', 'preset_name': 'x'})
+    assert ui.requires_external_confirmation({
+        'backend': 'HF',
+        'preset_name': 'Judge — API Sequence (zero-shot)',
+    })
+    assert not ui.requires_external_confirmation({
+        'backend': 'HF',
+        'preset_name': 'Uncertainty — Sequence (zero-shot)',
+    })
+
+
+class _Preset:
+    def __init__(self, name='Uncertainty — Sequence (zero-shot)', family='uncertainty'):
+        self.name = name
+        self.family = family
+        self.description = 'desc'
+        self.requires_checkpoint = False
+        self.is_judge = family == 'judge'
+
+
+class _SidebarHarness:
+    def __init__(self, selectbox_values=None, text_values=None):
+        self.selectbox_values = selectbox_values or {}
+        self.text_values = text_values or {}
+        self.selectbox_calls = []
+        self.text_input_calls = []
+
+    @property
+    def sidebar(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def header(self, body):
+        pass
+
+    def caption(self, body):
+        pass
+
+    def divider(self):
+        pass
+
+    def selectbox(self, label, options):
+        self.selectbox_calls.append((label, list(options)))
+        return self.selectbox_values.get(label, list(options)[0])
+
+    def text_input(self, label, value='', **kwargs):
+        self.text_input_calls.append((label, value))
+        return self.text_values.get(label, value)
+
+    def number_input(self, label, min_value=None, value=0, **kwargs):
+        return value
+
+    def slider(self, label, min_value=None, max_value=None, value=0.0, **kwargs):
+        return value
+
+
+def test_api_provider_model_is_editable_not_allowlisted(monkeypatch):
+    from sirin.ui import presets
+
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    monkeypatch.setattr(presets, 'list_presets', lambda: [_Preset()])
+
+    st = _SidebarHarness(
+        selectbox_values={'Backend': 'OpenAI'},
+        text_values={'Model': 'gpt-4.1-mini'},
+    )
+    cfg = ui._sidebar(st)
+
+    assert cfg['model_path'] == 'gpt-4.1-mini'
+    assert ('Model', 'gpt-4.1-mini') in st.text_input_calls
+    assert not any(label == 'Model' for label, _ in st.selectbox_calls)
+
+
+def test_api_provider_model_default_can_be_set_by_env(monkeypatch):
+    from sirin.ui import presets
+
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    monkeypatch.setenv('SIRIN_OPENAI_MODEL', 'admin-openai-model')
+    monkeypatch.setattr(presets, 'list_presets', lambda: [_Preset()])
+
+    st = _SidebarHarness(selectbox_values={'Backend': 'OpenAI'})
+    cfg = ui._sidebar(st)
+
+    assert cfg['model_path'] == 'admin-openai-model'
+    assert ('Model', 'admin-openai-model') in st.text_input_calls
+
+
+def test_anthropic_provider_model_default_can_be_set_by_env(monkeypatch):
+    from sirin.ui import presets
+
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    monkeypatch.setenv('SIRIN_ANTHROPIC_MODEL', 'admin-anthropic-model')
+    monkeypatch.setattr(presets, 'list_presets', lambda: [_Preset()])
+
+    st = _SidebarHarness(selectbox_values={'Backend': 'Anthropic'})
+    cfg = ui._sidebar(st)
+
+    assert cfg['model_path'] == 'admin-anthropic-model'
+    assert ('Model', 'admin-anthropic-model') in st.text_input_calls
+
+
+def test_judge_provider_model_is_editable_not_allowlisted(monkeypatch):
+    from sirin.ui import presets
+
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    monkeypatch.setattr(
+        presets,
+        'list_presets',
+        lambda: [_Preset(name='Judge — API Token (zero-shot)', family='judge')],
+    )
+
+    st = _SidebarHarness(
+        selectbox_values={'Judge provider': 'OpenAI', 'Backend': 'HF'},
+        text_values={'Judge model': 'gpt-4.1'},
+    )
+    cfg = ui._sidebar(st)
+
+    assert cfg['judge_provider'] == 'OpenAI'
+    assert cfg['judge_model'] == 'gpt-4.1'
+    assert ('Judge model', 'gpt-4.1-mini') in st.text_input_calls
+    assert not any(label == 'Judge model' for label, _ in st.selectbox_calls)
 
 
 def test_detection_view_model_handles_sequence_token_and_claim_outputs():
