@@ -5,6 +5,9 @@ from transformers import AutoProcessor, GenerationConfig
 import transformers
 transformers = sys.modules['transformers']
 
+if not hasattr(transformers, 'HybridCache') and hasattr(transformers, 'DynamicCache'):
+    transformers.HybridCache = transformers.DynamicCache
+
 from transformers.generation.utils import (
     GenerateBeamDecoderOnlyOutput,
     GenerateDecoderOnlyOutput,

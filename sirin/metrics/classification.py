@@ -55,7 +55,7 @@ def calculate_classification_metrics(
                 else:
                     results[metric.value] = metric_func(y_true, y_pred)
         except Exception as e:
-            lg.warning(e)
+            lg.warning(f"Metric {metric} failed: {e}")
             results[metric.value] = None
     
     return results

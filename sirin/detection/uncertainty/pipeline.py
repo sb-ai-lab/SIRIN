@@ -6,13 +6,11 @@ from loguru import logger as lg
 
 from sirin.models.detection import DetectionResult, PipelineBaseConfig
 from sirin.detection.approximators import TargetApproximatorBase
-from sirin.detection.base import (
-    ModelAdapterBase,
-    PipelineBase,
-)
+from sirin.detection.base import PipelineBase
 from sirin.detection.utils.basic import flatten_array
 from sirin.detection.uncertainty.detectors import SequenceUncertaintyDetector
 from sirin.definitions import INPUT_COL, DetectionTaskType, TARGET_COL, DetectionLevel
+from sirin.inference.adapters import ModelAdapterBase
 from sirin.loggers import LoggerBase
 from sirin.metrics import calculate_classification_metrics
 from sirin.utils.config_manager import validate_hydra_config
@@ -52,7 +50,7 @@ class UncertaintyPipeline(PipelineBase):
         lg.info("Starting training pipeline...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Training started')
+            self.experiment_logger.log_text("Training started")
 
         if isinstance(self.train_dataset, datasets.DatasetDict):
             train_data = self.train_dataset['train']
@@ -106,7 +104,7 @@ class UncertaintyPipeline(PipelineBase):
         lg.info("Starting evaluation...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Evaluation started')
+            self.experiment_logger.log_text("Evaluation started")
 
         batch_size = self.detector.config.batch_size
         data, _ = self._load_dataset(self.eval_dataset)

@@ -3,7 +3,13 @@ from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-import mtd.barcodes as mtd
+try:
+    import mtd.barcodes as mtd
+    _MTD_IMPORT_ERROR = None
+except Exception as e:
+    mtd = None
+    _MTD_IMPORT_ERROR = e
+
 import numpy as np
 try:
     import ripserplusplus as rpp_py
@@ -39,6 +45,11 @@ class MTopDivFeatureProcessor(FeatureProcessorBase):
                 "On macOS this dependency is not available; run on Linux with CUDA, "
                 "or remove MTopDiv from your pipeline."
             ) from _RIPSERPP_IMPORT_ERROR
+        if mtd is None:
+            raise ImportError(
+                "mtd.barcodes is required for MTopDivFeatureProcessor. "
+                "Install the mtopdiv dependency to use this processor."
+            ) from _MTD_IMPORT_ERROR
         super().__init__(config=config, extractor=extractor, cache_dir=cache_dir)
 
     def __call__(
@@ -49,7 +60,7 @@ class MTopDivFeatureProcessor(FeatureProcessorBase):
         List[Dict[Tuple[int, int], List[Any]]]     # Barcodes for each head
     ]:
         """Process samples to extract MTopDiv features."""
-        assert self._extractor is not None, 'No feature extractor found.'
+        assert self._extractor is not None, "No feature extractor found."
         
         samples_to_process, sample_indices, cached_results = self.check_features(
             samples
@@ -205,7 +216,7 @@ class MTopDivFeatureProcessor(FeatureProcessorBase):
                 layer_heads_map[layer] = []
             layer_heads_map[layer].append(head)
 
-        for i in trange(len(attentions), desc='MTopDiv processing'):
+        for i in trange(len(attentions), desc="MTopDiv processing"):
             attention_maps = attentions[i]
             location = locations[i] if i < len(locations) else None
             
@@ -350,7 +361,7 @@ def attn_mx_to_mtopdiv(distance_mx: np.ndarray) -> tuple[np.ndarray, float]:
     """Calculate barcodes and MTopDiv value for the given attention matrix."""
     if rpp_py is None:
         raise ImportError(
-            "ripserplusplus is required for MTopDivFeatureProcessor, but it is not installed."
+            'ripserplusplus is required for MTopDivFeatureProcessor, but it is not installed.'
         ) from _RIPSERPP_IMPORT_ERROR
     barcodes = rpp_py.run('--format distance --dim 1', distance_mx)
     barcodes = mtd.barc2array(barcodes)

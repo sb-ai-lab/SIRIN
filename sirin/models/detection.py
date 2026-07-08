@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union, Literal
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, Literal
 
 import torch
-from peft import PeftConfig
 
 from sirin.definitions import (
     ClassificationMetric,
@@ -14,6 +15,9 @@ from sirin.definitions import (
     AggregationMethod,
 )
 from sirin.models.inference import ModelManagerConfig, TokenLocatorConfig, CleanerConfig
+
+if TYPE_CHECKING:
+    from peft import PeftConfig
 
 
 @dataclass
@@ -31,11 +35,11 @@ class TrainingHistory:
     def to_dict(self) -> Dict[str, List[float]]:
         """Return flat dict compatible with the legacy plotting utilities."""
         d: Dict[str, Any] = {
-            "epoch": self.epochs,
-            "train_loss": self.train_loss,
-            "learning_rate": self.learning_rate,
-            "val_epochs": self.val_epochs,
-            "val_loss": self.val_loss,
+            'epoch': self.epochs,
+            'train_loss': self.train_loss,
+            'learning_rate': self.learning_rate,
+            'val_epochs': self.val_epochs,
+            'val_loss': self.val_loss,
         }
         for metric, values in self.val_metrics.items():
             d[f"val_{metric}"] = values
@@ -62,7 +66,7 @@ class DetectionResult:
         return (self.metrics or {}).get(name, default)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"metrics": self.metrics, "threshold": self.threshold}
+        return {'metrics': self.metrics, 'threshold': self.threshold}
 
 
 @dataclass
@@ -114,7 +118,7 @@ class BertScoreConfig:
     batch_size: int = 32
     nthreads: int = 4
     device: Optional[str] = None
-    lang: str = "en"
+    lang: str = 'en'
 
 
 @dataclass
@@ -139,6 +143,7 @@ class SamplingConfig:
     min_length: int = 1
     do_sample: bool = True
     num_beams: int = 1
+    kwargs: Dict[str, Any] = field(default_factory=dict)
     num_return_sequences: int = 1
     repetition_penalty: float = 1.0
     length_penalty: float = 1.0
@@ -156,28 +161,28 @@ class FeatureProcessorBaseConfig:
     token_locator_config: TokenLocatorConfig = field(default_factory=TokenLocatorConfig)
     separate: bool = True
     side: SideType = field(default=SideType.RIGHT)
-    pooling_type: Literal["mean", "last", "max", "none"] = "none"
+    pooling_type: Literal['mean', 'last', 'max', 'none'] = 'none'
     padding: Union[bool, str] = False
     truncation: bool = False
     max_length: Optional[int] = None
+    feature_extraction_batch_size: int = 1
 
 
 @dataclass
 class DetectorBaseConfig:
     """Base configuration for detectors."""
 
-    model_name: str = "default_detector"
     model_save_path: Optional[str] = None
     model_load_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
     threshold: float = 0.5
-    device: str = "cuda"
+    device: str = 'cuda'
     seed: int = 42
     num_cpus: int = 1
     use_multiprocessing: bool = True
     batch_size: int = 1
     kwargs: Dict[str, Any] = field(default_factory=dict)
-    threshold_method: Literal["percentile", "fixed", "optimal", "f1_optimal", "prior"] = "optimal"
+    threshold_method: Literal['percentile', 'fixed', 'optimal', 'f1_optimal', 'prior'] = 'optimal'
     threshold_percentile: float = 0.5
     fixed_threshold: float = 0.5
     num_classification_heads: int = 1
@@ -188,18 +193,16 @@ class DetectorBaseConfig:
 class PipelineBaseConfig:
     """Base configuration for pipeline."""
 
-    _target_: str = ""
-    save_dir: str = "./outputs"
+    _target_: str = ''
+    save_dir: str = './outputs'
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
     model_manager: ModelManagerConfig = field(default_factory=ModelManagerConfig)
     lm_metrics: Optional[LmMetricsConfig] = None
     classification_metrics: Optional[List[ClassificationMetric]] = None
     cleaner_configs: Optional[List[CleanerConfig]] = None
     save_intermediate: bool = True
-    debug: bool = False
     experiment_name: Optional[str] = None
     f_beta: float = 1.0
-    checkpoint_interval: Optional[int] = None
     split_context_train: bool = False
     shuffle_train: bool = False
     per_sample_metrics: bool = (
@@ -211,11 +214,21 @@ class PipelineBaseConfig:
 class JudgeBaseConfig(DetectorBaseConfig):
     """Base configuration for judges."""
 
-    system_prompt: str = 'You are a precise hallucination detector for AI-generated dialogue. Your only task is to analyze the given user-assistant exchange and output a single binary digit: 1 if the assistant’s response contains any factual inaccuracy, unsupported claim, or hallucinated content — 0 if it is fully grounded and correct. Do not explain, justify, or add any text. Output only "1" or "0".'
+    system_prompt: str = (
+        "You are a precise hallucination detector for AI-generated dialogue. "
+        "Your only task is to analyze the given user-assistant exchange and output "
+        "a single binary digit: 1 if the assistant's response contains any factual "
+        "inaccuracy, unsupported claim, or hallucinated content - 0 if it is fully "
+        "grounded and correct. Do not explain, justify, or add any text. "
+        "Output only '1' or '0'."
+    )
     dialogue_format: str = "Question: {question}.\n Answer: {answer}"
-    user_prompt: str = """I give you a dialogue that consists of user prompt and assistant answer on the prompt. Your task is to evaluate if this dialogue contain hallcination. Answer only 0 or 1.
-                Dialogue: "{sample}". 
-                Respond with 1 if the assistant’s answer contains hallucination, 0 otherwise: """
+    user_prompt: str = (
+        "I give you a dialogue consisting of a user prompt and an assistant answer. "
+        "Your task is to evaluate whether this dialogue contains hallucination. "
+        'Answer only 0 or 1.\nDialogue: "{sample}".\n'
+        "Respond with 1 if the assistant's answer contains hallucination, 0 otherwise: "
+    )
     max_new_tokens: int = 2048
     temperature: float = 1.0
     top_p: float = 1.0
@@ -229,7 +242,7 @@ class HfJudgeConfig(JudgeBaseConfig):
     """Base configuration for Hf judges."""
 
     peft_config: Optional[PeftConfig] = None
-    return_tensors: str = "pt"
+    return_tensors: str = 'pt'
 
 
 @dataclass
@@ -243,7 +256,7 @@ class OpenAIJudgeConfig(JudgeBaseConfig):
 class JudgePipelineConfig(PipelineBaseConfig):
     """Configuration for probing pipeline."""
 
-    _target_: str = "engine.detection.judging.JudgePipeline"
+    _target_: str = 'sirin.detection.judging.JudgePipeline'
 
 
 @dataclass
@@ -323,8 +336,8 @@ class ProbingDetectorConfig(DetectorBaseConfig):
     dropout_rate: float = 0.1
     ensemble: Optional[List[int]] = None
     max_length: int = 128
-    padding_side: str = "right"
-    truncation_side: str = "right"
+    padding_side: str = 'right'
+    truncation_side: str = 'right'
 
     # Contrastive learning parameters
     use_contrastive: bool = False
@@ -342,10 +355,9 @@ class TrainingArgsConfig:
 
     max_epochs: Optional[int] = 5
     validation_interval: int = 5
-    save_interval: Optional[int] = None
     val_size: Optional[float] = None
     step_size: Optional[int] = None
-    device: Optional[str] = "cuda"
+    device: Optional[str] = 'cuda'
     learning_rate: Optional[float] = 0.001
     max_learning_rate: Optional[float] = 1
     weight_decay: Optional[float] = 0
@@ -357,19 +369,19 @@ class TrainingArgsConfig:
     threshold: Optional[float] = 0.5
     alpha_start: Optional[float] = 1.0
     alpha_gamma: Optional[float] = 0.9
-    loss_function: Optional[str] = "bce"
-    alpha_scheduler: Optional[str] = "exp"
+    loss_function: Optional[str] = 'bce'
+    alpha_scheduler: Optional[str] = 'exp'
     beta: Optional[float] = 1.0
     weight: Optional[float] = 0.5
     gamma: Optional[float] = 0.5
-    threshold_method: str = "optimal"
+    threshold_method: str = 'optimal'
     threshold_percentile: float = 0.5
     fixed_threshold: float = 0.5
 
     # Contrastive learning parameters
     use_contrastive: bool = False
     contrastive_loss_type: str = (
-        "supervised"  # 'supervised', 'triplet', 'infonce', 'circle', 'hard_negative'
+        'supervised'  # 'supervised', 'triplet', 'infonce', 'circle', 'hard_negative'
     )
     contrastive_weight: float = 0.5
     contrastive_temperature: float = 0.07
@@ -377,18 +389,18 @@ class TrainingArgsConfig:
     use_hard_negative_mining: bool = True
     hard_negative_weight: float = 2.0
     hard_mining_ratio: float = 0.3
-    triplet_mining_strategy: str = "hard"  # 'hard', 'semi-hard', 'all'
+    triplet_mining_strategy: str = 'hard'  # 'hard', 'semi-hard', 'all'
     circle_loss_gamma: float = 256
     zero_bce: bool = False
     use_lr_scheduler: bool = False
-    log_contrastive_metrics: bool = True  # Логировать метрики contrastive learning
+    log_contrastive_metrics: bool = True  # Log contrastive-learning metrics
 
 
 @dataclass
 class ProbingPipelineConfig(PipelineBaseConfig):
     """Configuration for probing pipeline."""
 
-    _target_: str = "engine.detection.probing.ProbingPipeline"
+    _target_: str = 'sirin.detection.probing.ProbingPipeline'
     train_args: TrainingArgsConfig = field(default_factory=TrainingArgsConfig)
 
 
@@ -411,7 +423,7 @@ class UncertaintyDetectorConfig(DetectorBaseConfig):
 
     threshold_percentile: float = 0.8
     fixed_threshold: float = 0.5
-    aggregation_method: Literal["mean", "max", "min", "weighted"] = "mean"
+    aggregation_method: Literal['mean', 'max', 'min', 'weighted'] = 'mean'
     method_weights: Optional[Dict[str, float]] = None
 
 
@@ -420,7 +432,7 @@ class MTopDivProcessorConfig(FeatureProcessorBaseConfig):
     """Configuration for MTopDiv feature processor."""
 
     n_jobs: Optional[int] = None
-    zero_out: str = "prompt"  # whether to zero out distances between prompt tokens or response tokens
+    zero_out: str = 'prompt'  # whether to zero out distances between prompt tokens or response tokens
     heads_to_analyze: Optional[Tuple[int, int]] = (
         None  # [(layer_index, head_index), ...]
     )

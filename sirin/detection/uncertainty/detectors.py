@@ -7,7 +7,8 @@ from pathlib import Path
 from loguru import logger as lg
 
 from sirin.definitions import BASIC_METRICS, INPUT_COL, TARGET_COL, DetectionLevel
-from sirin.detection.base import DetectorBase, LoggerBase
+from sirin.detection.base import DetectorBase
+from sirin.loggers import LoggerBase
 from sirin.detection.processors import (
     SequenceUncertaintyFeatureProcessor,
     TokenUncertaintyFeatureProcessor,
@@ -49,13 +50,13 @@ class UncertaintyDetectorBase(DetectorBase):
 
         aggregation_method = self.config.aggregation_method
 
-        if aggregation_method == "mean":
+        if aggregation_method == 'mean':
             return np.mean(uncertainties, axis=-1)
-        elif aggregation_method == "max":
+        elif aggregation_method == 'max':
             return np.max(uncertainties, axis=-1)
-        elif aggregation_method == "min":
+        elif aggregation_method == 'min':
             return np.min(uncertainties, axis=-1)
-        elif aggregation_method == "weighted" and self._has_method_weights():
+        elif aggregation_method == 'weighted' and self._has_method_weights():
             return self._weighted_aggregation(uncertainties)
         else:
             return np.mean(uncertainties, axis=-1)
@@ -63,26 +64,22 @@ class UncertaintyDetectorBase(DetectorBase):
     def _has_method_weights(self) -> bool:
         """Check if method weights are configured"""
         return (
-            hasattr(self.config, "method_weights")
+            hasattr(self.config, 'method_weights')
             and self.config.method_weights is not None
         )
 
     def _weighted_aggregation(self, uncertainties: np.ndarray) -> np.ndarray:
         """Perform weighted aggregation of uncertainties"""
-        method_names = (
-            self.feature_processor.uncertainty_methods.keys()
-            if hasattr(self.feature_processor.uncertainty_methods, "keys")
-            else self.feature_processor.uncertainty_methods
-        )
+        method_names = self.feature_processor.config.uncertainty_methods or []
         weights = np.array(
             [self.config.method_weights.get(method, 1.0) for method in method_names]
         )
-        weights = weights / np.sum(weights)  # Normalize
+        weights = weights / np.sum(weights)
         return np.average(uncertainties, axis=-1, weights=weights)
 
     def _get_classification_metrics_config(self):
         """Get classification metrics from config or use defaults"""
-        return getattr(self.config, "classification_metrics", BASIC_METRICS)
+        return BASIC_METRICS
 
     def _flatten_samples(self, samples: List) -> List:
         """Flatten nested list of samples"""
@@ -95,12 +92,12 @@ class UncertaintyDetectorBase(DetectorBase):
             threshold=self.threshold,
             feature_stats=self.feature_stats,
         )
-        joblib.dump(config_dict, save_dir / "config.joblib")
+        joblib.dump(config_dict, save_dir / 'config.joblib')
         lg.info(f"Saved config to {save_dir / 'config.joblib'}")
 
     def _load_config(self, load_dir: Path):
         """Load detector configuration"""
-        config_path = load_dir / "config.joblib"
+        config_path = load_dir / 'config.joblib'
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found at: {config_path}")
 
@@ -153,7 +150,7 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         result_probs = probs.tolist()
 
         if logger:
-            logger.log_metrics(result_metrics, -1, prefix="/train")
+            logger.log_metrics(result_metrics, -1, prefix='/train')
 
         return DetectionResult(
             metrics=result_metrics,
@@ -233,7 +230,7 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         result_probs = flat_probs.tolist()
 
         if logger:
-            logger.log_metrics(result_metrics, -1, prefix="/train")
+            logger.log_metrics(result_metrics, -1, prefix='/train')
 
         return DetectionResult(
             metrics=result_metrics,

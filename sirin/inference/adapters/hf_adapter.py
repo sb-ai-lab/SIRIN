@@ -64,7 +64,7 @@ class HfModelAdapter(ModelAdapterBase):
             elif isinstance(dm, dict) and dm:
                 first_device = next(iter(dm.values()))
                 if isinstance(first_device, int):
-                    return f'cuda:{first_device}'
+                    return f"cuda:{first_device}"
                 if isinstance(first_device, str):
                     return first_device
 
@@ -77,17 +77,17 @@ class HfModelAdapter(ModelAdapterBase):
     ):
         """Load HuggingFace model and tokenizer."""
         if self._is_loaded:
-            lg.warning('Model already loaded')
+            lg.warning("Model already loaded")
             return
 
         if model and tokenizer:
-            lg.info(f'Using of preloaded HuggingFace model and tokenizer.')
+            lg.info(f"Using of preloaded HuggingFace model and tokenizer.")
             self.model, self.tokenizer = model, tokenizer
             self.config = None
         else:
             self._authenticate()
             self.model, self.tokenizer = self._load_model_and_tokenizer()
-            lg.info(f'Loaded HuggingFace model: {self.config.model_path}')
+            lg.info(f"Loaded HuggingFace model: {self.config.model_path}")
 
         # Only move to device if device_map is not used
         # When device_map is set, the model is already distributed across devices
@@ -97,7 +97,7 @@ class HfModelAdapter(ModelAdapterBase):
         elif use_device_map:
             # Update device to primary device for input handling
             self.device = self._get_primary_device()
-            lg.info(f'Using device_map, primary device for inputs: {self.device}')
+            lg.info(f"Using device_map, primary device for inputs: {self.device}")
 
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -135,7 +135,7 @@ class HfModelAdapter(ModelAdapterBase):
                 model_kwargs['max_memory'] = self.config.max_memory
             if hasattr(self.config, 'offload_folder') and self.config.offload_folder is not None:
                 model_kwargs['offload_folder'] = self.config.offload_folder
-            lg.info(f'Using device_map={self.config.device_map} for multi-GPU model loading')
+            lg.info(f"Using device_map={self.config.device_map} for multi-GPU model loading")
 
         if self.config.model_type == ModelType.CAUSAL:
             model = AutoModelForCausalLM.from_pretrained(
@@ -166,7 +166,7 @@ class HfModelAdapter(ModelAdapterBase):
                 **model_kwargs,
             )
         else:
-            raise ValueError(f'Unsupported model type: {self.config.model_type}')
+            raise ValueError(f"Unsupported model type: {self.config.model_type}")
 
         tokenizer = AutoTokenizer.from_pretrained(
             getattr(self.config, 'tokenizer_path', None) or self.config.model_path,
@@ -183,7 +183,7 @@ class HfModelAdapter(ModelAdapterBase):
             tokenizer.padding = self.config.padding
 
         tokenizer.padding_side = self.config.padding_side or 'right'
-        lg.info(f'Using padding_side={tokenizer.padding_side} for padding')
+        lg.info(f"Using padding_side={tokenizer.padding_side} for padding")
 
         return model, tokenizer
 
@@ -448,7 +448,7 @@ class HfModelAdapter(ModelAdapterBase):
                         )
                         handles.extend([input_handle, output_handle])
                     except Exception as e:
-                        lg.warning(f'Failed to register hooks for layer {layer_}: {e}. Sublayers may not be extracted correctly.')
+                        lg.warning(f"Failed to register hooks for layer {layer_}: {e}. Sublayers may not be extracted correctly.")
             else:
                 try:
                     input_handle = self.model.model.layers[-1].register_forward_pre_hook(
@@ -459,7 +459,7 @@ class HfModelAdapter(ModelAdapterBase):
                     )
                     handles.extend([input_handle, output_handle])
                 except Exception as e:
-                    lg.warning(f'Failed to register hooks for last layer: {e}. Sublayers may not be extracted correctly.')
+                    lg.warning(f"Failed to register hooks for last layer: {e}. Sublayers may not be extracted correctly.")
 
         with torch.no_grad():
             outputs = self.model(
@@ -500,18 +500,18 @@ class HfModelAdapter(ModelAdapterBase):
                         skipped = [i for i in layers if i not in attn_layers]
                         if not attn_layers:
                             raise ValueError(
-                                f'All requested attention layers {layers} are out of range. '
-                                f'Model returns only {n_attn} attention tensors '
-                                f'(valid range: [-{n_attn}, {n_attn - 1}]). '
-                                f'For hybrid-attention models, compute layer indices '
-                                f'relative to the attention block count, not num_hidden_layers.'
+                                f"All requested attention layers {layers} are out of range. "
+                                f"Model returns only {n_attn} attention tensors "
+                                f"(valid range: [-{n_attn}, {n_attn - 1}]). "
+                                f"For hybrid-attention models, compute layer indices "
+                                f"relative to the attention block count, not num_hidden_layers."
                             )
                         lg.warning(
-                            f'Model returned {n_attn} attention tensors, but layers={layers} were requested. '
-                            f'Requested indices are applied to outputs.attentions (valid range: '
-                            f'[-{n_attn}, {n_attn - 1}]), so indices {skipped} were skipped as out of range. '
-                            f'In hybrid-attention models, outputs.attentions may include only the subset of '
-                            f'blocks that use standard full attention.'
+                            f"Model returned {n_attn} attention tensors, but layers={layers} were requested. "
+                            f"Requested indices are applied to outputs.attentions (valid range: "
+                            f"[-{n_attn}, {n_attn - 1}]), so indices {skipped} were skipped as out of range. "
+                            f"In hybrid-attention models, outputs.attentions may include only the subset of "
+                            f"blocks that use standard full attention."
                         )
                     selected_attentions = [attentions[i].cpu() if hasattr(attentions[i], 'device') else attentions[i] for i in attn_layers]
                 else:
@@ -592,7 +592,7 @@ class HfModelAdapter(ModelAdapterBase):
                         break
             
             location = token_locator.locate(
-                tokens=tokenized_inputs["input_ids"][i],
+                tokens=tokenized_inputs['input_ids'][i],
                 tokenizer=self.tokenizer,
                 answer_text=answer,
             )
@@ -605,7 +605,7 @@ class HfModelAdapter(ModelAdapterBase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
-        lg.info('Unloaded HuggingFace model and freed memory')
+        lg.info("Unloaded HuggingFace model and freed memory")
 
     def _preprocess_input(self, inputs: Union[List[str], List[List[Dict]]]) -> str:
         formatted_prompts = []
@@ -643,7 +643,7 @@ class HfModelAdapter(ModelAdapterBase):
                         skip_special_tokens=False,
                     )
             else:
-                raise ValueError(f'Unsupported input fromat: {input_item}')
+                raise ValueError(f"Unsupported input format: {input_item}")
 
             formatted_prompts.append(formatted_string)
 

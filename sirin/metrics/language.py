@@ -14,13 +14,10 @@ try:
     from nltk.translate.meteor_score import meteor_score
     from sacrebleu.metrics import TER as ter_score
 
-    nltk.download('wordnet', quiet=True)
-    nltk.download('punkt', quiet=True)
-    nltk.download('punkt_tab', quiet=True)
-
     _smoothing_function = SmoothingFunction().method1
     _tokenizer = nltk.tokenize.word_tokenize
 except ImportError as e:
+    nltk = None
     _smoothing_function = None
     _tokenizer = None
     lg.warning(f"Failed to import: {e}")
@@ -29,6 +26,16 @@ from sirin.definitions import LmMetric
 from sirin.models.detection import BertScoreConfig
 
 mp.set_start_method('spawn', force=True)
+
+
+@functools.lru_cache(maxsize=None)
+def _ensure_nltk_resource(resource: str, path: str) -> None:
+    if nltk is None:
+        raise ImportError("NLTK is required for language metrics")
+    try:
+        nltk.data.find(path)
+    except LookupError:
+        nltk.download(resource, quiet=True)
 
 
 @functools.lru_cache(maxsize=10000)
@@ -42,6 +49,8 @@ def tokenize(text: str) -> List[str]:
     Returns:
         List[str]: List of tokens.
     """
+    _ensure_nltk_resource('punkt', 'tokenizers/punkt')
+    _ensure_nltk_resource('punkt_tab', 'tokenizers/punkt_tab')
     return _tokenizer(text.lower())
 
 
@@ -219,6 +228,7 @@ def calculate_lm_metrics(
                 ]
             )
         elif metric == LmMetric.METEOR:
+            _ensure_nltk_resource('wordnet', 'corpora/wordnet')
             all_scores[metric.value] = np.array(
                 [
                     meteor_score(refs, cand)

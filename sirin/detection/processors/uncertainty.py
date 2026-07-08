@@ -31,6 +31,45 @@ from sirin.utils.config_manager import validate_hydra_config
 _ATTENTION_METHODS = frozenset({'RAUQ', 'Focus', 'AttentionScore'})
 
 
+def _split_prompt_and_answer(sample: list[dict]) -> tuple[str, str]:
+    non_assistant = [m for m in sample if m['role'] != 'assistant']
+    answer = next((m['content'] for m in sample if m['role'] == 'assistant'), '')
+    if len(non_assistant) == 1:
+        return non_assistant[0]['content'], answer
+    return '\n\n'.join(m['content'] for m in non_assistant), answer
+
+
+def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:
+    """Build lm-polygraph model wrapper for uncertainty estimation."""
+    if isinstance(extractor, OpenAIModelAdapter):
+        model_wrapper = BlackboxModel.from_openai(
+            openai_api_key=getattr(extractor.config, 'openai_api_key', None)
+            or getattr(extractor.config, 'api_key', None),
+            model_path=extractor.config.model_path,
+            supports_logprobs=config.supports_logprobs,
+            base_url=extractor.config.base_url,
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Blackbox'
+    if isinstance(extractor, HfModelAdapter):
+        model_wrapper = WhiteboxModel(
+            extractor.model,
+            extractor.tokenizer,
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Whitebox'
+    if isinstance(extractor, VllmModelAdapter):
+        model_wrapper = WhiteboxModelvLLM(
+            extractor.model,
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Whitebox'
+    raise NotImplementedError(
+        f"Uncertainty estimation supports HfModelAdapter, VllmModelAdapter, OpenAIModelAdapter; "
+        f"got {type(extractor).__name__}"
+    )
+
+
 def _needs_attention(config: UncertaintyFeatureProcessorConfig) -> bool:
     """Check if any configured uncertainty method needs attention weights."""
     if getattr(config, 'output_attentions', False):
@@ -101,37 +140,14 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
         super().setup_extractor()
-
-        if isinstance(self._extractor, OpenAIModelAdapter):
-            self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
-                or getattr(self._extractor.config, 'api_key', None),
-                model_path=self._extractor.config.model_path,
-                supports_logprobs=self.config.supports_logprobs,
-                base_url=self._extractor.config.base_url,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Blackbox'
-        elif isinstance(self._extractor, HfModelAdapter):
-            self.model_wrapper = WhiteboxModel(
-                self._extractor.model,
-                self._extractor.tokenizer,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        elif isinstance(self._extractor, VllmModelAdapter):
-            self.model_wrapper = WhiteboxModelvLLM(
-                self._extractor.model,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        else:
-            raise NotImplementedError
+        self.model_wrapper, self.model_type = _build_polygraph_wrapper(
+            self._extractor, self.config
+        )
 
     def __call__(
         self, samples: List[List[Dict]]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        assert self._extractor is not None, 'No feature extractor found.'
+        assert self._extractor is not None, "No feature extractor found."
         samples_to_process, sample_indices, cached_results = self.check_features(
             samples
         )
@@ -179,10 +195,10 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
     def generate_features(self, samples: List[List[Dict]]) -> Dict[str, Any]:
         # Process uncached samples in batch for efficiency
         user_inputs, assistant_outputs = zip(
-            *[(sample[0]['content'], sample[1]['content']) for sample in samples]
+            *[_split_prompt_and_answer(sample) for sample in samples]
         )
 
-        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
+        batch_size = self.config.feature_extraction_batch_size
         uncertainty, generation_texts, generation_tokens = estimate_uncertainty(
             self.model_wrapper,
             self.model_type,
@@ -263,7 +279,6 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'EigValLaplacian': estimators.EigValLaplacian,
             'DegMat': estimators.DegMat,
             'Eccentricity': estimators.Eccentricity,
-            'LexicalSimilarity': estimators.LexicalSimilarity,
             'EigenScore': estimators.EigenScore,
             'AttentionScore': estimators.AttentionScore,
             'PTrue': estimators.PTrue,
@@ -280,36 +295,14 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
         super().setup_extractor()
-
-        if isinstance(self._extractor, OpenAIModelAdapter):
-            self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
-                or getattr(self._extractor.config, 'api_key', None),
-                model_path=self._extractor.config.model_path,
-                supports_logprobs=self.config.supports_logprobs,
-                base_url=self._extractor.config.base_url,
-            )
-            self.model_type = 'Blackbox'
-        elif isinstance(self._extractor, HfModelAdapter):
-            self.model_wrapper = WhiteboxModel(
-                self._extractor.model,
-                self._extractor.tokenizer,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        elif isinstance(self._extractor, VllmModelAdapter):
-            self.model_wrapper = WhiteboxModelvLLM(
-                self._extractor.model,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        else:
-            raise NotImplementedError
+        self.model_wrapper, self.model_type = _build_polygraph_wrapper(
+            self._extractor, self.config
+        )
 
     def __call__(
         self, samples: List[List[Dict]]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        assert self._extractor is not None, 'No feature extractor found.'
+        assert self._extractor is not None, "No feature extractor found."
         samples_to_process, sample_indices, cached_results = self.check_features(
             samples
         )
@@ -392,16 +385,16 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
 
         if len(cached_results) > 0 or len(new_features) > 0:
             lg.debug(
-                f'Loaded {len(cached_results)} from cache, computed {len(new_features)} new features'
+                f"Loaded {len(cached_results)} from cache, computed {len(new_features)} new features"
             )
 
         return all_features
 
     def generate_features(self, samples: List[List[Dict]]) -> Dict[str, Any]:
         user_inputs, assistant_outputs = zip(
-            *[(sample[0]['content'], sample[1]['content']) for sample in samples]
+            *[_split_prompt_and_answer(sample) for sample in samples]
         )
-        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
+        batch_size = self.config.feature_extraction_batch_size
         uncertainty, generation_texts, _ = estimate_uncertainty(  # keep scored text for UI.
             self.model_wrapper,
             self.model_type,

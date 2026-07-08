@@ -40,7 +40,7 @@ class ModelAdapterBaseConfig:
 class HFConfig(ModelAdapterBaseConfig):
     """Configuration for HuggingFace inference engine."""
 
-    _target_: str = 'engine.inference.hf_adapter.HfModelAdapter'
+    _target_: str = 'sirin.inference.adapters.HfModelAdapter'
     model_type: ModelType = field(default=ModelType.CAUSAL)
     model_dtype: Optional[str] = 'bf16'
     tokenizer_path: Optional[str] = None
@@ -62,7 +62,7 @@ class HFConfig(ModelAdapterBaseConfig):
 class VLLMConfig(ModelAdapterBaseConfig):
     """Configuration for vLLM inference engine."""
 
-    _target_: str = 'engine.inference.vllm_adapter.VllmModelAdapter'
+    _target_: str = 'sirin.inference.adapters.VllmModelAdapter'
     enforce_eager: bool = True
     gpu_memory_utilization: float = 0.8
     model_kwargs: Dict[str, Any] = field(default_factory=dict)

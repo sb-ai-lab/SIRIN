@@ -1,7 +1,10 @@
 """Utilities for serialization and deserialization of detector and judge configurations."""
 
+import dataclasses
 from dataclasses import asdict
-from typing import Any, Dict, Type, Union
+from typing import Any, Dict, Union
+
+from loguru import logger as lg
 
 from sirin.models.detection import (
     CompressionConfig,
@@ -12,6 +15,14 @@ from sirin.models.detection import (
     SplitConfig,
     UncertaintyDetectorConfig,
 )
+
+
+def _filter_to_known_fields(config_cls: type, config_dict: dict) -> dict:
+    known = {f.name for f in dataclasses.fields(config_cls)}
+    dropped = sorted(set(config_dict) - known)
+    if dropped:
+        lg.warning(f"Dropping legacy config keys for {config_cls.__name__}: {dropped}")
+    return {k: v for k, v in config_dict.items() if k in known}
 
 
 # ============================================================================
@@ -55,13 +66,19 @@ def deserialize_probing_detector_config(config_dict: Dict[str, Any]) -> tuple[Pr
     
     # Handle nested configurations
     if 'compression' in config_dict and isinstance(config_dict['compression'], dict):
+        config_dict['compression'] = _filter_to_known_fields(CompressionConfig, config_dict['compression'])
         config_dict['compression'] = CompressionConfig(**config_dict['compression'])
     
     if 'context_split_config' in config_dict and config_dict['context_split_config'] is not None:
         if isinstance(config_dict['context_split_config'], dict):
+            config_dict['context_split_config'] = _filter_to_known_fields(
+                SplitConfig,
+                config_dict['context_split_config'],
+            )
             config_dict['context_split_config'] = SplitConfig(**config_dict['context_split_config'])
     
     # Restore full configuration
+    config_dict = _filter_to_known_fields(ProbingDetectorConfig, config_dict)
     config = ProbingDetectorConfig(**config_dict)
     
     return config, threshold
@@ -141,6 +158,7 @@ def deserialize_judge_config(
         pass
     
     # Restore configuration
+    config_dict = _filter_to_known_fields(config_type, config_dict)
     config = config_type(**config_dict)
     
     return config, threshold, adapter_config, model_path
@@ -194,8 +212,8 @@ def deserialize_uncertainty_detector_config(
     feature_stats = config_dict.pop('feature_stats', {})
     
     # Restore full configuration
+    config_dict = _filter_to_known_fields(UncertaintyDetectorConfig, config_dict)
     config = UncertaintyDetectorConfig(**config_dict)
     
     return config, threshold, feature_stats
-
 

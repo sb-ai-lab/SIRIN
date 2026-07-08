@@ -1,6 +1,5 @@
 max_epochs: 5
 validation_interval: 1
-save_interval: 1
 val_size: 0.1
 learning_rate: 0.001
 train_batch_size: 8
