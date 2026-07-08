@@ -461,12 +461,44 @@ class HfModelAdapter(ModelAdapterBase):
                 except Exception as e:
                     lg.warning(f"Failed to register hooks for last layer: {e}. Sublayers may not be extracted correctly.")
 
+        attn_handles = []
+        attn_capture = []
+        _decoder_layers = getattr(getattr(self.model, 'model', None), 'layers', None)
+        use_attn_hooks = return_attention and _decoder_layers is not None and any(
+            getattr(_l, 'self_attn', None) is not None for _l in _decoder_layers
+        )
+        if use_attn_hooks:
+            impl = getattr(self.model.config, '_attn_implementation', None)
+            if impl and impl != 'eager':
+                raise ValueError(
+                    f"Lookback attention capture requires eager attention, got "
+                    f"_attn_implementation={impl!r}; load the adapter with "
+                    f"attn_implementation='eager'."
+                )
+
+            def _mk_attn_hook(store):
+                def _hook(module, inputs_, output):
+                    w = output[1] if isinstance(output, tuple) and len(output) > 1 else None
+                    if w is not None and hasattr(w, 'dim') and w.dim() == 4:
+                        store.append(w.detach().cpu() if use_device_map else w.detach())
+                return _hook
+
+            for _layer in _decoder_layers:
+                _sa = getattr(_layer, 'self_attn', None)
+                if _sa is not None:
+                    attn_handles.append(_sa.register_forward_hook(_mk_attn_hook(attn_capture)))
+
         with torch.no_grad():
-            outputs = self.model(
-                **tokenized_inputs,
-                output_hidden_states=return_hiddens,
-                output_attentions=return_attention,
-            )
+            try:
+                outputs = self.model(
+                    **tokenized_inputs,
+                    output_hidden_states=return_hiddens,
+                    output_attentions=return_attention and not use_attn_hooks,
+                )
+            finally:
+                for _h in attn_handles:
+                    _h.remove()
+                attn_handles = []
             logits = outputs.logits if return_logits else None
 
             # Process hidden states
@@ -491,7 +523,14 @@ class HfModelAdapter(ModelAdapterBase):
             # When using device_map, outputs may be on different devices, so move to CPU
             all_attentions = []
             if return_attention:
-                attentions = outputs.attentions
+                if use_attn_hooks and not attn_capture:
+                    raise ValueError(
+                        "Attention-hook capture returned no tensors under eager hooks "
+                        "(expected per-layer 4-D attention weights from self_attn output[1]). "
+                        "The model did not expose attention this way; refusing to proceed with "
+                        "empty attention rather than fail silently."
+                    )
+                attentions = tuple(attn_capture) if use_attn_hooks else outputs.attentions
                 if layers:
                     # Move each attention to CPU (handles multi-device models)
                     n_attn = len(attentions)

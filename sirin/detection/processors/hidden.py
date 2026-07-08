@@ -53,7 +53,14 @@ class HiddensProcessor(FeatureProcessorBase):
         for feature in features:  # list-num_layers(seq_len, embedding_dim)
             pooled_layers = []
             for layer in feature:
-                if self.config.pooling_type == 'mean':
+                if layer.shape[0] == 0:
+                    raise ValueError(
+                        'Empty located span in HiddensProcessor.postprocess: the token '
+                        'locator matched no tokens for a sample (e.g. border absent in a split '
+                        'chunk). Refusing to impute a zero feature into metrics — fix '
+                        'locator/border coverage or exclude such samples upstream.'
+                    )
+                elif self.config.pooling_type == 'mean':
                     pooled_layer = layer.mean(dim=0)[None, :]
                 elif self.config.pooling_type == 'max':
                     pooled_layer = layer.amax(dim=0)[None, :]

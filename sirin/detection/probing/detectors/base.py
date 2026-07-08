@@ -60,10 +60,18 @@ class ProbingDetectorBase(DetectorBase):
             ]
         ]
 
-        if self.feature_processor._token_locator.config.locate_substring:
-            batch[0][0]['content'] += ' ' + ' '.join(
-                self.feature_processor._token_locator.config.substrings
-            )
+        locators = [getattr(self.feature_processor, '_token_locator', None)]
+        locators.extend(
+            getattr(proc, '_token_locator', None)
+            for proc in getattr(self.feature_processor, 'processors', [])
+        )
+        substrings = []
+        for locator in locators:
+            cfg = getattr(locator, 'config', None)
+            if cfg is not None and cfg.locate_substring and cfg.substrings:
+                substrings.extend(cfg.substrings)
+        if substrings:
+            batch[0][0]['content'] += ' ' + ' '.join(substrings)
         features, _ = self.feature_processor(batch)
 
         embedding_dim = [torch.tensor(feature[0]).shape[-1] for feature in features]

@@ -30,7 +30,13 @@ class LookbacksProcessor(HiddensProcessor):
         reshaped_features = [torch.cat(feature, dim=-1) for feature in features]
         pooled_samples = []
         for sample in reshaped_features:
-            if self.config.pooling_type == 'mean':
+            if sample.shape[0] == 0:
+                raise ValueError(
+                    f'Empty lookback span (border {self.border.value} absent, e.g. missing in '
+                    f'a split chunk). Refusing to impute a zero feature into metrics — fix '
+                    f'locator/border coverage or exclude such samples upstream.'
+                )
+            elif self.config.pooling_type == 'mean':
                 pooled_sample = sample.mean(dim=0)[None, :].tolist()
             elif self.config.pooling_type == 'max':
                 pooled_sample = sample.amax(dim=0)[None, :].tolist()
