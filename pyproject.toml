@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "transformers (>=4.56.0,<5.0.0)",
+    "transformers (>=4.56.0,<5.4.0)",
     "accelerate (>=1.12.0,<2.0.0)",
     "tqdm (>=4.67.1,<5.0.0)",
     "pandas (>=2.2.3,<3.0.0)",
@@ -57,9 +57,17 @@ ui = [
     "streamlit>=1,<2",
 ]
 
-[tool.ruff]
-select = ["Q"]
+[tool.ruff.lint]
+select = ["Q002", "Q003"]
 
-[tool.ruff.flake8-quotes]
-inline-quotes = "single"
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: real GPU/endpoint tests",
+]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
