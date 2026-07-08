@@ -7,10 +7,11 @@ reference, no external assets) with dark frosted-glass panels.
 
 ## Start
 
+Activate your preferred Python environment first, then:
+
 ```bash
-conda activate sirin_exps
 python -m pip install -e '.[ui]'
-streamlit run sirin/ui/streamlit_app.py
+python -m streamlit run sirin/ui/streamlit_app.py
 ```
 
 Open the URL Streamlit prints (usually `http://localhost:8501`).
@@ -78,7 +79,6 @@ reused by the result visualizers, so the whole app stays on one palette.
 ## Smoke checks
 
 ```bash
-conda activate sirin_exps
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q tests/test_streamlit_ui.py
 python -m ruff check sirin/ui/
 python sirin/ui/styles.py && python sirin/ui/presets.py && python sirin/ui/visualizers.py
