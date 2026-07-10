@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from sirin.ui.providers import OPENROUTER_PROVIDER, provider_models, resolve_api_provider
@@ -17,7 +18,8 @@ from sirin.ui.providers import OPENROUTER_PROVIDER, provider_models, resolve_api
 # default zero-shot uncertainty methods that need no attention maps (sdpa-safe).
 _SEQ_UNC_METHODS = ['MeanTokenEntropy', 'Perplexity']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
-_DEFAULT_HF_MODEL = 'Qwen/Qwen2.5-3B-Instruct'
+_DEFAULT_HF_MODEL = 'Qwen/Qwen3.5-4B'
+_SEQUENCE_TABPFN_LAYERS = [-6, -5, -4, -3, -2, -1]
 _JUDGE_PROMPT = (
     "You verify whether the assistant response is faithful to the provided context. "
     "Reply with 1 if it contains hallucinated, unsupported, or contradicted claims, "
@@ -206,11 +208,15 @@ def _build_openai_token_judge(
         OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
     )
     judge = TokenOpenAIJudge(
-        # temperature 0 keeps span tags deterministic across the sampled generations.
-        config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.0),
+        # temperature > 0 so the num_beams generations DIFFER — a character's score is their span-tag
+        # agreement (a [0,1] consensus). At temperature 0 all generations are identical and the
+        # "consensus" collapses to a single deterministic 0/1 pass.
+        config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.7),
         model_adapter=model,
     )
-    return _tag(judge, 'judge', 'token', calibrated=False, display_mode='heatmap')
+    # calibrated=True: the char scores are already fraction-in-[0,1], so show them absolute (a clean
+    # answer reads all-clear) instead of min-max-stretching a near-binary array to a misleading mid-grey.
+    return _tag(judge, 'judge', 'token', calibrated=True, display_mode='heatmap')
 
 
 def _build_probing_sequence_tabpfn(
@@ -225,25 +231,83 @@ def _build_probing_sequence_tabpfn(
     if not checkpoint_dir:
         raise ValueError("This preset needs a trained checkpoint directory.")
 
+    from sirin.definitions import SideType
     from sirin.detection.probing import SequenceTabPFNProbingDetector
     from sirin.detection.processors import HiddensProcessor
     from sirin.models.detection import HiddensProcessorConfig, ProbingDetectorConfig
     from sirin.models.inference import TokenLocatorConfig
 
     extractor = _hf_adapter(device, generator_adapter)
-    # processor config (side/layers/pooling) must match the checkpoint's training run.
     processor = HiddensProcessor(
         config=HiddensProcessorConfig(
-            token_locator_config=TokenLocatorConfig(locate_answer_start=True)
+            token_locator_config=TokenLocatorConfig(locate_answer_start=True),
+            layers=_SEQUENCE_TABPFN_LAYERS,
+            side=SideType.RIGHT,
+            pooling_type='mean',
         ),
         extractor=extractor,
     )
     detector = SequenceTabPFNProbingDetector(
-        config=ProbingDetectorConfig(),
+        config=ProbingDetectorConfig(device='cpu', max_length=1),
         feature_processor=processor,
     )
     detector.load(checkpoint_dir)
     return _tag(detector, 'probing', 'sequence', calibrated=True, display_mode='gauge')
+
+
+def _hf_hidden_size(model_path: str) -> int | None:
+    if not model_path:
+        return None
+    try:
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    except Exception:
+        return None
+    hidden_size = getattr(config, 'hidden_size', None)
+    if hidden_size is not None:
+        return int(hidden_size)
+    text_config = getattr(config, 'text_config', None)
+    if text_config is None:
+        text_config = config.to_dict().get('text_config')
+    if isinstance(text_config, dict):
+        hidden_size = text_config.get('hidden_size')
+    else:
+        hidden_size = getattr(text_config, 'hidden_size', None)
+    return int(hidden_size) if hidden_size is not None else None
+
+
+def sequence_tabpfn_checkpoint_shape_error(
+    checkpoint_dir: str,
+    model_path: str | None = None,
+) -> str | None:
+    """Fast compatibility check for the UI's sequence TabPFN probing preset."""
+    config_path = Path(checkpoint_dir) / 'compressor_config.joblib'
+    if not config_path.exists():
+        return None
+    import joblib
+
+    config = joblib.load(config_path)
+    shapes = list(config.get('feature_shapes') or [])
+    if not shapes:
+        return None
+    expected = tuple(shapes[0][1:])
+    configured = (len(_SEQUENCE_TABPFN_LAYERS), 1, expected[-1])
+    if expected != configured:
+        return (
+            'Checkpoint/processor mismatch before generation: '
+            f'checkpoint expects feature shape {expected}, but the UI sequence TabPFN preset '
+            f'is configured for {configured}. Use a matching checkpoint or update the preset.'
+        )
+    hidden_size = _hf_hidden_size(model_path or '')
+    if hidden_size is not None and hidden_size != expected[-1]:
+        return (
+            'Checkpoint/model mismatch before generation: '
+            f'checkpoint expects hidden size {expected[-1]}, but selected model '
+            f'{model_path} has hidden size {hidden_size}. Use a model with hidden size '
+            f'{expected[-1]} for this checkpoint or choose a matching checkpoint.'
+        )
+    return None
 
 
 def _build_probing_answerability(
@@ -297,7 +361,7 @@ def _build_probing_answerability(
     detector = SequenceTabPFNProbingDetector(
         config=ProbingDetectorConfig(
             num_classification_heads=2,
-            device='cuda',
+            device='cpu',
             batch_size=1,
         ),
         feature_processor=processor,
@@ -307,6 +371,17 @@ def _build_probing_answerability(
 
 
 PRESETS: dict[str, Preset] = {
+    "Probing — Sequence TabPFN (checkpoint)": Preset(
+        name="Probing — Sequence TabPFN (checkpoint)",
+        family='probing',
+        level='sequence',
+        calibrated=True,
+        requires_checkpoint=True,
+        description="TabPFN probe on hidden states — calibrated [0,1]. Needs a trained checkpoint directory.",
+        build=_build_probing_sequence_tabpfn,
+        display_mode='gauge',
+        is_judge=False,
+    ),
     "Uncertainty — Sequence (zero-shot)": Preset(
         name="Uncertainty — Sequence (zero-shot)",
         family='uncertainty',
@@ -344,9 +419,9 @@ PRESETS: dict[str, Preset] = {
         name="Judge — API Token (zero-shot)",
         family='judge',
         level='token',
-        calibrated=False,
+        calibrated=True,
         requires_checkpoint=False,
-        description="Per-character hallucination heatmap via the OpenAI/OpenRouter API (span-tag agreement across generations). No training.",
+        description="Per-character hallucination heatmap via the OpenAI/OpenRouter API (span-tag agreement across sampled generations). No training.",
         build=_build_openai_token_judge,
         display_mode='heatmap',
         is_judge=True,
@@ -359,17 +434,6 @@ PRESETS: dict[str, Preset] = {
         requires_checkpoint=True,
         description="Answerability TabPFN probe on Qwen3.5-4B hidden states. Uses the fixed trust_assistant checkpoint by default.",
         build=_build_probing_answerability,
-        display_mode='gauge',
-        is_judge=False,
-    ),
-    "Probing — Sequence TabPFN (checkpoint)": Preset(
-        name="Probing — Sequence TabPFN (checkpoint)",
-        family='probing',
-        level='sequence',
-        calibrated=True,
-        requires_checkpoint=True,
-        description="TabPFN probe on hidden states — calibrated [0,1]. Needs a trained checkpoint directory.",
-        build=_build_probing_sequence_tabpfn,
         display_mode='gauge',
         is_judge=False,
     ),

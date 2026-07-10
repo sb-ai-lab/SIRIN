@@ -33,6 +33,9 @@ export ANTHROPIC_API_KEY=...   # Anthropic provider
    `Context: ... \n Question: ...` — or click a suggestion chip.
 4. SIRIN generates an answer, runs the selected detector on the
    `[user, assistant]` pair, and renders the analysis inline under the answer.
+5. Use **Attention tools** in the sidebar only when you need diagnostics:
+   **Cached explorer** opens offline feature-cache inspection, and **Live capture**
+   opens the GPU-backed Qwen attention capture path.
 
 ## Detector presets
 
@@ -62,7 +65,7 @@ The UI defaults to shared-safe controls:
 - External API calls require a per-session sidebar confirmation because prompts, generated
   answers, and judge prompts may leave the server.
 - Provider base URLs, device, tokenizer, Hydra, and raw path controls are limited by
-  default; API model names remain editable.
+  default; API and local model names remain editable.
 - Set `SIRIN_OPENAI_MODEL`, `SIRIN_OPENROUTER_MODEL`, or `SIRIN_ANTHROPIC_MODEL`
   to choose API model defaults without editing code.
 - `Max tokens` remains user-controlled and uncapped.
@@ -90,10 +93,18 @@ export SIRIN_UI_CHECKPOINT_ROOTS=/path/to/checkpoints
 - **Sequence** — calibrated probes show a gauge with a threshold marker + verdict badge;
   uncertainty/judge show a raw-score chip + verdict.
 - **Token** — a character heatmap over the answer (per-sample min–max normalized for
-  uncertainty), plus any highlighted hallucination spans.
+  uncertainty) rendered as inline evidence chips with hover metadata. Missing score
+  coverage is neutral, not green.
 - **Claim** — one card per extracted fact (probability + verdict) with an overall verdict.
+- **Attention tools** — LookbackLens matrices show low-context-attention intensity as
+  a diagnostic signal. They are not calibrated hallucination probabilities unless a
+  detector explicitly produced calibrated token scores.
 - **Reasoning** — judge-generated text, when available, in an expander.
 - **Per-method uncertainty** and **Debug** (feature-processor shapes) are shown in expanders.
+
+Chat is the default app surface. Explorer and Live Capture are sidebar-launched tools,
+not a three-way top-level view switch. If the tool surface grows beyond the sidebar
+launcher, move those tools to native Streamlit pages as the fallback navigation model.
 
 ## Appearance
 

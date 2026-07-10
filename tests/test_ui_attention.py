@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 
 from sirin.ui import attention_explorer as ax
-from sirin.ui.visualizers import token_strip
+from sirin.ui.styles import PALETTE, risk_color, risk_ink
+from sirin.ui.visualizers import layer_token_heatmap, token_strip
 
 
 def test_sample_hash_deterministic_ordered():
@@ -105,9 +106,92 @@ def test_token_strip_titles_and_missing_score():
     assert 'title="0.00"' in out and 'title="0.50"' in out
 
 
+def test_token_strip_makes_whitespace_tokens_visible():
+    out = token_strip([' ', '\n', '\t', ' Admin'], [0.0, 0.5, 1.0, 0.2])
+
+    assert '>space<' in out
+    assert '>\\n<' in out
+    assert '>tab<' in out
+    assert ' Admin' in out
+
+
 def test_heads_grid_escapes_token_labels():
     out = ax._heads_grid(np.ones((2, 1)), ['<img src=x onerror=alert(1)>', '&'])
 
     assert '<img' not in out
     assert '&lt;img' in out
     assert '&amp;' in out
+
+
+def test_risk_color_endpoints():
+    assert risk_color(0.0) == PALETTE['ok']
+    assert risk_color(1.0) == PALETTE['risk']
+
+
+def test_risk_color_is_monotonic_ish():
+    assert risk_color(0.0) != risk_color(1.0)
+
+
+def test_risk_ink_returns_valid_hex():
+    ink = risk_ink(risk_color(0.0))
+    assert ink.startswith('#') and len(ink) == 7
+    int(ink[1:], 16)  # a valid hex colour, doesn't raise
+
+
+def test_layer_token_heatmap_shows_real_tokens_not_positions():
+    raw = np.array([[0.2, 0.8], [0.3, 0.7]])
+    shown = 1.0 - raw
+    out = layer_token_heatmap([4, 5], ['Bus', 'Adm'], raw, shown)
+
+    assert 'Bus' in out and 'Adm' in out
+    assert '>0<' not in out  # not a positional-only header
+    assert 'data-layer="4"' in out
+    assert 'raw 0.2000' in out
+    assert 'shown 0.8000' in out
+
+
+def test_content_slice_wrapper():
+    # the fixture's fixed wrapper: span == 7 (header + empty think) + answer_tokens + 2 (footer)
+    assert ax._content_slice(25, 16) == slice(7, 23)
+    assert ax._content_slice(11, 2) == slice(7, 9)
+    assert ax._content_slice(10, 2) is None   # wrapper doesn't fit -> positional fallback
+    assert ax._content_slice(9, 0) is None    # no answer tokens
+
+
+def test_answer_cells_and_slice_positional_fallback():
+    # no tokenizer name -> positional cells over the FULL span, identity slice
+    cells, sl = ax._answer_cells_and_slice('the answer', '', 5)
+    assert cells == ['0', '1', '2', '3', '4']
+    assert sl == slice(0, 5)
+
+
+def test_answer_cells_and_slice_uses_qwen_wrapper_without_tokenizer():
+    cells, sl = ax._answer_cells_and_slice('Business Administration', '', 11)
+
+    assert cells == ['Business', ' Administration']
+    assert sl == slice(7, 9)
+
+
+def test_marvel_demo_renders_publication_figure_with_provenance():
+    class St:
+        def __init__(self):
+            self.rendered = []
+
+        def html(self, body):
+            self.rendered.append(body)
+
+    st = St()
+
+    ax.render_marvel_demo(st)
+
+    page = '\n'.join(st.rendered)
+    assert '[data-testid="stSidebar"]' in page
+    assert 'Flagged: model answered &quot;One&quot;, evidence supports 2' in page
+    assert 'Recorded generated output' in page
+    assert 'P(contradiction | hidden states)' in page
+    assert 'hidden states only; no gold answer or failure label' in page
+    assert 'memory_id' in page
+    assert 'sample_id' in page
+    assert '681a1674' in page
+    assert '99.8%' in page
+    assert 'Flagged generated span' in page

@@ -7,6 +7,7 @@ import the same tokens (single source of truth).
 """
 
 import base64
+import html
 import re
 from pathlib import Path
 
@@ -74,6 +75,60 @@ THEMES: dict[str, dict[str, str]] = {
         'hot': PALETTE['hot'], 'mint': PALETTE['mint'], 'accent': PALETTE['accent'],
     },
 }
+
+PALETTE['warn'] = '#e8b64a'  # dusty-amber "mid" anchor for the risk colormap; every other accent is
+                              # cool pink/teal, so mid needs its own hue or it collapses toward "high".
+
+RISK_STOPS: tuple[str, str, str] = (PALETTE['ok'], PALETTE['warn'], PALETTE['risk'])
+RISK_CELL_BORDER: str = 'rgba(26, 18, 38, 0.4)'  # fixed dark hairline; NOT var(--sirin-border), which
+                                                   # would go light-on-light on these pastels in dark mode.
+_DARK_INK = THEMES['light']['text']
+_LIGHT_INK = THEMES['dark']['text']
+
+
+def lerp_hex(a: str, b: str, t: float) -> str:
+    """Plain sRGB channel-wise lerp — the same space CSS linear-gradient() uses."""
+    ah, bh = a.lstrip('#'), b.lstrip('#')
+    out = [round(int(ah[i:i+2], 16) + (int(bh[i:i+2], 16) - int(ah[i:i+2], 16)) * t) for i in (0, 2, 4)]
+    return '#{:02x}{:02x}{:02x}'.format(*out)
+
+
+def risk_color(t: float, stops: tuple[str, str, str] = RISK_STOPS) -> str:
+    """[0,1] -> opaque hex. Two-segment lerp over 3 stops: safe -> mid(t=0.5) -> danger."""
+    t = min(1.0, max(0.0, t))
+    lo, mid, hi = stops
+    return lerp_hex(lo, mid, t * 2) if t <= 0.5 else lerp_hex(mid, hi, (t - 0.5) * 2)
+
+
+def risk_ink(fill_hex: str) -> str:
+    """AA-legible ink for a risk_color() fill, by WCAG relative luminance."""
+    h = fill_hex.lstrip('#')
+    def _lin(c: float) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(h[i:i+2], 16) for i in (0, 2, 4))
+    luminance = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+    return _DARK_INK if luminance > 0.18 else _LIGHT_INK
+
+
+def risk_gradient_css(stops: tuple[str, str, str] = RISK_STOPS) -> str:
+    lo, mid, hi = stops
+    return f"linear-gradient(90deg, {lo} 0%, {mid} 50%, {hi} 100%)"
+
+
+def colorbar_html(low: float = 0.0, high: float = 1.0, *,
+                   stops: tuple[str, str, str] = RISK_STOPS, label: str = '') -> str:
+    """Inline colour-scale legend: numeric low — gradient bar — numeric high (+ optional caption)."""
+    caption = f'<span style="margin-left:0.5rem;opacity:0.85;">{html.escape(label)}</span>' if label else ''
+    return (
+        '<div style="display:flex;align-items:center;gap:0.5rem;margin:0.3rem 0 0.6rem;'
+        'font-size:0.72rem;color:var(--sirin-muted);font-family:var(--sirin-mono);">'
+        f'<span>{low:.2f}</span>'
+        f'<span style="flex:0 0 auto;width:160px;height:10px;border-radius:999px;'
+        f'background:{risk_gradient_css(stops)};border:1px solid var(--sirin-border);"></span>'
+        f'<span>{high:.2f}</span>{caption}</div>'
+    )
+
 
 # Baked holographic-silk background, JPEG bytes (chosen candidate "Aurora Silk — Balanced").
 # Recreated procedurally from the reference (no stock imagery).
@@ -204,6 +259,7 @@ input, textarea, [data-baseweb="select"] > div, [data-baseweb="textarea"],
     background: @@input_bg@@ !important;
     border-color: var(--sirin-border) !important;
     color: var(--sirin-text) !important;
+    caret-color: var(--sirin-text) !important;
 }
 input::placeholder, textarea::placeholder { color: var(--sirin-faint) !important; }
 

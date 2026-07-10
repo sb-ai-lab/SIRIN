@@ -111,6 +111,7 @@ class SequenceTabPFNProbingDetector(ProbingDetectorBase):
             else:
                 self.model = TabPFNClassifier(
                     model_path=self.config.checkpoint_path,
+                    device=self.device,
                     random_state=self.config.seed,
                 )
         else:

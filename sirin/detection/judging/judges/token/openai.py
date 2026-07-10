@@ -53,10 +53,10 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         )
         self.last_generations = list(generated_texts)
         self.last_spans = [find_span_segments(text) for text in generated_texts]
-        sample_sequences = []
-        for _ in range(self.config.num_beams):
-            sample_sequences.append(generated_texts[0])
-        all_generated_sequences.append(sample_sequences)
+        # Consensus across the DISTINCT generations: each independently marks [SPAN]s, so a character's
+        # score is the fraction of generations that flagged it. (Was: num_beams copies of
+        # generated_texts[0], which threw away every other generation and forced each char to a hard 0/1.)
+        all_generated_sequences.append(list(generated_texts))
 
         all_char_probs = []
         all_char_preds = []

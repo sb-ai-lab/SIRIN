@@ -44,6 +44,20 @@ def test_inject_global_styles_light_theme():
     assert 'color-scheme: dark' in stub_dark.calls[0]
 
 
+def test_inject_global_styles_keeps_input_caret_visible():
+    class Stub:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def html(self, s) -> None:
+            self.calls.append(s)
+
+    stub = Stub()
+    inject_global_styles(stub, theme='light')
+
+    assert 'caret-color: var(--sirin-text)' in stub.calls[0]
+
+
 def test_theme_contract_holds():
     from sirin.ui import styles
 

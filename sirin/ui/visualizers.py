@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import math
 import html
+import re
 from typing import Any
 
-from sirin.ui.styles import PALETTE
+import numpy as np
+
+from sirin.ui.styles import PALETTE, RISK_CELL_BORDER, colorbar_html, risk_color, risk_ink
 
 try:
     from sirin.ui.streamlit_app import score_heatmap
@@ -88,7 +91,9 @@ def _render_gauge(st: Any, view: dict[str, Any]) -> None:
             '<div style="padding:0.75rem 0;">'
             '<div style="display:flex;justify-content:space-between;'
             'align-items:center;gap:0.75rem;margin-bottom:0.5rem;">'
-            f'<strong style="font-size:1.4rem;{_MONO}">{prob * 100:.1f}%</strong>{_badge(pred)}'
+            '<strong style="font-size:1.4rem;color:#8f123c;background:#fff1f5;'
+            'border:1px solid #f4a3bd;border-radius:0.55rem;padding:0.16rem 0.45rem;'
+            f'{_MONO}">{prob * 100:.1f}%</strong>{_badge(pred)}'
             '</div>'
             '<div style="position:relative;padding-top:0.55rem;">'
             '<div style="height:16px;border-radius:999px;'
@@ -198,6 +203,18 @@ def _scores(value: Any) -> list[float]:
     return scores
 
 
+def _cell_label(cell: str) -> str:
+    if cell == ' ':
+        return 'space'
+    if cell == '\n':
+        return '\\n'
+    if cell == '\t':
+        return 'tab'
+    if cell and not cell.strip():
+        return f'{len(cell)} spaces'
+    return html.escape(cell) if cell else '&nbsp;'
+
+
 def token_strip(
     cells: list[str],
     scores: list[float],
@@ -205,14 +222,17 @@ def token_strip(
     invert: bool = False,
     color: str | None = None,
     titles: list[str] | None = None,
+    colorbar: bool = False,
 ) -> str:
     """One row of per-token cells tinted by score in [0, 1] — the shared primitive behind the
     per-token visualizers. ``invert`` colours LOW scores hot (e.g. a lookback ratio: little
-    attention to context => higher hallucination risk). ``color`` overrides the tint hue.
-    ``titles`` gives per-cell hover text (e.g. the RAW value), else the shown intensity is used.
-    A cell with no matching score renders NEUTRAL (not hot), so a length mismatch never
-    masquerades as risk."""
-    hue = color or PALETTE['risk']
+    attention to context => higher hallucination risk). ``color`` overrides the risk-colormap's
+    hot end. ``titles`` gives per-cell hover text (e.g. the RAW value), else the shown intensity
+    is used. A cell with no matching score renders NEUTRAL (not hot), so a length mismatch never
+    masquerades as risk. ``colorbar`` prefixes an inline 0-1 legend."""
+    from sirin.ui.styles import RISK_STOPS, lerp_hex
+
+    stops = RISK_STOPS if color is None else (PALETTE['ok'], lerp_hex(PALETTE['ok'], color, 0.5), color)
     out = []
     for index, cell in enumerate(cells):
         if index < len(scores):
@@ -221,35 +241,391 @@ def token_strip(
         else:
             shown = 0.5  # missing score => neutral, never max-risk
         title = titles[index] if titles and index < len(titles) else f"{shown:.2f}"
-        text = html.escape(cell) if cell and cell.strip() else '&nbsp;'
+        text = _cell_label(cell)
+        fill = risk_color(shown, stops)
         out.append(
             f'<span title="{html.escape(title)}" style="display:inline-block;margin:0.09rem;'
             f'padding:0.1rem 0.3rem;border-radius:0.35rem;{_MONO}font-size:0.86rem;'
-            f'color:var(--sirin-text);background:{_tint(hue, 0.10 + shown * 0.75)};'
-            f'border:1px solid {_tint(hue, 0.18 + shown * 0.42)};">{text}</span>'
+            f'color:{risk_ink(fill)};background:{fill};border:1px solid {RISK_CELL_BORDER};">{text}</span>'
         )
-    return '<div class="sirin-token-strip" style="line-height:2.2;">' + ''.join(out) + '</div>'
+    body = '<div class="sirin-token-strip" style="line-height:2.2;">' + ''.join(out) + '</div>'
+    return (colorbar_html(0.0, 1.0) + body) if colorbar else body
+
+
+def _segments(text: str) -> list[tuple[int, int, str]]:
+    return [(m.start(), m.end(), m.group(0)) for m in re.finditer(r'\s+|\S+', text)]
+
+
+def _score_values(value: Any) -> list[float | None]:
+    if value is None:
+        return []
+    if hasattr(value, 'tolist'):
+        value = value.tolist()
+    if not isinstance(value, list):
+        return []
+    return [_num(item) for item in value]
+
+
+def _segment_values(
+    text: str,
+    segments: list[tuple[int, int, str]],
+    values: list[float | None],
+) -> list[float | None]:
+    if len(values) == len(text):
+        return [
+            max((v for v in values[start:end] if v is not None), default=None)
+            for start, end, _ in segments
+        ]
+    if len(values) == len(segments):
+        return list(values)
+
+    non_ws = [i for i, (_, _, piece) in enumerate(segments) if not piece.isspace()]
+    if len(values) <= len(non_ws):
+        out: list[float | None] = [None] * len(segments)
+        for slot, value in zip(non_ws, values):
+            out[slot] = value
+        return out
+    return [values[i] if i < len(values) else None for i in range(len(segments))]
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int, str]]:
+    spans = []
+    for match in re.finditer(r'[^.!?\n]+[.!?]*', text):
+        piece = match.group(0)
+        if piece.strip():
+            spans.append((match.start(), match.end(), piece.strip()))
+    return spans or ([(0, len(text), text.strip())] if text.strip() else [])
+
+
+def _format_score(value: float | None, calibrated: bool) -> str:
+    if value is None:
+        return 'score n/a'
+    return f'{value * 100:.1f}%' if calibrated and 0.0 <= value <= 1.0 else f'score {value:.4g}'
+
+
+def _review_badge(pred: Any) -> str:
+    flagged = _pred_bool(pred)
+    if flagged is None:
+        label, color = 'No verdict', PALETTE['faint']
+    elif flagged:
+        label, color = 'Flagged for review', PALETTE['risk']
+    else:
+        label, color = 'Not flagged', PALETTE['ok']
+    return (
+        '<span style="display:inline-flex;align-items:center;border-radius:999px;'
+        'padding:0.16rem 0.52rem;font-size:0.74rem;font-weight:700;'
+        f'background:{_tint(color, 0.15)};border:1px solid {_tint(color, 0.45)};'
+        f'color:{color};">{html.escape(label)}</span>'
+    )
+
+
+def _is_sequence_broadcast(view: dict[str, Any]) -> bool:
+    return str(view.get('display_mode') or '') == 'sequence-broadcast'
+
+
+def _sequence_broadcast_html(
+    answer: str,
+    score: float | None,
+    shown_score: float | None,
+    calibrated: bool,
+    scale_label: str,
+    signal_note: str,
+) -> str:
+    shown = _clamp01(shown_score if shown_score is not None else score)
+    fill = risk_color(shown)
+    tint = _tint(fill, 0.24)
+    score_text = _format_score(score, calibrated)
+    token_cells = []
+    for start, end, piece in _segments(answer):
+        escaped = html.escape(piece)
+        if piece.isspace():
+            token_cells.append(escaped)
+            continue
+        token_cells.append(
+            '<span data-granularity="token"'
+            f' data-score="{shown:.3f}" data-index="{start}" data-end="{end}"'
+            f' title="{html.escape(score_text + " · " + scale_label)}"'
+            ' style="display:inline;margin:0 0.02rem;padding:0.03rem 0.18rem;'
+            f'border-radius:0.24rem;background:{tint};color:var(--sirin-text);'
+            f'box-shadow:inset 0 -0.18rem 0 {_tint(fill, 0.72)};'
+            f'border:1px solid {_tint(fill, 0.38)};">{escaped}</span>'
+        )
+    sentence_rows = []
+    for _, _, sentence in _sentence_spans(answer):
+        sentence_rows.append(
+            '<div style="border:1px solid var(--sirin-border);border-radius:0.55rem;'
+            f'border-left:4px solid {fill};padding:0.55rem 0.65rem;background:var(--sirin-surface-2);">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:0.7rem;">'
+            f'<span style="line-height:1.42;color:var(--sirin-text);">{html.escape(sentence)}</span>'
+            f'<strong style="{_MONO}white-space:nowrap;color:{risk_ink(fill)};background:{fill};'
+            f'border:1px solid {RISK_CELL_BORDER};border-radius:999px;'
+            f'padding:0.12rem 0.45rem;">{html.escape(score_text)}</strong></div></div>'
+        )
+    return (
+        '<div class="sirin-granularity-panel" style="border:1px solid var(--sirin-border);'
+        'border-radius:10px;padding:0.9rem 1rem;background:var(--sirin-surface-2);'
+        'box-shadow:0 12px 30px var(--sirin-shadow);">'
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;'
+        'gap:0.9rem;flex-wrap:wrap;margin-bottom:0.75rem;">'
+        '<div><div style="font-size:0.82rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:800;color:var(--sirin-hot);">Output · Sequence Attribution</div>'
+        '<div style="font-size:0.86rem;color:var(--sirin-muted);margin-top:0.2rem;">'
+        f'{html.escape(signal_note)}</div></div>'
+        f'<span style="border:1px solid var(--sirin-border);border-radius:999px;'
+        'padding:0.16rem 0.55rem;font-size:0.74rem;color:var(--sirin-muted);'
+        f'text-transform:uppercase;letter-spacing:0.06em;">{html.escape(scale_label)}</span></div>'
+        '<div style="display:grid;grid-template-columns:minmax(9rem,12rem) 1fr;'
+        'gap:0.8rem;align-items:center;margin-bottom:0.75rem;">'
+        f'<strong style="{_MONO}font-size:1.35rem;color:{risk_ink(fill)};background:{fill};'
+        f'border:1px solid {RISK_CELL_BORDER};border-radius:0.55rem;padding:0.22rem 0.55rem;'
+        f'text-align:center;">{html.escape(score_text)}</strong>'
+        f'<div style="height:12px;border-radius:999px;background:{PALETTE["track"]};overflow:hidden;">'
+        f'<div style="height:100%;width:{shown * 100:.2f}%;background:{fill};"></div></div>'
+        '</div>'
+        '<section>'
+        '<div style="font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:700;color:var(--sirin-muted);">Highlighted answer tokens</div>'
+        '<div style="margin-top:0.35rem;border:1px solid var(--sirin-border);'
+        'border-radius:0.65rem;background:var(--sirin-surface);padding:0.75rem 0.85rem;'
+        'line-height:1.85;color:var(--sirin-text);font-size:0.94rem;white-space:pre-wrap;">'
+        + ''.join(token_cells)
+        + '</div></section>'
+        '<section style="margin-top:0.8rem;">'
+        '<div style="font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:700;color:var(--sirin-muted);">Sentence coverage</div>'
+        '<div style="display:grid;gap:0.45rem;margin-top:0.35rem;">'
+        + ''.join(sentence_rows)
+        + '</div></section></div>'
+    )
+
+
+def publication_granularity_html(view: dict[str, Any]) -> str:
+    """Publication-style output panel: token spans, derived sentence summary, optional claim rows."""
+    answer = str(view.get('answer') or '')
+    segments = _segments(answer)
+    shown_values = _segment_values(answer, segments, _score_values(view.get('norm_scores')))
+    raw_values = _segment_values(answer, segments, _score_values(view.get('scores')))
+    preds = _segment_values(answer, segments, _score_values(view.get('predictions')))
+    calibrated = bool(view.get('calibrated', True))
+    scale_label = str(view.get('scale_label') or (
+        'calibrated detector score' if calibrated else 'relative detector signal'
+    ))
+    signal_note = str(
+        view.get('signal_note')
+        or 'Each highlighted span shows detector signal assigned to generated text. '
+           'Color is not evidence by itself.'
+    )
+    if _is_sequence_broadcast(view):
+        scores = _score_values(view.get('scores'))
+        shown_scores = _score_values(view.get('norm_scores'))
+        return _sequence_broadcast_html(
+            answer,
+            scores[0] if scores else None,
+            shown_scores[0] if shown_scores else None,
+            calibrated,
+            scale_label,
+            signal_note,
+        )
+    legend = (
+        'lower detector signal -> higher detector signal'
+        if calibrated
+        else 'lower relative signal -> higher relative signal'
+    )
+
+    token_cells = []
+    for index, (start, end, piece) in enumerate(segments):
+        escaped_piece = html.escape(piece)
+        if piece.isspace():
+            token_cells.append(escaped_piece)
+            continue
+        shown = shown_values[index] if index < len(shown_values) else None
+        raw = raw_values[index] if index < len(raw_values) else None
+        pred = preds[index] if index < len(preds) else None
+        pred_attr = f' data-pred="{int(pred)}"' if pred in (0, 0.0, 1, 1.0) else ''
+        if shown is None:
+            title = f'span "{piece}" · no detector score'
+            token_cells.append(
+                '<span data-granularity="token" data-score="missing" data-missing="true"'
+                f' data-index="{start}" data-end="{end}" title="{html.escape(title)}"'
+                ' style="display:inline-block;margin:0.08rem 0.02rem;padding:0.08rem 0.24rem;'
+                'border-radius:0.3rem;background:rgba(148,163,184,0.14);'
+                'border-bottom:3px dashed var(--sirin-faint);">'
+                f'{escaped_piece}</span>'
+            )
+            continue
+        shown = _clamp01(shown)
+        raw_text = _format_score(raw, calibrated)
+        title = (
+            f'span "{piece}" · {raw_text} · {scale_label}'
+            if calibrated
+            else f'span "{piece}" · raw {raw if raw is not None else "n/a"} · '
+                 f'color value {shown:.3f} · not a probability'
+        )
+        fill = risk_color(shown)
+        token_cells.append(
+            '<span data-granularity="token"'
+            f' data-score="{shown:.3f}" data-index="{start}" data-end="{end}"{pred_attr}'
+            f' title="{html.escape(title)}"'
+            ' style="display:inline-block;margin:0.08rem 0.02rem;padding:0.08rem 0.24rem;'
+            f'border-radius:0.3rem;background:{fill};color:{risk_ink(fill)};'
+            f'border:1px solid {RISK_CELL_BORDER};">'
+            f'{escaped_piece}</span>'
+        )
+
+    sentence_rows = []
+    for start, end, sentence in _sentence_spans(answer):
+        candidates = [
+            shown_values[index]
+            for index, (seg_start, seg_end, piece) in enumerate(segments)
+            if not piece.isspace()
+            and seg_start < end
+            and start < seg_end
+            and index < len(shown_values)
+            and shown_values[index] is not None
+        ]
+        score = max(candidates, default=None)
+        width = _clamp01(score) * 100 if score is not None else 0
+        score_attr = f'{score:.3f}' if score is not None else 'missing'
+        fill = risk_color(_clamp01(score)) if score is not None else 'rgba(148,163,184,0.18)'
+        sentence_rows.append(
+            '<div data-granularity="sentence"'
+            f' data-score="{score_attr}"'
+            ' style="border:1px solid var(--sirin-border);border-radius:0.55rem;'
+            'padding:0.55rem 0.65rem;margin-top:0.45rem;background:var(--sirin-surface-2);">'
+            '<div style="display:flex;align-items:center;gap:0.65rem;justify-content:space-between;">'
+            f'<span style="line-height:1.4;">{html.escape(sentence)}</span>'
+            f'<strong style="{_MONO}white-space:nowrap;">{html.escape(_format_score(score, calibrated))}</strong>'
+            '</div>'
+            f'<div style="height:6px;border-radius:999px;background:{PALETTE["track"]};'
+            'overflow:hidden;margin-top:0.45rem;">'
+            f'<div style="height:100%;width:{width:.2f}%;background:{fill};"></div></div>'
+            '</div>'
+        )
+
+    claim_rows = []
+    for claim in list(view.get('claims') or []):
+        fact = str(claim.get('fact') or '')
+        score = _num(claim.get('prob'))
+        shown = _clamp01(score)
+        fill = risk_color(shown)
+        claim_rows.append(
+            '<div data-granularity="claim"'
+            f' data-score="{shown:.3f}"'
+            ' style="display:grid;grid-template-columns:1fr auto auto;gap:0.7rem;'
+            'align-items:center;border:1px solid var(--sirin-border);border-radius:0.55rem;'
+            'padding:0.55rem 0.65rem;margin-top:0.45rem;background:var(--sirin-surface-2);">'
+            f'<span style="line-height:1.4;">{html.escape(fact)}</span>'
+            f'<strong style="{_MONO}color:{risk_ink(fill)};background:{fill};'
+            f'border:1px solid {RISK_CELL_BORDER};border-radius:999px;padding:0.12rem 0.45rem;">'
+            f'{html.escape(_format_score(score, calibrated))}</strong>'
+            f'{_review_badge(claim.get("pred"))}</div>'
+        )
+
+    claim_lane = (
+        '<section style="margin-top:0.8rem;">'
+        '<div style="font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:700;color:var(--sirin-muted);">Claim-level output</div>'
+        '<div style="font-size:0.82rem;color:var(--sirin-muted);margin-top:0.15rem;">'
+        'Shown only when the detector provides claim rows.</div>'
+        + ''.join(claim_rows)
+        + '</section>'
+        if claim_rows else ''
+    )
+
+    return (
+        '<div class="sirin-granularity-panel" style="border:1px solid var(--sirin-border);'
+        'border-radius:12px;padding:0.9rem 1rem;background:var(--sirin-surface-2);'
+        'box-shadow:0 12px 30px var(--sirin-shadow);">'
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;'
+        'gap:0.9rem;flex-wrap:wrap;margin-bottom:0.75rem;">'
+        '<div><div style="font-size:0.82rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:800;color:var(--sirin-hot);">Output · Granularity</div>'
+        '<div style="font-size:0.86rem;color:var(--sirin-muted);margin-top:0.2rem;">'
+        f'{html.escape(signal_note)}</div></div>'
+        f'<span style="border:1px solid var(--sirin-border);border-radius:999px;'
+        'padding:0.16rem 0.55rem;font-size:0.74rem;color:var(--sirin-muted);'
+        f'text-transform:uppercase;letter-spacing:0.06em;">{html.escape(scale_label)}</span></div>'
+        f'{colorbar_html(0.0, 1.0, label=legend)}'
+        '<section>'
+        '<div style="font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:700;color:var(--sirin-muted);">Token-level signal</div>'
+        '<div style="line-height:2.25;white-space:pre-wrap;margin-top:0.35rem;">'
+        + ''.join(token_cells)
+        + '</div></section>'
+        '<section style="margin-top:0.8rem;">'
+        '<div style="font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;'
+        'font-weight:700;color:var(--sirin-muted);">Sentence-level summary</div>'
+        '<div style="font-size:0.82rem;color:var(--sirin-muted);margin-top:0.15rem;">'
+        'Derived as max token signal in each sentence.</div>'
+        + ''.join(sentence_rows)
+        + '</section>'
+        + claim_lane
+        + '</div>'
+    )
+
+
+def layer_token_heatmap(layers: list[int], cells: list[str], raw: np.ndarray, shown: np.ndarray) -> str:
+    """Rows = layers, cols = REAL answer tokens. Opaque risk-colormap cells; hover = raw value.
+    `raw` and `shown` are (n_layers, n_tokens); `shown` is already risk-oriented in [0,1]."""
+    header_cells = ''.join(
+        f'<th style="padding:0.3rem 0.5rem;text-align:center;font-weight:600;color:var(--sirin-muted);'
+        f'font-size:0.74rem;white-space:pre;max-width:5rem;overflow:hidden;text-overflow:ellipsis;'
+        f'border-bottom:1px solid var(--sirin-border);" title="{html.escape(c)}">'
+        f'{html.escape(c) if c.strip() else "&nbsp;"}</th>'
+        for c in cells
+    )
+    rows = [
+        '<tr><th style="position:sticky;left:0;background:var(--sirin-surface-2);'
+        'border-bottom:1px solid var(--sirin-border);border-right:1px solid var(--sirin-border);'
+        f'padding:0.3rem 0.6rem;text-align:right;color:var(--sirin-muted);">layer</th>{header_cells}</tr>'
+    ]
+    for r, layer in enumerate(layers):
+        tds = []
+        for c in range(len(cells)):
+            t = float(shown[r, c])
+            raw_value = float(raw[r, c])
+            fill = risk_color(t)
+            title = (
+                f'layer {layer} | token {c} | {cells[c]} | '
+                f'raw {raw_value:.4f} | shown {t:.4f}'
+            )
+            tds.append(
+                f'<td data-layer="{layer}" data-token-index="{c}" data-raw="{raw_value:.4f}" '
+                f'data-shown="{t:.4f}" title="{html.escape(title)}" '
+                f'style="background:{fill};color:{risk_ink(fill)};'
+                f'border:1px solid {RISK_CELL_BORDER};padding:0.28rem 0.4rem;text-align:center;'
+                f'min-width:2.3rem;font-size:0.78rem;">{raw_value:.2f}</td>'
+            )
+        rows.append(
+            '<tr><th style="position:sticky;left:0;background:var(--sirin-surface-2);'
+            'border-right:1px solid var(--sirin-border);padding:0.28rem 0.6rem;text-align:right;'
+            f'font-weight:600;color:var(--sirin-text);white-space:nowrap;">L{layer}</th>'
+            + ''.join(tds) + '</tr>'
+        )
+    table = ('<table style="border-collapse:collapse;width:max-content;font-family:var(--sirin-mono);">'
+             + ''.join(rows) + '</table>')
+    return f'<div style="overflow:auto;max-height:70vh;border-radius:12px;">{table}</div>'
 
 
 def _render_token(st: Any, view: dict[str, Any]) -> None:
-    if score_heatmap is None:
-        st.info("Token heatmap is unavailable because UI helpers could not be imported.")
-        return
     answer = str(view.get('answer') or '')
-    heatmap = score_heatmap(answer, _scores(view.get('norm_scores')))
-    swatch = 'display:inline-block;width:0.95rem;height:0.95rem;border-radius:4px;vertical-align:-0.15rem;'
-    _html(
-        st,
-        (
-            '<div style="margin-bottom:0.5rem;font-size:0.82rem;color:var(--sirin-muted);">'
-            f'<span style="{swatch}background:{_tint(PALETTE["risk"], 0.14)};'
-            f'border:1px solid {_tint(PALETTE["risk"], 0.3)};"></span>'
-            ' low&nbsp;&nbsp;'
-            f'<span style="{swatch}background:{_tint(PALETTE["risk"], 0.85)};"></span>'
-            ' high&nbsp;&nbsp;<span style="opacity:0.8;">= more likely hallucinated</span></div>'
-            f"{heatmap}"
-        ),
-    )
+    _html(st, publication_granularity_html(view))
+    if score_heatmap is None:
+        st.info("Exact span boundary debug is unavailable because UI helpers could not be imported.")
+    else:
+        with st.expander('Exact span boundary debug', expanded=False):
+            heatmap = score_heatmap(
+                answer,
+                _scores(view.get('norm_scores')),
+                predictions=list(view.get('predictions') or []),
+            )
+            _html(
+                st,
+                '<div style="font-size:0.82rem;color:var(--sirin-muted);margin-bottom:0.4rem;">'
+                'Exact span boundary debug</div>'
+                + colorbar_html(0.0, 1.0, label='lower detector signal → higher detector signal')
+                + heatmap,
+            )
     if view.get('tagged_generation'):
         with st.expander("Judge's annotated answer (raw)"):
             st.write(str(view.get('tagged_generation')))
