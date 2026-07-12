@@ -15,6 +15,7 @@ Both tasks are supported at **sequence-level** and **token-level** granularities
 - [SIRIN: Semantic Inconsistency Recognition and Inspection Nexus](#sirin-semantic-inconsistency-recognition-and-inspection-nexus)
   - [📑 Table of Contents](#-table-of-contents)
   - [🌟 Key Features](#-key-features)
+  - [🖼️ UI](#ui)
   - [🧩 Architecture \& Overview](#-architecture--overview)
     - [Detection Tasks](#detection-tasks)
     - [Detection Granularities](#detection-granularities)
@@ -47,6 +48,18 @@ Both tasks are supported at **sequence-level** and **token-level** granularities
 - 📈 **Advanced features**: Layer-specific extraction, pooling strategies, normalization, and dimensionality reduction
 - 🔄 **Target approximation**: Automatic label generation for unlabeled or noisy data
 - 🌐 **Multi-backend**: Whitebox (HuggingFace) and blackbox (OpenAI API) inference support
+
+## UI
+
+Install and start the Streamlit UI from the repository root:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e '.[ui]'
+python -m streamlit run sirin/ui/streamlit_app.py
+```
+
+Open the URL printed by Streamlit (for instance `http://localhost:8501`). In the sidebar, select a generator and detector (choose a zero-shot preset if you do not have a trained checkpoint), then enter a context and question in the chat box. API-backed options require the corresponding provider key and confirmation of external API calls. See [the UI guide](docs/ui.md) for details.
 
 ## 🧩 Architecture & Overview
 
