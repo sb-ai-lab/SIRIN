@@ -41,7 +41,7 @@ def _run_judge(monkeypatch, gens, *, key=SENTINEL):
     result = judge.detect([build_sample('the prompt', ANSWER)])
     view = detection_view_model(result, ANSWER, judge)
     setup = SetupSnapshot(
-        detector_preset='Judge — API Token (zero-shot)',
+        detector_preset='Judge — API Span (zero-shot)',
         detector_family='judge',
         detector_level='token',
     )
@@ -122,7 +122,7 @@ def test_judge_annotation_error_maps_to_actionable_partial():
 
     engine = RunEngine(generate=None, detect=detect)
     setup = SetupSnapshot(
-        detector_preset='Judge — API Token (zero-shot)',
+        detector_preset='Judge — API Span (zero-shot)',
         detector_family='judge',
         detector_level='token',
     )

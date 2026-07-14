@@ -31,6 +31,8 @@ _SEQ_UNC_METHODS_MSP = ['MaximumSequenceProbability']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
 _DEFAULT_HF_MODEL = 'Qwen/Qwen3-4B'
 PSILOQA_TOKEN_LINEAR_PRESET = 'Probing — Token Linear · PsiloQA/Qwen3-4B'
+# The paste-a-key span judge is the demo headline: the sidebar pins it right under the hero probe.
+JUDGE_SPAN_PRESET = 'Judge — API Span (zero-shot)'
 PSILOQA_MODEL_ID = 'Qwen/Qwen3-4B'
 PSILOQA_MODEL_REVISION = '1cfa9a7208912126459214e8b04321603b3df60c'
 PSILOQA_CHECKPOINT_DIR = str(
@@ -774,8 +776,8 @@ PRESETS: dict[str, Preset] = {
         is_judge=True,
         census_caption='single-digit hallucination verdict · one judge pass, not calibrated',
     ),
-    "Judge — API Token (zero-shot)": Preset(
-        name="Judge — API Token (zero-shot)",
+    "Judge — API Span (zero-shot)": Preset(
+        name="Judge — API Span (zero-shot)",
         family='judge',
         level='token',
         calibrated=True,

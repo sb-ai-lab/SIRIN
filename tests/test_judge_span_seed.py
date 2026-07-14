@@ -66,7 +66,7 @@ def _fixture_payload():
         'why_notable': 'One fabricated census figure.',
         'license': 'CC-BY-4.0',
         'detector': {
-            'preset': 'Judge — API Token (zero-shot)',
+            'preset': 'Judge — API Span (zero-shot)',
             'family': 'judge',
             'level': 'token',
             'score_semantics': 'spanAgreement',

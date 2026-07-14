@@ -49,7 +49,7 @@ CASE_ID = 'psiloqa_togethercomputer/Pythia-Chat-Base-7B-v0.16_13194'
 SPLIT = 'test'
 PROMPT_PREFIX = 'Answer the question based on the passage.\nPassage: '
 
-PRESET = 'Judge — API Token (zero-shot)'
+PRESET = 'Judge — API Span (zero-shot)'
 JUDGE_MODEL = 'Qwen/Qwen3.5-4B'
 PROVIDER_LABEL = 'Custom OpenAI-compatible (local vLLM)'
 TEMPERATURE = 0.7

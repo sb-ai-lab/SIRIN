@@ -80,6 +80,7 @@ TrustMem answerability judges (same 4B model through the trustmem runner; `LLM` 
 |---|---|---|
 | SimpleMem | 0.616 | 0.769 |
 | LightMem | 0.616 | 0.805 |
+| Mem0 | 0.612 | 0.832 |
 
 ## Provenance notes
 

@@ -19,7 +19,7 @@ def test_presets_registry():
         if 'zero-shot' in preset.name:
             assert preset.requires_checkpoint is False
     assert 'Probing — Answerability TabPFN (checkpoint)' in presets.PRESETS
-    assert 'Judge — API Token (zero-shot)' in presets.PRESETS
+    assert 'Judge — API Span (zero-shot)' in presets.PRESETS
 
 
 def test_every_preset_declares_an_honest_score_meaning():

@@ -551,7 +551,7 @@ def build_psiloqa_prompt(passage: str, question: str) -> str:
 #   source_answer_model        : model that produced the answer
 #   why_notable, license       : demo copy + license string
 #   detector: {
-#     preset            : the UI preset name (e.g. 'Judge — API Token (zero-shot)')
+#     preset            : the UI preset name (e.g. 'Judge — API Span (zero-shot)')
 #     family            : must be 'judge'
 #     level             : must be 'token'
 #     score_semantics   : must be 'spanAgreement' (k/n agreement, NOT a calibrated probability)

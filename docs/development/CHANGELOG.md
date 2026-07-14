@@ -24,6 +24,7 @@ This changelog records user-facing and runtime changes to the canonical Streamli
 - Background motion is perceptible immediately: larger drift amplitudes, shorter cycles (Subtle 45s, Lively 16s), and each cycle starts at its midpoint instead of an ease-in-out standstill.
 - The "Allow external API calls" consent renders directly under the Judge API key whenever a judge preset is active (one session-wide checkbox, unchanged key and semantics).
 - The Custom judge provider (trusted-local) defaults to `http://localhost:8000/v1` when `SIRIN_CUSTOM_OPENAI_BASE_URL` is unset and lists the served models from `/v1/models` (1.5s probe, cached per session, silent when nothing is running).
+- The span-level API judge preset is discoverable: renamed **Judge — API Span (zero-shot)** (was "Judge — API Token", which never said span) and pinned second in the Detector select, right under the hero probe — it was 8th of 9 and clipped inside the dropdown at 1080p. The judge seed asset's integrity hash was recomputed for the metadata-only label change; answer/message/score hashes are untouched.
 
 ### Fixed
 

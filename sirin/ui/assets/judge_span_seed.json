@@ -40,7 +40,7 @@
     "why_notable": "Two fabricated dates: the answer gives \"March 1, 1883\" and \"March 1, 1963\", but the passage states 13 February 1893 - 4 June 1962. The token API judge tagged both invented dates (2/3 samples agreed on each), and its two spans coincide exactly with the hidden gold annotation (character IoU 1.00).",
     "license": "CC-BY-4.0",
     "detector": {
-      "preset": "Judge — API Token (zero-shot)",
+      "preset": "Judge — API Span (zero-shot)",
       "family": "judge",
       "level": "token",
       "score_semantics": "spanAgreement",
@@ -136,6 +136,6 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "sha256": "15df5e40fc09e0ecaee74a81286d1ef9d97a5775b3a18422596dbd750cb6b7b6"
+    "sha256": "d84383ecfa2a286cfeaa8127698237d56838d78bf4e906ac6d13bcda107d11d0"
   }
 }

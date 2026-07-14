@@ -1150,7 +1150,7 @@ def test_judge_provider_model_is_editable_not_allowlisted(monkeypatch):
     monkeypatch.setattr(
         presets,
         'list_presets',
-        lambda: [_Preset(name='Judge — API Token (zero-shot)', family='judge')],
+        lambda: [_Preset(name='Judge — API Span (zero-shot)', family='judge')],
     )
 
     st = _SidebarHarness(
@@ -1171,7 +1171,7 @@ def _judge_preset_sidebar(monkeypatch, **harness_kwargs):
     monkeypatch.setattr(
         presets,
         'list_presets',
-        lambda: [_Preset(name='Judge — API Token (zero-shot)', family='judge')],
+        lambda: [_Preset(name='Judge — API Span (zero-shot)', family='judge')],
     )
     return _SidebarHarness(**harness_kwargs)
 

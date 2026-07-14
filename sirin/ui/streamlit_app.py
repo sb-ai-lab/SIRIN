@@ -1028,6 +1028,9 @@ def _sidebar(st: Any) -> dict[str, Any]:
         if default_preset in names:
             names.remove(default_preset)
             names.insert(0, default_preset)
+        if presets.JUDGE_SPAN_PRESET in names and default_preset != presets.JUDGE_SPAN_PRESET:
+            names.remove(presets.JUDGE_SPAN_PRESET)
+            names.insert(1, presets.JUDGE_SPAN_PRESET)
         by_name = {p.name: p for p in preset_objs}
         preset_name = st.selectbox('Preset', names)
         preset = by_name[preset_name]

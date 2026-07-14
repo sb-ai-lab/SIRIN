@@ -32,7 +32,7 @@ def test_reference_aligns_scores_to_answer_length():
 
 def test_api_token_judge_is_calibrated_absolute():
     # char scores are a fraction in [0, 1] -> shown absolute, not min-max-stretched.
-    assert PRESETS['Judge — API Token (zero-shot)'].calibrated is True
+    assert PRESETS['Judge — API Span (zero-shot)'].calibrated is True
 
 
 # --- judge.detect() reference-aligned consensus (fake adapter, no network) -----------------
