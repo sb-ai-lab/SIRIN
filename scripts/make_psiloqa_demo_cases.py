@@ -11,7 +11,9 @@ SOURCE_PATH = (
     REPO_ROOT
     / 'output/psiloqa_span_qwen35_4b/experiment/top5_demo_cases.json'
 )
-FIXTURE_PATH = REPO_ROOT / 'sirin/ui/assets/psiloqa_span_demo.json'
+DISCLOSURE_SEED_PATH = (
+    REPO_ROOT / 'sirin/ui/assets/psiloqa_span_seed_qwen35_4b.json'
+)
 ASSET_PATH = REPO_ROOT / 'sirin/ui/assets/psiloqa_demo_cases.json'
 CHECKPOINT = 'demo/checkpoints/qwen35_4b_psiloqa_span_linear'
 PROMPT_PREFIX = 'Answer the question based on the passage.\nPassage: '
@@ -31,7 +33,7 @@ SELECTED_CASES = (
         'Douglas Wright',
         'Whole answer fabricated: claims Douglas James Wright became founding '
         'editor of "Best Australian Poems" (Black Inc.); nearly the entire '
-        'answer is one hallucinated span (IoU 0.998).',
+        'answer is one hallucinated span (probe IoU 0.998).',
     ),
     (
         822,
@@ -52,6 +54,14 @@ SELECTED_CASES = (
         'Apollo roles',
         'Invented Apollo mission-scientist and backup-pilot roles for '
         'Joseph Shea.',
+    ),
+    (
+        560,
+        'Hartmuth Pfeil dates',
+        'Localized exemplar: a short answer that invents two specific dates '
+        '(born "March 1, 1883", died "March 1, 1963"), neither in the passage. '
+        'Gold marks only the two date spans, not the whole answer — the '
+        'contrast with the whole-answer fabrications above.',
     ),
 )
 
@@ -162,8 +172,11 @@ def build_case(
 
 def main() -> None:
     source = json.loads(SOURCE_PATH.read_text(encoding='utf-8'))
-    fixture_case = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))['case']
-    disclosures = {field: fixture_case[field] for field in DISCLOSURE_FIELDS}
+    # Disclosure fields describe the live probe extractor (Qwen3.5-4B, checkpoint
+    # qwen35_4b_psiloqa_span_linear, layer 16, tau 0.385), so source them from the
+    # Qwen3.5-4B seed — NOT the old Qwen3-4B psiloqa_span_demo fixture.
+    seed_case = json.loads(DISCLOSURE_SEED_PATH.read_text(encoding='utf-8'))['case']
+    disclosures = {field: seed_case[field] for field in DISCLOSURE_FIELDS}
 
     by_index = {case['dataset_index']: case for case in source['top5']}
     missing = [index for index, _, _ in SELECTED_CASES if index not in by_index]

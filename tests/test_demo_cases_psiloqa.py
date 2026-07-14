@@ -25,7 +25,11 @@ def test_curated_cases_load_in_demo_order():
         (822, 'LECT2 disorder'),
         (984, 'Picard influences'),
         (473, 'Apollo roles'),
+        (560, 'Hartmuth Pfeil dates'),
     ]
+    # Disclosures describe the live Qwen3.5-4B probe extractor, not the old Qwen3-4B proxy.
+    assert {case['representation_model'] for case in cases} == {'Qwen/Qwen3.5-4B'}
+    assert all('did not generate' in case['representation_disclosure'] for case in cases)
 
 
 def test_hero_case_is_verified_escaped_cock_fixture():

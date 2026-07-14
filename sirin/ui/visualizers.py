@@ -822,16 +822,16 @@ def publication_case_html(case: dict[str, Any], *, include_result: bool = True) 
         )
     else:
         score = _clamp01(_num(case.get('score'), 0.0))
+        # The scale copy must name the detector that actually produced the recorded score —
+        # cases carry probe scores, judge probabilities, or uncertainty values interchangeably.
+        detector_label = str(case.get('detector') or 'recorded detector')
         answer_view = _sequence_broadcast_html(
             str(case.get('prediction') or ''),
             score,
             score,
             False,
-            'recorded OOF unfaithfulness score',
-            (
-                'One recorded response-level score from the nested grouped-OOF '
-                'hidden-state logistic probe.'
-            ),
+            'recorded response-level score',
+            f'One recorded response-level score from: {detector_label}.',
         )
     if not include_result:
         memory_count = str(case.get('answer_prompt') or '').count('[Context ')

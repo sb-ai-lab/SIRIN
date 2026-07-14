@@ -23,9 +23,10 @@ def test_curated_cases_load_in_demo_order():
 
     assert [(case['dataset_index'], case['label']) for case in cases] == [
         (0, 'RAGTruth: Bowel movement & weight'),
-        (4, 'RAGTruth: Carbon footprint'),
         (138, 'RAGTruth: FEHA vs ADA'),
-        (721, 'RAGTruth: Patterned paint rollers'),
+        (839, 'RAGTruth: Bucharest weather'),
+        (570, 'RAGTruth: Oracle co-CEOs'),
+        (638, 'RAGTruth: Carbon footprint effect'),
     ]
 
 
@@ -35,7 +36,7 @@ def test_supported_case_carries_no_spans_hallucinated_cases_do():
     assert cases[0]['gold_spans'] == []
     assert cases[0]['source_answer_model'] == 'gpt-4-0613'
     assert all(case['gold_visibility'] == 'hidden' for case in cases)
-    assert [len(case['gold_spans']) for case in cases] == [0, 1, 2, 1]
+    assert [len(case['gold_spans']) for case in cases] == [0, 2, 2, 1, 1]
 
 
 def test_absent_asset_is_silent(tmp_path):

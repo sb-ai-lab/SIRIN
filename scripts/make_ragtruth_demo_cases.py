@@ -37,19 +37,18 @@ TAIL = (
 )
 
 # (dataset_index, short label, why_notable) — curated from the RAGTruth QA test
-# split for model + hallucination-type diversity and short, readable contexts.
+# split for model + hallucination-type diversity and short, readable contexts, then
+# pre-screened with the local Qwen3.5-4B UI judges (span judge num_beams=3): every
+# hallucinated case kept has char-IoU(judge vs gold) >= 0.4 and a seq verdict of 1, so
+# the hosted judge visibly localizes it. (Final nemotron confirmation is a later step.)
+# No faithful candidate passed the local screen — the 4B span-tag judge over-flags every
+# clean answer — so the faithful baseline (idx 0) is retained on its RAGTruth gold label.
 SELECTED_CASES = (
     (
         0,
         'Bowel movement & weight',
         'Faithful gpt-4 answer with zero hallucination spans — the supported '
         'baseline that stays grounded in the passages.',
-    ),
-    (
-        4,
-        'Carbon footprint',
-        'One localized fabrication (Subtle Baseless): the closing list of '
-        'reduction tactics is invented, not supported by any passage.',
     ),
     (
         138,
@@ -59,11 +58,25 @@ SELECTED_CASES = (
         'passages.',
     ),
     (
-        721,
-        'Patterned paint rollers',
-        'One conflicting span (Evident Conflict): claims patterned rollers '
-        '"stimulate the skin and provide a healthy glow", which no passage '
-        'about paint rollers supports.',
+        839,
+        'Bucharest weather',
+        'Two fabricated spans (Evident Baseless Info): the llama-2-13b answer '
+        'invents a live Bucharest weather report (22°C, 82% humidity, '
+        '6 mph wind) that appears in no passage.',
+    ),
+    (
+        570,
+        'Oracle co-CEOs',
+        'One fabricated span (Subtle Baseless Info): invents a rationale — '
+        '"to provide a smooth transition and ensure continued growth" — for '
+        "Oracle's co-CEO structure that no passage states.",
+    ),
+    (
+        638,
+        'Carbon footprint effect',
+        'One fabricated span (Subtle Baseless Info): the gpt-3.5 answer adds an '
+        'unsupported "contributes to climate change and global warming" claim '
+        'that no passage makes.',
     ),
 )
 

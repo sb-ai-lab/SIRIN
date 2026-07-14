@@ -75,29 +75,31 @@ def test_psiloqa_span_demo_loader_rejects_changed_message_content(tmp_path):
 def test_recorded_demo_cases_are_exact_and_portable():
     cases = load_demo_cases()
 
-    assert list(cases) == ['681a1674', 'ef66a6e5', '07741c44']
-    marvel = cases['681a1674']
-    assert marvel['question'] == 'How many Marvel movies did I re-watch?'
-    assert marvel['prediction'] == 'One'
-    assert marvel['gold'] == '2'
-    assert marvel['score'] == 0.9983455751552265
-    assert marvel['prompt_sha256'] == (
-        'a904e2548ace27e5f7c39f3517edeeb955bce764278b2937789e5bf3b44f0976'
+    assert list(cases) == ['e3038f8c', 'ef66a6e5', '0bc8ad92']
+    rare_items = cases['e3038f8c']
+    assert rare_items['question'] == 'How many rare items do I have in total?'
+    assert rare_items['prediction'] == '74 items (57 records, 12 figurines, 5 books)'
+    assert rare_items['gold'] == '99'
+    assert rare_items['score'] == pytest.approx(0.6208371451)
+    assert rare_items['prompt_sha256'] == (
+        '0f73d6c9470769e644a07a18817d967f6b585a541370c1e65a7fc0fec6147ab0'
     )
-    assert marvel['messages_sha256'] == (
-        '3f07c9b1f81e48bfb936cd655195d13193787313a4c45680ee290270626d0ee4'
+    assert rare_items['messages_sha256'] == (
+        '8ec9680c26846dca48289d644ce080b778b512e33c49fd341c588ac1dec1f0c2'
     )
-    assert generation_messages(marvel)[0] == {
+    assert generation_messages(rare_items)[0] == {
         'role': 'system',
         'content': (
             'You are a professional Q&A assistant. Extract concise answers from context. '
             'You must output valid JSON format.'
         ),
     }
-    assert [item['label'] for item in marvel['evidence_excerpts']] == [
-        'Context 1',
-        'Context 2',
-        'Context 5',
+    # The 25 rare coins (Context 17) are the omitted item: 57+12+25+5 = 99, not 74.
+    assert [item['label'] for item in rare_items['evidence_excerpts']] == [
+        'Context 3',
+        'Context 4',
+        'Context 9',
+        'Context 17',
     ]
 
     sports = cases['ef66a6e5']
@@ -116,33 +118,33 @@ def test_recorded_demo_cases_are_exact_and_portable():
     source = Path(__file__).parents[1] / trace['source']
     assert hashlib.sha256(source.read_bytes()).hexdigest() == trace['source_sha256']
 
-    sneakers = cases['07741c44']
-    assert sneakers['question'] == 'Where do I initially keep my old sneakers?'
-    assert sneakers['prediction'] == 'In a shoe rack'
-    assert sneakers['gold'] == 'under my bed'
-    assert sneakers['score'] == pytest.approx(0.7290154702)
-    assert sneakers['provenance']['category'] == 'knowledge-update'
-    assert sneakers['evaluation_scope'] == (
-        'training example approved for mechanics demonstration'
+    museum = cases['0bc8ad92']
+    assert museum['question'] == (
+        'How many months have passed since I last visited a museum with a friend?'
     )
+    assert museum['prediction'] == 'Approximately 4 months (since 22 October 2022)'
+    assert museum['gold'] == '5'
+    assert museum['score'] == pytest.approx(0.7042218294)
+    assert museum['provenance']['category'] == 'temporal-reasoning'
 
     assert {case['detector'] for case in cases.values()} == {
-        'Nested grouped-OOF hidden-state logistic probe',
+        'Span-tag judge sequence probability (Qwen3.5-4B, 3-beam)',
         'Token uncertainty (chosen-token NLL + top-20 entropy)',
     }
     assert all(case['threshold'] is None for case in cases.values())
     assert all(
         case['provenance']['score_method']
-        == 'StandardScaler -> PCA(256) -> balanced LogisticRegression'
-        for case in (marvel,)
+        == 'span-tag judge (Qwen/Qwen3.5-4B, num_beams=3, temperature=0.7)'
+        for case in (rare_items, museum)
     )
+    # Judge-scored cases carry no probe fold/layer; the token-trace case has neither.
     assert [
         (case['provenance']['fold'], case['provenance']['probe_layer'])
         for case in cases.values()
     ] == [
-        (4, 30),
         (None, None),
-        (3, 30),
+        (None, None),
+        (None, None),
     ]
     assert all(
         not Path(case['provenance'][field]).is_absolute()

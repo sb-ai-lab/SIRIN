@@ -43,4 +43,6 @@ def test_judge_seed_run_it_live_resolves_when_asset_present():
 
     assert request.mode == RunMode.RECORDED_REPLAY
     assert request.supplied_answer == case['answer']
-    assert case['example_id'] not in {s.id for s in registry.summaries()}
+    # The seed must resolve either way; since its case was promoted into the visible
+    # PsiloQA gallery (the localized exemplar), the visible summary wins over the
+    # hidden seed entry — same guard as the Qwen3.5-4B probe seed.

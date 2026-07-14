@@ -125,12 +125,13 @@ def test_sequence_broadcast_preserves_small_nonzero_scores():
 def test_recorded_case_renders_raw_score_without_invented_threshold():
     from sirin.ui.demo_cases import get_demo_case
 
-    rendered = visualizers.publication_case_html(get_demo_case('681a1674'))
+    rendered = visualizers.publication_case_html(get_demo_case('e3038f8c'))
 
-    assert 'score 0.9983' in rendered
+    assert 'score 0.6208' in rendered
     assert 'Recorded raw score' in rendered
-    assert 'recorded OOF unfaithfulness score' in rendered
-    assert 'nested grouped-OOF hidden-state logistic probe' in rendered
+    assert 'recorded response-level score' in rendered
+    # The scale copy names the detector that actually produced the score.
+    assert 'Span-tag judge sequence probability' in rendered
     assert 'title="threshold"' not in rendered
     assert 'TabPFN score' not in rendered
 
@@ -139,12 +140,12 @@ def test_live_case_setup_does_not_label_historical_detector_as_live():
     from sirin.ui.demo_cases import get_demo_case
 
     rendered = visualizers.publication_case_html(
-        get_demo_case('07741c44'), include_result=False
+        get_demo_case('0bc8ad92'), include_result=False
     )
 
     assert 'Live run setup' in rendered
     assert 'detector selected in sidebar' in rendered
-    assert 'training example approved for mechanics demonstration' in rendered
+    assert 'recorded evaluation example' in rendered
     assert 'Nested grouped-OOF hidden-state logistic probe' not in rendered
 
 

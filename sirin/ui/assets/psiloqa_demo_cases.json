@@ -37,8 +37,8 @@
       ],
       "gold_visibility": "hidden",
       "source_answer_model": "ServiceNow-AI/Apriel-5B-Instruct",
-      "representation_model": "Qwen/Qwen3-4B",
-      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
       "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
       "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
       "license": "CC-BY-4.0"
@@ -46,7 +46,7 @@
     {
       "case_id": "psiloqa_HuggingFaceH4/zephyr-7b-beta_11308",
       "label": "Douglas Wright",
-      "why_notable": "Whole answer fabricated: claims Douglas James Wright became founding editor of \"Best Australian Poems\" (Black Inc.); nearly the entire answer is one hallucinated span (IoU 0.998).",
+      "why_notable": "Whole answer fabricated: claims Douglas James Wright became founding editor of \"Best Australian Poems\" (Black Inc.); nearly the entire answer is one hallucinated span (probe IoU 0.998).",
       "dataset": "psiloqa_en_span",
       "split": "test",
       "dataset_index": 460,
@@ -77,8 +77,8 @@
       ],
       "gold_visibility": "hidden",
       "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
-      "representation_model": "Qwen/Qwen3-4B",
-      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
       "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
       "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
       "license": "CC-BY-4.0"
@@ -117,8 +117,8 @@
       ],
       "gold_visibility": "hidden",
       "source_answer_model": "NousResearch/Nous-Hermes-2-Mistral-7B-DPO",
-      "representation_model": "Qwen/Qwen3-4B",
-      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
       "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
       "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
       "license": "CC-BY-4.0"
@@ -157,8 +157,8 @@
       ],
       "gold_visibility": "hidden",
       "source_answer_model": "utter-project/EuroLLM-9B-Instruct",
-      "representation_model": "Qwen/Qwen3-4B",
-      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
       "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
       "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
       "license": "CC-BY-4.0"
@@ -197,8 +197,52 @@
       ],
       "gold_visibility": "hidden",
       "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
-      "representation_model": "Qwen/Qwen3-4B",
-      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_togethercomputer/Pythia-Chat-Base-7B-v0.16_13194",
+      "label": "Hartmuth Pfeil dates",
+      "why_notable": "Localized exemplar: a short answer that invents two specific dates (born \"March 1, 1883\", died \"March 1, 1963\"), neither in the passage. Gold marks only the two date spans, not the whole answer — the contrast with the whole-answer fabrications above.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 560,
+      "passage": "Hartmuth Pfeil (13 February 1893 – 4 June 1962) was a German painter. His work was part of the painting event in the art competition at the 1936 Summer Olympics.\n\n\n== References ==",
+      "question": "During which dates was Hartmuth Pfeil alive?",
+      "answer": "Hartmuth Pfeil was born on March 1, 1883 and died on March 1, 1963.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Hartmuth Pfeil (13 February 1893 – 4 June 1962) was a German painter. His work was part of the painting event in the art competition at the 1936 Summer Olympics.\n\n\n== References ==\nQuestion: During which dates was Hartmuth Pfeil alive?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Hartmuth Pfeil was born on March 1, 1883 and died on March 1, 1963."
+        }
+      ],
+      "content_sha256": {
+        "user": "d112d85d65a16f2f0e38be9c4c5a37e3313705329e1d22eeaeda37a8180a454b",
+        "assistant": "8246c7b089492315fc1af9868cd07965ee03a6c71291855c9a3d2381b0bf1ef5"
+      },
+      "messages_sha256": "78b44c70add5da50d682f0a18f144cbf0867b2e00b65a232f8ddcf9af2cc790d",
+      "gold_spans": [
+        [
+          27,
+          40
+        ],
+        [
+          53,
+          66
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "togethercomputer/Pythia-Chat-Base-7B-v0.16",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
       "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
       "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
       "license": "CC-BY-4.0"
