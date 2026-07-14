@@ -86,6 +86,44 @@ class UncertaintyDetectorBase(DetectorBase):
         """Flatten nested list of samples"""
         return [item for sample in samples for item in sample]
 
+    @staticmethod
+    def _validated_generation_trace(
+        samples: List,
+        trace: Dict,
+        method_names: List[str],
+    ) -> Tuple[str, List, List[str], Dict[str, List[float]]]:
+        if len(samples) != 1:
+            raise ValueError('A generation trace can score exactly one answer at a time.')
+        answer = next(
+            (
+                message['content']
+                for message in reversed(samples[0])
+                if message['role'] == 'assistant'
+            ),
+            '',
+        )
+        text = str(trace.get('text') or '')
+        if answer != text:
+            raise ValueError(
+                'Uncertainty generation trace does not match the displayed answer.'
+            )
+
+        offsets = list(trace.get('offsets') or [])
+        pieces = list(trace.get('pieces') or [])
+        values = {name: list(trace.get(name) or []) for name in method_names}
+        lengths = {len(offsets), len(pieces), *(len(items) for items in values.values())}
+        if len(lengths) != 1 or not offsets:
+            raise ValueError('Uncertainty trace arrays have inconsistent lengths.')
+        for piece, offset in zip(pieces, offsets):
+            if (
+                not isinstance(offset, (list, tuple))
+                or len(offset) != 2
+                or not 0 <= int(offset[0]) < int(offset[1]) <= len(text)
+                or text[int(offset[0]) : int(offset[1])] != piece
+            ):
+                raise ValueError('Uncertainty trace has invalid text offsets.')
+        return text, offsets, pieces, values
+
     def _save_config(self, save_dir: Path):
         """Save detector configuration"""
         config_dict = serialize_uncertainty_detector_config(
@@ -167,6 +205,11 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Detect hallucinations at sequence level using uncertainty scores"""
         samples, group_ids = self._split_context_samples(samples)
+        generation_trace = kwargs.get('generation_trace')
+        if generation_trace is not None:
+            return self._detect_generation_trace(
+                samples, group_ids, generation_trace, labels
+            )
 
         uncertainty_scores, _ = self.feature_processor(samples)
         self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
@@ -185,6 +228,43 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         )
 
         return aggregated_scores, predictions, labels
+
+    def _detect_generation_trace(
+        self,
+        samples: List,
+        group_ids: List,
+        trace: Dict,
+        labels: Optional[np.ndarray],
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        text, _, _, token_values = self._validated_generation_trace(
+            samples,
+            trace,
+            ['MaximumTokenProbability', 'TokenEntropy'],
+        )
+        available = {
+            'MeanTokenEntropy': float(np.mean(token_values['TokenEntropy'])),
+            # lm-polygraph's Perplexity estimator is mean chosen-token NLL.
+            'Perplexity': float(np.mean(token_values['MaximumTokenProbability'])),
+        }
+        method_names = list(self.feature_processor.config.uncertainty_methods or [])
+        if any(name not in available for name in method_names):
+            raise ValueError(
+                'Generation trace does not support sequence uncertainty methods: '
+                + ', '.join(name for name in method_names if name not in available)
+            )
+        method_scores = np.array([available[name] for name in method_names])
+        score = float(self._aggregate_uncertainties(method_scores[None, :])[0])
+        prediction = int(score > self.threshold)
+        self.last_generated_text = text
+        self.last_generation_trace = trace
+        self.last_method_scores = {name: available[name] for name in method_names}
+        grouped_preds, grouped_probs = self._aggregate_context_predictions(
+            group_ids,
+            np.array([prediction]),
+            np.array([score]),
+            binary=(self.config.num_classification_heads <= 2),
+        )
+        return grouped_probs, grouped_preds, labels
 
 
 class TokenUncertaintyDetector(UncertaintyDetectorBase):
@@ -267,14 +347,41 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Detect hallucinations at token level using uncertainty scores"""
         samples, group_ids = self._split_context_samples(samples)
+        generation_trace = kwargs.get('generation_trace')
+        if generation_trace is not None:
+            return self._detect_generation_trace(
+                samples, group_ids, generation_trace, labels
+            )
 
         uncertainty_scores, _ = self.feature_processor(samples)
         self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
         self.last_method_scores = getattr(self.feature_processor, 'last_method_scores', None)
+        if len(samples) != 1 or not self.last_generated_text:
+            raise ValueError(
+                'Token uncertainty must expose the exact generated answer used for scoring.'
+            )
 
-        # Get answer offsets from the reference answer tokens — these define the
-        # character-level output space and drive all_lengths.
-        offsets, _, _ = get_answer_offsets(samples, self.feature_processor._extractor)
+        scored_sample = [dict(message) for message in samples[0]]
+        assistant_index = next(
+            (
+                index
+                for index in range(len(scored_sample) - 1, -1, -1)
+                if scored_sample[index]['role'] == 'assistant'
+            ),
+            None,
+        )
+        if assistant_index is None:
+            scored_sample.append(
+                {'role': 'assistant', 'content': self.last_generated_text}
+            )
+        else:
+            scored_sample[assistant_index]['content'] = self.last_generated_text
+
+        # Scores belong to the detector's generated text, never to a separately
+        # supplied answer that merely happens to have the same token count.
+        offsets, _, _ = get_answer_offsets(
+            [scored_sample], self.feature_processor._extractor
+        )
         offsets_cat = torch.cat(
             [torch.tensor(offset, dtype=torch.long) for offset in offsets]
         )
@@ -285,8 +392,7 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         for count in ref_token_counts:
             all_lengths.append(all_lengths[-1] + count)
 
-        # Process features aligned to the reference token count per sample so that
-        # all_token_probs and offsets_cat have the same total length.
+        # Refuse lossy truncation/padding: every score must map to one real token.
         all_token_probs, all_token_preds = self._process_token_features(
             uncertainty_scores[0], ref_token_counts
         )
@@ -315,6 +421,49 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
 
         return char_probs, char_preds, char_labels
 
+    def _detect_generation_trace(
+        self,
+        samples: List,
+        group_ids: List,
+        trace: Dict,
+        labels: Optional[np.ndarray],
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        method_names = list(self.feature_processor.config.uncertainty_methods or [])
+        text, offsets, pieces, values = self._validated_generation_trace(
+            samples, trace, method_names
+        )
+        method_values = [values[name] for name in method_names]
+
+        token_features = np.column_stack(method_values)
+        token_scores = self._aggregate_uncertainties(token_features)
+        token_preds = (token_scores > self.threshold).astype(int)
+        char_probs = [0.0] * len(text)
+        char_preds = [0] * len(text)
+        for (start, end), score, prediction in zip(
+            offsets, token_scores, token_preds
+        ):
+            char_probs[int(start) : int(end)] = [float(score)] * (int(end) - int(start))
+            char_preds[int(start) : int(end)] = [int(prediction)] * (int(end) - int(start))
+
+        self.last_generated_text = text
+        self.last_generation_trace = trace
+        self.last_method_scores = {
+            name: float(np.mean(values))
+            for name, values in zip(method_names, method_values)
+        }
+        grouped_preds, grouped_probs = self._aggregate_context_predictions(
+            group_ids,
+            [char_preds],
+            [char_probs],
+            binary=(self.config.num_classification_heads <= 2),
+        )
+        char_labels = (
+            convert_spans_to_labels(labels, grouped_probs)
+            if labels is not None
+            else None
+        )
+        return grouped_probs, grouped_preds, char_labels
+
     def _process_token_features(
         self,
         features: List[torch.Tensor],
@@ -334,18 +483,13 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
             token_scores = self._aggregate_uncertainties(sample_features.numpy())
             token_preds = (token_scores > self.threshold).astype(int)
 
-            # Align to reference answer token count when provided
+            # Alignment is a correctness contract, not a formatting convenience.
             if ref_token_counts is not None:
                 n = ref_token_counts[sample_idx]
-                if len(token_scores) >= n:
-                    token_scores = token_scores[:n]
-                    token_preds = token_preds[:n]
-                else:
-                    # Pad with zeros if generated sequence is shorter
-                    pad = n - len(token_scores)
-                    token_scores = np.concatenate([token_scores, np.zeros(pad)])
-                    token_preds = np.concatenate(
-                        [token_preds, np.zeros(pad, dtype=int)]
+                if len(token_scores) != n:
+                    raise ValueError(
+                        'Token uncertainty score/token mismatch: '
+                        f'{len(token_scores)} scores for {n} generated tokens.'
                     )
 
             all_token_probs.extend(token_scores.tolist())

@@ -44,15 +44,20 @@ class HFConfig(ModelAdapterBaseConfig):
     model_type: ModelType = field(default=ModelType.CAUSAL)
     model_dtype: Optional[str] = 'bf16'
     tokenizer_path: Optional[str] = None
+    revision: Optional[str] = None
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
     num_labels: int = 2
     truncation: bool = False
     padding: Union[bool, str] = 'longest'
     padding_side: str = 'right'
-    use_chat_template: bool = True 
+    use_chat_template: bool = True
     # Multi-GPU support via Accelerate
-    device_map: Optional[Union[str, Dict[str, Any]]] = None  # 'auto', 'balanced', 'balanced_low_0', or custom dict
-    max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None  # e.g., {0: "20GiB", 1: "20GiB"}
+    device_map: Optional[Union[str, Dict[str, Any]]] = (
+        None  # 'auto', 'balanced', 'balanced_low_0', or custom dict
+    )
+    max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = (
+        None  # e.g., {0: "20GiB", 1: "20GiB"}
+    )
     offload_folder: Optional[str] = None  # For CPU offloading
     low_cpu_mem_usage: bool = True  # Recommended for large models
     attn_implementation: str = 'eager'  # 'eager', 'sdpa', 'flash_attention_2'
@@ -83,6 +88,7 @@ class ModelManagerConfig:
 @dataclass
 class OpenAIConfig(ModelAdapterBaseConfig):
     """Configuration for OpenAI model adapter."""
+
     api_key: Optional[str] = None
     model_path: str = 'gpt-3.5-turbo'
     base_url: Optional[str] = 'https://openrouter.ai/api/v1'

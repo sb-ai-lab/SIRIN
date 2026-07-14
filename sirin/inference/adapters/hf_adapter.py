@@ -1,6 +1,9 @@
 import gc
+import hashlib
+import json
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from threading import Thread
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 from huggingface_hub import login
@@ -13,6 +16,7 @@ from transformers import (
     AutoTokenizer,
     StoppingCriteria,
     StoppingCriteriaList,
+    TextIteratorStreamer,
 )
 
 from sirin.models.detection import ModelStates
@@ -27,6 +31,85 @@ from sirin.definitions import (
 from sirin.definitions import TorchDtype
 from sirin.utils.config_manager import validate_hydra_config
 from sirin.inference.model_manager import manage_active_model
+
+
+def _token_uncertainty_trace(
+    tokenizer: Any,
+    generated_ids: torch.Tensor,
+    scores: Any,
+    *,
+    input_sha256: str,
+    temperature: float,
+    max_tokens: int,
+) -> dict[str, Any]:
+    """Keep the two token signals used by the UI, aligned to the exact decode."""
+    token_ids = generated_ids.detach().cpu().tolist()
+    if len(scores) < len(token_ids):
+        raise ValueError(
+            'Generation returned fewer score tensors than generated token IDs; '
+            'cannot align token uncertainty.'
+        )
+
+    def decode(ids: list[int]) -> str:
+        return tokenizer.decode(
+            ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+
+    text = decode(token_ids)
+    kept_ids: list[int] = []
+    pieces: list[str] = []
+    offsets: list[list[int]] = []
+    maximum_token_probability: list[float] = []
+    token_entropy: list[float] = []
+    previous = ''
+
+    for index, token_id in enumerate(token_ids):
+        current = decode(token_ids[: index + 1])
+        if not current.startswith(previous):
+            raise ValueError(
+                'Tokenizer prefix decoding changed previously emitted text; '
+                'cannot produce exact token offsets.'
+            )
+        if current == previous:  # EOS and other stripped special tokens.
+            continue
+
+        step_scores = scores[index][0].float()
+        log_probs = torch.log_softmax(step_scores, dim=-1)
+        probs = log_probs.exp()
+        kept_ids.append(int(token_id))
+        pieces.append(current[len(previous) :])
+        offsets.append([len(previous), len(current)])
+        maximum_token_probability.append(float(-log_probs[token_id].item()))
+        token_entropy.append(float(-(probs * log_probs).sum().item()))
+        previous = current
+
+    if previous != text:
+        raise ValueError(
+            'Generated token offsets do not cover the exact decoded answer.'
+        )
+
+    trace: dict[str, Any] = {
+        'text': text,
+        'token_ids': kept_ids,
+        'pieces': pieces,
+        'offsets': offsets,
+        'MaximumTokenProbability': maximum_token_probability,
+        'TokenEntropy': token_entropy,
+        'methods': ['MaximumTokenProbability', 'TokenEntropy'],
+        'entropy_scope': 'full-vocabulary',
+        'aggregation': 'mean',
+        'input_sha256': input_sha256,
+        'temperature': float(temperature),
+        'max_tokens': int(max_tokens),
+    }
+    trace['trace_sha256'] = hashlib.sha256(
+        json.dumps(
+            trace, ensure_ascii=False, sort_keys=True, separators=(',', ':')
+        ).encode()
+    ).hexdigest()
+    return trace
 
 
 class HfModelAdapter(ModelAdapterBase):
@@ -56,7 +139,11 @@ class HfModelAdapter(ModelAdapterBase):
             except (StopIteration, AttributeError):
                 pass
 
-        if hasattr(self, 'config') and hasattr(self.config, 'device_map') and self.config.device_map is not None:
+        if (
+            hasattr(self, 'config')
+            and hasattr(self.config, 'device_map')
+            and self.config.device_map is not None
+        ):
             dm = self.config.device_map
             if isinstance(dm, str):
                 if dm.startswith('cuda:') or dm == 'cpu':
@@ -91,7 +178,9 @@ class HfModelAdapter(ModelAdapterBase):
 
         # Only move to device if device_map is not used
         # When device_map is set, the model is already distributed across devices
-        use_device_map = hasattr(self.config, 'device_map') and self.config.device_map is not None
+        use_device_map = (
+            hasattr(self.config, 'device_map') and self.config.device_map is not None
+        )
         if self.device and not use_device_map:
             self.model = self.model.to(self.device)
         elif use_device_map:
@@ -106,11 +195,9 @@ class HfModelAdapter(ModelAdapterBase):
         self._model_name = self.model.config.name_or_path
 
     def _authenticate(self):
-        """Authenticate with HuggingFace Hub if token is available."""
+        """Use the process token without persisting it to the user account."""
         hf_token = os.environ.get(HF_TOKEN_ENV)
-        if hf_token:
-            login(token=hf_token)
-        else:
+        if not hf_token:
             lg.warning(
                 'No Hugging Face token found. Proceeding without login. '
                 'This may limit access to some models.'
@@ -126,16 +213,28 @@ class HfModelAdapter(ModelAdapterBase):
 
         if hasattr(self.config, 'model_kwargs'):
             model_kwargs.update(self.config.model_kwargs)
+        if getattr(self.config, 'revision', None):
+            model_kwargs.setdefault('revision', self.config.revision)
 
         # Multi-GPU support via Accelerate device_map
         if hasattr(self.config, 'device_map') and self.config.device_map is not None:
             model_kwargs['device_map'] = self.config.device_map
-            model_kwargs['low_cpu_mem_usage'] = getattr(self.config, 'low_cpu_mem_usage', True)
-            if hasattr(self.config, 'max_memory') and self.config.max_memory is not None:
+            model_kwargs['low_cpu_mem_usage'] = getattr(
+                self.config, 'low_cpu_mem_usage', True
+            )
+            if (
+                hasattr(self.config, 'max_memory')
+                and self.config.max_memory is not None
+            ):
                 model_kwargs['max_memory'] = self.config.max_memory
-            if hasattr(self.config, 'offload_folder') and self.config.offload_folder is not None:
+            if (
+                hasattr(self.config, 'offload_folder')
+                and self.config.offload_folder is not None
+            ):
                 model_kwargs['offload_folder'] = self.config.offload_folder
-            lg.info(f"Using device_map={self.config.device_map} for multi-GPU model loading")
+            lg.info(
+                f"Using device_map={self.config.device_map} for multi-GPU model loading"
+            )
 
         if self.config.model_type == ModelType.CAUSAL:
             model = AutoModelForCausalLM.from_pretrained(
@@ -170,16 +269,23 @@ class HfModelAdapter(ModelAdapterBase):
 
         tokenizer = AutoTokenizer.from_pretrained(
             getattr(self.config, 'tokenizer_path', None) or self.config.model_path,
+            revision=getattr(self.config, 'revision', None),
         )
-        
+
         if self.config.truncation:
-            lg.warning("Due to unexpected behavior when truncating use `truncation=False`")
+            lg.warning(
+                "Due to unexpected behavior when truncating use `truncation=False`"
+            )
 
         if self.config.max_length is not None:
-            tokenizer.max_length = min(self.config.max_length, tokenizer.model_max_length)
+            tokenizer.max_length = min(
+                self.config.max_length, tokenizer.model_max_length
+            )
 
         if self.config.padding and self.config.padding_side != 'right':
-            lg.warning("Due to unexpected behavior when padding, use `padding_side='right'` instead")
+            lg.warning(
+                "Due to unexpected behavior when padding, use `padding_side='right'` instead"
+            )
             tokenizer.padding = self.config.padding
 
         tokenizer.padding_side = self.config.padding_side or 'right'
@@ -231,12 +337,16 @@ class HfModelAdapter(ModelAdapterBase):
             self.load()
 
         tokenized_inputs = self.tokenizer(
-            self._preprocess_input(inputs),
+            self._preprocess_input(
+                inputs,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            ),
             padding=padding or self.config.padding,
             truncation=truncation or self.config.truncation,
             max_length=max_length or self.tokenizer.max_length,
             return_tensors='pt',
-            add_special_tokens=False, # not self.config.use_chat_template,
+            add_special_tokens=False,  # not self.config.use_chat_template,
             return_token_type_ids=False,
         )
         # Use primary device for inputs (first device in device_map if using multi-GPU)
@@ -272,50 +382,151 @@ class HfModelAdapter(ModelAdapterBase):
                 generated_sequences = outputs.sequences
                 scores = outputs.scores
             else:
-                generated_sequences = self.model.generate(**tokenized_inputs, **generation_kwargs)
+                generated_sequences = self.model.generate(
+                    **tokenized_inputs, **generation_kwargs
+                )
                 scores = None
 
         batch_size = len(inputs)
         responses = []
-        
+
         input_lengths = tokenized_inputs['attention_mask'].sum(dim=1)
-        
+
         for i in range(batch_size * num_return_sequences):
-            generated_ids = generated_sequences[i, input_lengths[i // num_return_sequences]:]
+            generated_ids = generated_sequences[
+                i, input_lengths[i // num_return_sequences] :
+            ]
             response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
             responses.append(response)
 
         if return_logprobs and scores is not None:
             logprobs_for_responses = []
-            
+
             for input_idx in range(batch_size):
                 input_logprobs = []
                 for seq_idx in range(num_return_sequences):
                     seq_logprobs = []
                     input_logprobs.append(seq_logprobs)
                 logprobs_for_responses.append(input_logprobs)
-            
+
             for step, step_scores in enumerate(scores):
                 probs = torch.softmax(step_scores, dim=-1)
-                top_probs, top_indices = torch.topk(probs, min(top_logprobs, probs.size(-1)), dim=-1)
-                
+                top_probs, top_indices = torch.topk(
+                    probs, min(top_logprobs, probs.size(-1)), dim=-1
+                )
+
                 top_logprobs_tensor = torch.log(top_probs + 1e-8)
 
                 for batch_idx in range(batch_size * num_return_sequences):
                     input_idx = batch_idx // num_return_sequences
                     seq_idx = batch_idx % num_return_sequences
-                    
+
                     top_tokens_logprobs = []
                     for j in range(top_indices.size(1)):
                         token_id = top_indices[batch_idx][j].item()
                         logprob = top_logprobs_tensor[batch_idx][j].item()
                         top_tokens_logprobs.append(logprob)
-                    
-                    logprobs_for_responses[input_idx][seq_idx].append(top_tokens_logprobs)
-            
+
+                    logprobs_for_responses[input_idx][seq_idx].append(
+                        top_tokens_logprobs
+                    )
+
             return responses, logprobs_for_responses
-        
+
         return responses
+
+    @manage_active_model
+    def stream(
+        self,
+        inputs: Union[List[str], List[List[Dict]]],
+        max_tokens: int = 100,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        top_k: int = -1,
+        stop_sequences: Optional[List[str]] = None,
+        capture_token_uncertainty: bool = False,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Stream one HuggingFace response as decoded text chunks."""
+        if len(inputs) != 1:
+            raise ValueError('HuggingFace streaming supports one input at a time.')
+
+        tokenized_inputs = self.tokenizer(
+            self._preprocess_input(
+                inputs,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            ),
+            padding=self.config.padding,
+            truncation=self.config.truncation,
+            max_length=self.tokenizer.max_length,
+            return_tensors='pt',
+            add_special_tokens=False,
+            return_token_type_ids=False,
+        ).to(self._get_primary_device())
+        max_time = float(kwargs.get('max_time', 60.0))
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=max_time + 10.0,
+        )
+        generation_kwargs = {
+            'max_new_tokens': max_tokens,
+            'temperature': temperature,
+            'do_sample': temperature > 0,
+            'pad_token_id': self.tokenizer.eos_token_id,
+            'streamer': streamer,
+            **kwargs,
+        }
+        if capture_token_uncertainty:
+            generation_kwargs.update(output_scores=True, return_dict_in_generate=True)
+            self.last_generation_trace = None
+        if top_p < 1.0:
+            generation_kwargs['top_p'] = top_p
+        if top_k > 0:
+            generation_kwargs['top_k'] = top_k
+        if stop_sequences:
+            generation_kwargs['stopping_criteria'] = self._get_stopping_criteria(
+                stop_sequences
+            )
+
+        errors: list[BaseException] = []
+
+        def generate() -> None:
+            try:
+                with torch.no_grad():
+                    output = self.model.generate(
+                        **tokenized_inputs, **generation_kwargs
+                    )
+                if capture_token_uncertainty:
+                    input_sha256 = hashlib.sha256(
+                        json.dumps(
+                            inputs,
+                            ensure_ascii=False,
+                            separators=(',', ':'),
+                        ).encode()
+                    ).hexdigest()
+                    self.last_generation_trace = _token_uncertainty_trace(
+                        self.tokenizer,
+                        output.sequences[0, tokenized_inputs['input_ids'].shape[1] :],
+                        output.scores,
+                        input_sha256=input_sha256,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+            except BaseException as error:  # propagate worker failures to the UI thread
+                errors.append(error)
+                streamer.on_finalized_text('', stream_end=True)
+
+        worker = Thread(target=generate, daemon=True)
+        worker.start()
+        try:
+            yield from streamer
+        finally:
+            worker.join()
+        if errors:
+            raise errors[0]
 
     @manage_active_model
     def probe_num_attention_layers(self) -> int:
@@ -330,7 +541,9 @@ class HfModelAdapter(ModelAdapterBase):
             self.load()
 
         dummy_input = self.tokenizer(
-            'probe', return_tensors='pt', add_special_tokens=True,
+            'probe',
+            return_tensors='pt',
+            add_special_tokens=True,
         ).to(self._get_primary_device())
 
         with torch.no_grad():
@@ -356,7 +569,7 @@ class HfModelAdapter(ModelAdapterBase):
         """Generate hidden states and attention weights in batch."""
         if not self._is_loaded:
             self.load()
-        
+
         # Tokenize all inputs at once with consistent padding
         # This ensures all batches will have the same shape for proper merging
         tokenized_inputs = self.tokenizer(
@@ -365,17 +578,17 @@ class HfModelAdapter(ModelAdapterBase):
             truncation=truncation or self.config.truncation,
             max_length=max_length or self.tokenizer.max_length,
             return_tensors='pt',
-            add_special_tokens=False, # not self.config.use_chat_template,
+            add_special_tokens=False,  # not self.config.use_chat_template,
         )
-        
+
         input_device = self._get_primary_device()
         tokenized_inputs = tokenized_inputs.to(input_device)
-        
+
         # Store full tokenized_inputs for access in batched method
         self._full_tokenized_inputs = tokenized_inputs
         self._full_original_inputs = inputs
         self._batch_start_idx = 0
-        
+
         return self._generate_hiddens_from_tokens(
             inputs=inputs,
             return_attention=return_attention,
@@ -386,7 +599,7 @@ class HfModelAdapter(ModelAdapterBase):
             token_locator=token_locator,
             **kwargs,
         )
-    
+
     @batch_processor(batch_size=None, flatten_results=True, log_progress=True)
     def _generate_hiddens_from_tokens(
         self,
@@ -400,22 +613,22 @@ class HfModelAdapter(ModelAdapterBase):
         **kwargs: Any,
     ) -> ModelStates:
         """Generate hidden states from pre-tokenized inputs.
-        
+
         This method is decorated with batch_processor which handles automatic batching
         and merging. It uses self._full_tokenized_inputs to slice the appropriate batch.
-        
+
         Args:
             inputs: Original text inputs for this batch (batched by batch_processor)
         """
         # Get the batch slice from full tokenized inputs
         start_idx = self._batch_start_idx
         end_idx = start_idx + len(inputs)
-        
+
         tokenized_inputs = {
             key: value[start_idx:end_idx]
             for key, value in self._full_tokenized_inputs.items()
         }
-        
+
         # Update start index for next batch
         self._batch_start_idx = end_idx
 
@@ -424,48 +637,71 @@ class HfModelAdapter(ModelAdapterBase):
         handles = []
         input_hiddens = []
         attention_output = []
-        use_device_map = hasattr(self.model, 'hf_device_map') and self.model.hf_device_map is not None
-        
+        use_device_map = (
+            hasattr(self.model, 'hf_device_map')
+            and self.model.hf_device_map is not None
+        )
+
         if return_sublayers:
             if use_device_map:
                 lg.warning(
                     'Using forward hooks with device_map. Hooks will be registered on the device '
                     'where each layer is located. Ensure outputs are moved to CPU if needed.'
                 )
-            
+
             if layers:
                 for layer_ in layers:
                     try:
                         input_handle = self.model.model.layers[
                             layer_
                         ].register_forward_pre_hook(
-                            lambda m, i: input_hiddens.append(i[0].detach().cpu() if use_device_map else i[0].detach())
+                            lambda m, i: input_hiddens.append(
+                                i[0].detach().cpu() if use_device_map else i[0].detach()
+                            )
                         )
                         output_handle = self.model.model.layers[
                             layer_
                         ].self_attn.register_forward_hook(
-                            lambda m, i, o: attention_output.append(o[0].detach().cpu() if use_device_map else o[0].detach())
+                            lambda m, i, o: attention_output.append(
+                                o[0].detach().cpu() if use_device_map else o[0].detach()
+                            )
                         )
                         handles.extend([input_handle, output_handle])
                     except Exception as e:
-                        lg.warning(f"Failed to register hooks for layer {layer_}: {e}. Sublayers may not be extracted correctly.")
+                        lg.warning(
+                            f"Failed to register hooks for layer {layer_}: {e}. Sublayers may not be extracted correctly."
+                        )
             else:
                 try:
-                    input_handle = self.model.model.layers[-1].register_forward_pre_hook(
-                        lambda m, i: input_hiddens.append(i[0].detach().cpu() if use_device_map else i[0].detach())
+                    input_handle = self.model.model.layers[
+                        -1
+                    ].register_forward_pre_hook(
+                        lambda m, i: input_hiddens.append(
+                            i[0].detach().cpu() if use_device_map else i[0].detach()
+                        )
                     )
-                    output_handle = self.model.model.layers[-1].self_attn.register_forward_hook(
-                        lambda m, i, o: attention_output.append(o[0].detach().cpu() if use_device_map else o[0].detach())
+                    output_handle = self.model.model.layers[
+                        -1
+                    ].self_attn.register_forward_hook(
+                        lambda m, i, o: attention_output.append(
+                            o[0].detach().cpu() if use_device_map else o[0].detach()
+                        )
                     )
                     handles.extend([input_handle, output_handle])
                 except Exception as e:
-                    lg.warning(f"Failed to register hooks for last layer: {e}. Sublayers may not be extracted correctly.")
+                    lg.warning(
+                        f"Failed to register hooks for last layer: {e}. Sublayers may not be extracted correctly."
+                    )
 
         attn_handles = []
         attn_capture = []
         _decoder_layers = getattr(getattr(self.model, 'model', None), 'layers', None)
-        use_attn_hooks = return_attention and _decoder_layers is not None and any(
-            getattr(_l, 'self_attn', None) is not None for _l in _decoder_layers
+        use_attn_hooks = (
+            return_attention
+            and _decoder_layers is not None
+            and any(
+                getattr(_l, 'self_attn', None) is not None for _l in _decoder_layers
+            )
         )
         if use_attn_hooks:
             impl = getattr(self.model.config, '_attn_implementation', None)
@@ -478,15 +714,22 @@ class HfModelAdapter(ModelAdapterBase):
 
             def _mk_attn_hook(store):
                 def _hook(module, inputs_, output):
-                    w = output[1] if isinstance(output, tuple) and len(output) > 1 else None
+                    w = (
+                        output[1]
+                        if isinstance(output, tuple) and len(output) > 1
+                        else None
+                    )
                     if w is not None and hasattr(w, 'dim') and w.dim() == 4:
                         store.append(w.detach().cpu() if use_device_map else w.detach())
+
                 return _hook
 
             for _layer in _decoder_layers:
                 _sa = getattr(_layer, 'self_attn', None)
                 if _sa is not None:
-                    attn_handles.append(_sa.register_forward_hook(_mk_attn_hook(attn_capture)))
+                    attn_handles.append(
+                        _sa.register_forward_hook(_mk_attn_hook(attn_capture))
+                    )
 
         with torch.no_grad():
             try:
@@ -507,11 +750,28 @@ class HfModelAdapter(ModelAdapterBase):
             if return_hiddens:
                 hidden_states = outputs.hidden_states
                 if layers:
+                    n_hidden = len(hidden_states or ())
+                    invalid = [i for i in layers if not -n_hidden <= i < n_hidden]
+                    if invalid:
+                        raise ValueError(
+                            f'Requested hidden-state layers {invalid} are out of range for '
+                            f'{self.config.model_path}; the model returned {n_hidden} tensors '
+                            f'(valid range: [-{n_hidden}, {n_hidden - 1}]).'
+                        )
                     # Move each hidden state to CPU (handles multi-device models)
-                    selected_hidden = [hidden_states[i].cpu() if hasattr(hidden_states[i], 'device') else hidden_states[i] for i in layers]
+                    selected_hidden = [
+                        hidden_states[i].cpu()
+                        if hasattr(hidden_states[i], 'device')
+                        else hidden_states[i]
+                        for i in layers
+                    ]
                 else:
                     last_hidden = hidden_states[-1]
-                    selected_hidden = [last_hidden.cpu() if hasattr(last_hidden, 'device') else last_hidden]
+                    selected_hidden = [
+                        last_hidden.cpu()
+                        if hasattr(last_hidden, 'device')
+                        else last_hidden
+                    ]
 
                 for i in range(len(inputs)):
                     seq_mask = tokenized_inputs['attention_mask'][i].bool().cpu()
@@ -530,7 +790,9 @@ class HfModelAdapter(ModelAdapterBase):
                         "The model did not expose attention this way; refusing to proceed with "
                         "empty attention rather than fail silently."
                     )
-                attentions = tuple(attn_capture) if use_attn_hooks else outputs.attentions
+                attentions = (
+                    tuple(attn_capture) if use_attn_hooks else outputs.attentions
+                )
                 if layers:
                     # Move each attention to CPU (handles multi-device models)
                     n_attn = len(attentions)
@@ -552,10 +814,17 @@ class HfModelAdapter(ModelAdapterBase):
                             f"In hybrid-attention models, outputs.attentions may include only the subset of "
                             f"blocks that use standard full attention."
                         )
-                    selected_attentions = [attentions[i].cpu() if hasattr(attentions[i], 'device') else attentions[i] for i in attn_layers]
+                    selected_attentions = [
+                        attentions[i].cpu()
+                        if hasattr(attentions[i], 'device')
+                        else attentions[i]
+                        for i in attn_layers
+                    ]
                 else:
                     last_attn = attentions[-1]
-                    selected_attentions = [last_attn.cpu() if hasattr(last_attn, 'device') else last_attn]
+                    selected_attentions = [
+                        last_attn.cpu() if hasattr(last_attn, 'device') else last_attn
+                    ]
 
                 for i in range(len(inputs)):
                     seq_mask = tokenized_inputs['attention_mask'][i].bool().cpu()
@@ -572,7 +841,7 @@ class HfModelAdapter(ModelAdapterBase):
                     self._preprocess_input(inputs),
                     padding=False,
                     truncation=False,
-                    add_special_tokens=False, # not self.config.use_chat_template,
+                    add_special_tokens=False,  # not self.config.use_chat_template,
                 )
                 if isinstance(token_locator, List):
                     for locator in token_locator:
@@ -609,7 +878,7 @@ class HfModelAdapter(ModelAdapterBase):
                 locations=locations,
                 logits=logits,
                 sublayers=all_sublayers,
-                masks=tokenized_inputs['attention_mask'].bool().cpu()
+                masks=tokenized_inputs['attention_mask'].bool().cpu(),
             )
 
             return result
@@ -627,9 +896,11 @@ class HfModelAdapter(ModelAdapterBase):
             if isinstance(sample, list) and len(sample) > 0:
                 for j, msg in enumerate(sample):
                     if isinstance(msg, dict) and msg.get('role') == 'assistant':
-                        answer = self._preprocess_input([sample])[0][len(self._preprocess_input([sample[:j]])[0]):]
+                        answer = self._preprocess_input([sample])[0][
+                            len(self._preprocess_input([sample[:j]])[0]) :
+                        ]
                         break
-            
+
             location = token_locator.locate(
                 tokens=tokenized_inputs['input_ids'][i],
                 tokenizer=self.tokenizer,
@@ -646,7 +917,13 @@ class HfModelAdapter(ModelAdapterBase):
         gc.collect()
         lg.info("Unloaded HuggingFace model and freed memory")
 
-    def _preprocess_input(self, inputs: Union[List[str], List[List[Dict]]]) -> str:
+    def _preprocess_input(
+        self,
+        inputs: Union[List[str], List[List[Dict]]],
+        *,
+        add_generation_prompt: bool = False,
+        enable_thinking: Optional[bool] = None,
+    ) -> List[str]:
         formatted_prompts = []
 
         for input_item in inputs:
@@ -663,12 +940,23 @@ class HfModelAdapter(ModelAdapterBase):
                 )
             elif isinstance(input_item, list):
                 if self.config.use_chat_template and self.tokenizer.chat_template:
+                    should_generate = (
+                        add_generation_prompt
+                        and input_item
+                        and input_item[-1].get('role') != 'assistant'
+                    )
+                    template_kwargs = (
+                        {'enable_thinking': enable_thinking}
+                        if enable_thinking is not None
+                        else {}
+                    )
                     formatted_string = self.tokenizer.apply_chat_template(
                         input_item,
                         tokenize=False,
-                        add_generation_prompt=False,
+                        add_generation_prompt=should_generate,
                         padding=False,
                         truncation=False,
+                        **template_kwargs,
                     )
                 else:
                     formatted_tokens = self.tokenizer(

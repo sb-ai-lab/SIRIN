@@ -47,7 +47,8 @@ def _split_prompt_and_answer(sample: list[dict]) -> tuple[str, str]:
 
 def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:
     """Build lm-polygraph model wrapper for uncertainty estimation."""
-    if isinstance(extractor, OpenAIModelAdapter):
+    adapter_name = type(extractor).__name__
+    if isinstance(extractor, OpenAIModelAdapter) or adapter_name == 'OpenAIModelAdapter':
         model_wrapper = BlackboxModel.from_openai(
             openai_api_key=getattr(extractor.config, 'openai_api_key', None)
             or getattr(extractor.config, 'api_key', None),
@@ -57,14 +58,16 @@ def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:
             **getattr(config, 'model_kwargs', {}),
         )
         return model_wrapper, 'Blackbox'
-    if isinstance(extractor, HfModelAdapter):
+    if isinstance(extractor, HfModelAdapter) or callable(
+        getattr(extractor, 'generate_hiddens', None)
+    ):
         model_wrapper = WhiteboxModel(
             extractor.model,
             extractor.tokenizer,
             **getattr(config, 'model_kwargs', {}),
         )
         return model_wrapper, 'Whitebox'
-    if isinstance(extractor, VllmModelAdapter):
+    if isinstance(extractor, VllmModelAdapter) or adapter_name == 'VllmModelAdapter':
         model_wrapper = WhiteboxModelvLLM(
             extractor.model,
             **getattr(config, 'model_kwargs', {}),
