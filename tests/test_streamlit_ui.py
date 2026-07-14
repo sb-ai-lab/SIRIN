@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from sirin.ui import streamlit_app as ui
@@ -8,6 +10,399 @@ def test_build_sample_uses_two_message_shape():
         {'role': 'user', 'content': 'Question?'},
         {'role': 'assistant', 'content': 'Answer.'},
     ]
+
+
+def test_generate_answer_preserves_recorded_message_sequence():
+    class Adapter:
+        def sample(self, inputs, **kwargs):
+            self.inputs = inputs
+            self.kwargs = kwargs
+            return ['answer']
+
+    adapter = Adapter()
+    messages = [
+        {'role': 'system', 'content': 'System.'},
+        {'role': 'user', 'content': 'Question?'},
+    ]
+
+    assert (
+        ui.generate_answer(adapter, 'OpenAI', 'ignored', 192, 0.1, messages) == 'answer'
+    )
+    assert adapter.inputs == [messages]
+    assert adapter.kwargs == {'max_tokens': 192, 'temperature': 0.1}
+
+
+def test_generate_answer_renders_recorded_messages_for_vllm():
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            self.call = (messages, kwargs)
+            return 'rendered chat prompt'
+
+    class Model:
+        def __init__(self, tokenizer):
+            self.tokenizer = tokenizer
+
+        def get_tokenizer(self):
+            return self.tokenizer
+
+    class Adapter:
+        is_loaded = True
+        tokenizer = None
+
+        def __init__(self):
+            self.model = Model(Tokenizer())
+
+        def sample(self, inputs, **kwargs):
+            self.inputs = inputs
+            return ['answer']
+
+    adapter = Adapter()
+    messages = [
+        {'role': 'system', 'content': 'System.'},
+        {'role': 'user', 'content': 'Question?'},
+    ]
+
+    assert (
+        ui.generate_answer(adapter, 'vLLM', 'ignored', 192, 0.1, messages) == 'answer'
+    )
+    assert adapter.inputs == ['rendered chat prompt']
+    assert adapter.model.tokenizer.call == (
+        messages,
+        {'tokenize': False, 'add_generation_prompt': True},
+    )
+
+
+def test_generate_answer_preserves_hf_max_tokens_and_sets_native_timeout():
+    class Adapter:
+        def sample(self, inputs, **kwargs):
+            self.inputs = inputs
+            self.kwargs = kwargs
+            return ['answer']
+
+    adapter = Adapter()
+
+    assert ui.generate_answer(adapter, 'HF', 'Prompt.', 8192, 0.7) == 'answer'
+    assert adapter.kwargs == {
+        'max_tokens': 8192,
+        'temperature': 0.7,
+        'max_time': 60.0,
+    }
+
+
+def test_hf_generation_adds_nonthinking_assistant_prompt():
+    from types import SimpleNamespace
+
+    from sirin.inference.adapters.hf_adapter import HfModelAdapter
+
+    class Tokenizer:
+        chat_template = 'template'
+
+        def apply_chat_template(self, messages, **kwargs):
+            self.call = (messages, kwargs)
+            return 'rendered prompt'
+
+    adapter = object.__new__(HfModelAdapter)
+    adapter.config = SimpleNamespace(use_chat_template=True)
+    adapter.tokenizer = Tokenizer()
+    messages = [[{'role': 'user', 'content': 'Question?'}]]
+
+    assert adapter._preprocess_input(
+        messages,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    ) == ['rendered prompt']
+    assert adapter.tokenizer.call == (
+        messages[0],
+        {
+            'tokenize': False,
+            'add_generation_prompt': True,
+            'padding': False,
+            'truncation': False,
+            'enable_thinking': False,
+        },
+    )
+
+
+def test_hf_adapter_streams_native_generation_chunks(monkeypatch):
+    from queue import Queue
+    from types import SimpleNamespace
+
+    import torch
+
+    from sirin.inference.adapters import hf_adapter
+    from sirin.inference.model_manager import ModelManager
+
+    class Batch(dict):
+        def to(self, device):
+            return self
+
+    class Tokenizer:
+        max_length = 1024
+        eos_token_id = 0
+
+        def __call__(self, inputs, **kwargs):
+            return Batch(
+                input_ids=torch.tensor([[1]]),
+                attention_mask=torch.tensor([[1]]),
+            )
+
+    class Streamer:
+        stop = object()
+
+        def __init__(self, tokenizer, **kwargs):
+            self.queue = Queue()
+
+        def on_finalized_text(self, text, stream_end=False):
+            if text:
+                self.queue.put(text)
+            if stream_end:
+                self.queue.put(self.stop)
+
+        def __iter__(self):
+            while (item := self.queue.get()) is not self.stop:
+                yield item
+
+    class Model:
+        def generate(self, **kwargs):
+            self.kwargs = kwargs
+            kwargs['streamer'].on_finalized_text('Hello', stream_end=False)
+            kwargs['streamer'].on_finalized_text(' world', stream_end=True)
+
+    adapter = object.__new__(hf_adapter.HfModelAdapter)
+    adapter.config = SimpleNamespace(padding=False, truncation=False)
+    adapter.tokenizer = Tokenizer()
+    adapter.model = Model()
+    adapter._preprocess_input = lambda inputs, **kwargs: ['prompt']
+    adapter._get_primary_device = lambda: 'cpu'
+    monkeypatch.setattr(hf_adapter, 'TextIteratorStreamer', Streamer)
+    monkeypatch.setattr(
+        ModelManager,
+        'load_model',
+        classmethod(lambda cls, selected: selected),
+    )
+
+    chunks = list(
+        adapter.stream(
+            [[{'role': 'user', 'content': 'Question?'}]],
+            max_tokens=32,
+            temperature=0.0,
+            max_time=1.0,
+        )
+    )
+
+    assert chunks == ['Hello', ' world']
+    assert adapter.model.kwargs['max_new_tokens'] == 32
+    assert adapter.model.kwargs['max_time'] == 1.0
+
+
+def test_openai_adapter_streams_and_retains_exact_logprob_trace(monkeypatch):
+    from types import SimpleNamespace
+
+    from sirin.inference.adapters import openai_adapter
+    from sirin.inference.model_manager import ModelManager
+
+    def token(piece, logprob):
+        return SimpleNamespace(
+            token=piece,
+            bytes=list(piece.encode()),
+            logprob=logprob,
+            top_logprobs=[
+                SimpleNamespace(token=piece, logprob=logprob),
+                SimpleNamespace(token='x', logprob=-2.0),
+            ],
+        )
+
+    events = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content='1'),
+                    logprobs=SimpleNamespace(content=[token('1', -0.2)]),
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=' sport'),
+                    logprobs=SimpleNamespace(
+                        content=[token(' sp', -0.4), token('ort', -0.1)]
+                    ),
+                )
+            ]
+        ),
+    ]
+    calls = []
+
+    class Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return events
+
+    adapter = object.__new__(openai_adapter.OpenAIModelAdapter)
+    adapter.config = SimpleNamespace(
+        model_path='Qwen/Qwen3.5-35B-A3B',
+        base_url='http://127.0.0.1:30110/v1',
+    )
+    adapter._client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    monkeypatch.setattr(
+        ModelManager,
+        'load_model',
+        classmethod(lambda cls, selected: selected),
+    )
+
+    chunks = list(
+        adapter.stream(
+            [[{'role': 'user', 'content': 'Question?'}]],
+            max_tokens=16,
+            temperature=0.0,
+            capture_token_uncertainty=True,
+        )
+    )
+
+    assert chunks == ['1', ' sport']
+    assert calls[0]['stream'] is True
+    assert calls[0]['logprobs'] is True
+    assert calls[0]['extra_body']['chat_template_kwargs']['enable_thinking'] is False
+    assert adapter.last_generation_trace['text'] == '1 sport'
+    assert adapter.last_generation_trace['pieces'] == ['1', ' sp', 'ort']
+    assert adapter.last_generation_trace['offsets'] == [[0, 1], [1, 4], [4, 7]]
+    assert adapter.last_generation_trace['MaximumTokenProbability'] == pytest.approx(
+        [0.2, 0.4, 0.1]
+    )
+    assert adapter.last_generation_trace['entropy_scope'] == 'top-20'
+
+
+def test_preset_detector_reuses_canonical_generator_cache_key(monkeypatch):
+    from sirin.ui import presets
+
+    class Preset:
+        family = 'probing'
+
+        @staticmethod
+        def build(**kwargs):
+            return kwargs['generator_adapter']
+
+    calls = []
+    adapter = object()
+    monkeypatch.setitem(presets.PRESETS, 'test', Preset())
+    monkeypatch.setattr(
+        ui,
+        'load_generator',
+        lambda *args: calls.append(args) or adapter,
+    )
+    result = ui.build_preset_detector(
+        'test', 'cuda', '', 'HF', 'model', '', '', 'OpenRouter', ''
+    )
+
+    assert result is adapter
+    assert calls == [('HF', 'model', 'cuda', '')]
+
+
+def test_preset_detector_does_not_cache_a_stale_extractor(monkeypatch):
+    from sirin.ui import presets
+
+    built = []
+
+    class Preset:
+        family = 'probing'
+
+        @staticmethod
+        def build(**kwargs):
+            detector = object()
+            built.append(detector)
+            return detector
+
+    monkeypatch.setitem(presets.PRESETS, 'fresh detector', Preset())
+    monkeypatch.setattr(ui, 'load_generator', lambda *args: object())
+    args = ('fresh detector', 'cuda', '', 'HF', 'model', '', '', 'OpenRouter', '')
+    first = ui.build_preset_detector(*args)
+    second = ui.build_preset_detector(*args)
+
+    assert first is not second
+    assert built == [first, second]
+
+
+def test_qwen35_sequence_uncertainty_does_not_mix_calibration_contracts(monkeypatch):
+    from sirin.ui import presets
+
+    class Preset:
+        family = 'uncertainty'
+
+        @staticmethod
+        def build(**kwargs):
+            return kwargs
+
+    monkeypatch.setitem(
+        presets.PRESETS,
+        'Uncertainty — Sequence (zero-shot)',
+        Preset(),
+    )
+    monkeypatch.setattr(ui, 'load_generator', lambda *args: object())
+    kwargs = ui.build_preset_detector(
+        'Uncertainty — Sequence (zero-shot)',
+        'cuda',
+        '',
+        'HF',
+        'Qwen/Qwen3.5-35B-A3B',
+        '',
+        '',
+        'OpenRouter',
+        '',
+    )
+
+    assert kwargs['uncertainty_threshold'] is None
+    assert kwargs['uncertainty_max_new_tokens'] is None
+    assert kwargs['uncertainty_threshold_source'] is None
+
+
+def test_qwen35_sequence_probe_records_threshold_source(monkeypatch):
+    from sirin.ui import presets
+
+    class Detector:
+        pass
+
+    class Preset:
+        family = 'probing'
+
+        @staticmethod
+        def build(**kwargs):
+            return Detector()
+
+    preset_name = ui.LONGMEMEVAL_PROFILE['ui']['default_preset']
+    monkeypatch.setitem(presets.PRESETS, preset_name, Preset())
+    monkeypatch.setattr(ui, 'load_generator', lambda *args: object())
+
+    detector = ui.build_preset_detector(
+        preset_name,
+        'cuda',
+        '',
+        'HF',
+        'Qwen/Qwen3.5-35B-A3B',
+        '',
+        '',
+        'OpenRouter',
+        '',
+    )
+
+    assert 'validation split' in detector._ui_threshold_source
+
+
+def test_longmemeval_profile_records_every_qwen35_checkpoint():
+    profile = ui.load_longmemeval_profile()
+
+    assert profile['model']['path'] == 'Qwen/Qwen3.5-35B-A3B'
+    assert profile['uncertainty']['token']['threshold'] is None
+    for task in ('hallucination_strict', 'answerability_strict'):
+        assert set(profile['checkpoints'][task]) == {
+            'linear',
+            'catboost',
+            'tabpfn',
+            'best',
+        }
+        assert all(
+            checkpoint['path'] for checkpoint in profile['checkpoints'][task].values()
+        )
 
 
 def test_score_heatmap_escapes_text_and_handles_short_scores():
@@ -60,16 +455,55 @@ def test_split_thinking_hides_json_reasoning_field():
     assert 'counted two movies' in thinking
 
 
+def test_split_thinking_extracts_answer_from_fenced_json():
+    visible, thinking = ui._split_thinking(
+        '```json\n{"reasoning": "The context names two movies.", "answer": "2"}\n```'
+    )
+
+    assert visible == '2'
+    assert thinking == 'The context names two movies.'
+
+
 def test_detector_setup_error_checks_checkpoint_roots(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
     monkeypatch.delenv('SIRIN_UI_CHECKPOINT_ROOTS', raising=False)
 
-    error = ui._detector_setup_error({
-        'use_hydra': False,
-        'checkpoint_dir': '/tmp/checkpoint',
-    })
+    error = ui._detector_setup_error(
+        {
+            'use_hydra': False,
+            'checkpoint_dir': '/tmp/checkpoint',
+        }
+    )
 
     assert 'SIRIN_UI_CHECKPOINT_ROOTS' in error
+
+
+def test_detector_setup_error_requires_sequence_probe_checkpoint():
+    error = ui._detector_setup_error(
+        {
+            'use_hydra': False,
+            'checkpoint_dir': '',
+            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
+        }
+    )
+
+    assert error == 'This preset needs a trained checkpoint directory.'
+
+
+def test_detector_setup_error_rejects_api_backend_for_sequence_probe():
+    error = ui._detector_setup_error(
+        {
+            'use_hydra': False,
+            'backend': 'Custom OpenAI-compatible',
+            'checkpoint_dir': '/tmp/checkpoint',
+            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
+        }
+    )
+
+    assert error == (
+        'Sequence probing requires the HF backend so SIRIN can extract hidden '
+        'states from the selected generator model.'
+    )
 
 
 def test_detector_setup_error_preflights_sequence_tabpfn_shape(monkeypatch, tmp_path):
@@ -81,11 +515,13 @@ def test_detector_setup_error_preflights_sequence_tabpfn_shape(monkeypatch, tmp_
         tmp_path / 'compressor_config.joblib',
     )
 
-    error = ui._detector_setup_error({
-        'use_hydra': False,
-        'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        'checkpoint_dir': str(tmp_path),
-    })
+    error = ui._detector_setup_error(
+        {
+            'use_hydra': False,
+            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
+            'checkpoint_dir': str(tmp_path),
+        }
+    )
 
     assert error.startswith('Checkpoint/processor mismatch before generation')
     assert '(1, 1, 2048)' in error
@@ -134,7 +570,9 @@ def test_custom_provider_requires_trusted_local(monkeypatch):
 
     monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
     monkeypatch.delenv('SIRIN_CUSTOM_OPENAI_API_KEY', raising=False)
-    custom = ui.resolve_api_provider('Custom OpenAI-compatible', 'http://localhost:11434/v1')
+    custom = ui.resolve_api_provider(
+        'Custom OpenAI-compatible', 'http://localhost:11434/v1'
+    )
     assert custom.api_key == 'EMPTY'
     assert custom.base_url == 'http://localhost:11434/v1'
 
@@ -142,27 +580,83 @@ def test_custom_provider_requires_trusted_local(monkeypatch):
 def test_hydra_detector_is_blocked_unless_trusted(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
     with pytest.raises(ValueError, match='SIRIN_UI_TRUSTED_LOCAL'):
-        ui._build_detector({
-            'use_hydra': True,
-            'config_dir': '/tmp',
-            'config_name': 'train',
-            'overrides_text': '',
-            'hydra_checkpoint': '',
-        })
+        ui._build_detector(
+            {
+                'use_hydra': True,
+                'config_dir': '/tmp',
+                'config_name': 'train',
+                'overrides_text': '',
+                'hydra_checkpoint': '',
+            }
+        )
+
+
+def test_hydra_detector_preserves_answerability_task(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import hydra
+
+    detector = SimpleNamespace()
+    config = SimpleNamespace(
+        model_adapter='adapter',
+        feature_processor='processor',
+        detector='detector',
+        task_type='answerability',
+    )
+    objects = {
+        'adapter': object(),
+        'processor': object(),
+        'detector': detector,
+    }
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.setattr(hydra, 'compose', lambda **kwargs: config)
+    monkeypatch.setattr(hydra, 'initialize_config_dir', lambda **kwargs: nullcontext())
+    monkeypatch.setattr(
+        hydra.utils, 'instantiate', lambda spec, **kwargs: objects[spec]
+    )
+    ui.load_detector.clear()
+
+    loaded = ui.load_detector(str(tmp_path), 'train', (), '')
+
+    assert loaded._ui_task == 'answerability'
+    ui.load_detector.clear()
 
 
 def test_external_confirmation_required_for_api_paths():
     assert ui.requires_external_confirmation({'backend': 'OpenAI', 'preset_name': 'x'})
-    assert ui.requires_external_confirmation({'backend': 'OpenRouter', 'preset_name': 'x'})
-    assert ui.requires_external_confirmation({'backend': 'Anthropic', 'preset_name': 'x'})
-    assert ui.requires_external_confirmation({
-        'backend': 'HF',
-        'preset_name': 'Judge — API Sequence (zero-shot)',
-    })
-    assert not ui.requires_external_confirmation({
-        'backend': 'HF',
-        'preset_name': 'Uncertainty — Sequence (zero-shot)',
-    })
+    assert ui.requires_external_confirmation(
+        {'backend': 'OpenRouter', 'preset_name': 'x'}
+    )
+    assert ui.requires_external_confirmation(
+        {'backend': 'Anthropic', 'preset_name': 'x'}
+    )
+    assert ui.requires_external_confirmation(
+        {
+            'backend': 'HF',
+            'preset_name': 'Judge — API Sequence (zero-shot)',
+        }
+    )
+    assert not ui.requires_external_confirmation(
+        {
+            'backend': 'HF',
+            'preset_name': 'Uncertainty — Sequence (zero-shot)',
+        }
+    )
+    assert not ui.requires_external_confirmation(
+        {
+            'backend': 'Custom OpenAI-compatible',
+            'custom_base_url': 'http://127.0.0.1:30110/v1',
+            'preset_name': 'Uncertainty — Token (zero-shot)',
+        }
+    )
+    assert ui.requires_external_confirmation(
+        {
+            'backend': 'Custom OpenAI-compatible',
+            'custom_base_url': 'https://remote.example/v1',
+            'preset_name': 'Uncertainty — Token (zero-shot)',
+        }
+    )
 
 
 class _Preset:
@@ -172,6 +666,7 @@ class _Preset:
         self.description = 'desc'
         self.requires_checkpoint = False
         self.is_judge = family == 'judge'
+        self.builtin_checkpoint = None
 
 
 class _SidebarHarness:
@@ -182,6 +677,8 @@ class _SidebarHarness:
         self.selectbox_calls = []
         self.text_input_calls = []
         self.button_calls = []
+        self.caption_calls = []
+        self.html_calls = []
         self.session_state = {}
         self.rerun_called = False
 
@@ -198,11 +695,23 @@ class _SidebarHarness:
     def header(self, body):
         pass
 
+    def html(self, body):
+        self.html_calls.append(body)
+
     def caption(self, body):
-        pass
+        self.caption_calls.append(body)
 
     def divider(self):
         pass
+
+    def expander(self, label, **kwargs):
+        return self
+
+    def checkbox(self, label, value=False, **kwargs):
+        return value
+
+    def text_area(self, label, value='', **kwargs):
+        return value
 
     def selectbox(self, label, options, **kwargs):
         self.selectbox_calls.append((label, list(options)))
@@ -227,108 +736,137 @@ class _SidebarHarness:
 
 
 def test_sidebar_uses_requested_defaults(monkeypatch):
+    from sirin.ui import presets
+
     monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
 
     cfg = ui._sidebar(_SidebarHarness())
 
+    assert cfg['preset_name'] == presets.PSILOQA_TOKEN_LINEAR_PRESET
+    assert cfg['model_path'] == presets.PSILOQA_MODEL_ID
+    assert ui._detector_setup_error(cfg) is None
+    assert cfg['max_tokens'] == 192
+
+
+def test_psiloqa_generator_uses_checkpoint_model_revision():
+    from sirin.ui import presets
+
+    cfg = ui._make_hf_config(presets.PSILOQA_MODEL_ID, 'cuda')
+
+    assert cfg.revision == presets.PSILOQA_MODEL_REVISION
+
+
+def test_native_streamlit_theme_matches_tokens_and_sets_fonts():
+    import json
+    import tomllib
+    from pathlib import Path
+
+    root = Path(ui.__file__).resolve().parents[2]
+    theme = tomllib.loads((root / '.streamlit' / 'config.toml').read_text())['theme']
+    light = json.loads((root / 'sirin' / 'ui' / 'tokens.json').read_text())['palette'][
+        'light'
+    ]
+    expected = {
+        'base': 'light',
+        'primaryColor': light['brand'],
+        'backgroundColor': light['canvas'],
+        'secondaryBackgroundColor': light['card'],
+        'textColor': light['ink'],
+        'linkColor': light['link'],
+    }
+    assert {key: theme[key] for key in expected} == expected
+    # Native widgets must resolve the same families as the host CSS and the component.
+    assert theme['font'] == 'Manrope'
+    assert theme['codeFont'] == 'IBM Plex Mono'
+
+
+def test_trusted_sidebar_uses_longmemeval_qwen35_profile(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+
+    cfg = ui._sidebar(_SidebarHarness())
+
+    expected = ui.LONGMEMEVAL_PROFILE['checkpoints']['hallucination_strict']['tabpfn'][
+        'path'
+    ]
     assert cfg['preset_name'] == 'Probing — Sequence TabPFN (checkpoint)'
-    assert cfg['model_path'] == 'Qwen/Qwen3.5-4B'
-    assert cfg['max_tokens'] == 8192
+    assert cfg['model_path'] == 'Qwen/Qwen3.5-35B-A3B'
+    assert cfg['checkpoint_dir'] == expected
+    assert cfg['temperature'] == 0.0
 
 
-def test_appearance_defaults_are_light_and_lively():
+def test_appearance_keeps_original_theme_and_motion_choices():
     st = _SidebarHarness()
 
     ui._appearance_sidebar(st)
 
     assert ('Theme', ['Light', 'Dark']) in st.selectbox_calls
-    assert ('Background motion', ['Lively', 'Subtle', 'Static']) in st.selectbox_calls
+    assert ('Background motion', ['Subtle', 'Static', 'Lively']) in st.selectbox_calls
+    # Appearance is the single home for these controls and uses the census heading.
+    assert any(
+        'sirin-side-heading' in body and 'Appearance' in body for body in st.html_calls
+    )
+    motion_options = next(
+        options for label, options in st.selectbox_calls if label == 'Background motion'
+    )
+    # Motion labels are exactly Static / Subtle / Lively — the 'Paused' alias is gone.
+    assert set(motion_options) == {'Static', 'Subtle', 'Lively'}
+    assert 'Paused' not in motion_options
 
 
-def test_attention_tools_sidebar_replaces_view_selector():
+def test_appearance_hydration_has_no_paused_alias():
+    st = _SidebarHarness()
+    st.session_state['sirin.workspace.v2'] = {'appearance': {'motion': 'static'}}
+
+    ui._hydrate_v2_appearance(st)
+
+    assert st.session_state['sirin.workspace.v2.bg_motion'] == 'Static'
+
+
+def test_sidebar_renders_census_headings_and_meta_for_default_preset(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
     st = _SidebarHarness()
 
-    assert ui._attention_tools_sidebar(st) == ''
-
-    assert ('A* Marvel demo', 'attention_open_marvel_demo') in st.button_calls
-    assert ('Cached explorer', 'attention_open_explorer') in st.button_calls
-    assert ('Live capture', 'attention_open_live') in st.button_calls
-    assert not any(label == 'View' for label, _ in st.selectbox_calls)
-
-
-def test_main_marvel_demo_skips_chat_shell(monkeypatch):
-    import sys
-    import types
-
-    calls = []
-
-    class SessionState(dict):
-        pass
-
-    fake_st = types.SimpleNamespace()
-    fake_st.session_state = SessionState({
-        'attention_tool': 'marvel_demo',
-        'bg_motion': 'Static',
-        'ui_theme': 'Light',
-    })
-    fake_st.set_page_config = lambda **kwargs: calls.append(('page_config', kwargs))
-    fake_st.html = lambda body: calls.append(('html', body))
-    fake_st.markdown = lambda body, **kwargs: calls.append(('markdown', body))
-    fake_st.caption = lambda body: calls.append(('caption', body))
-    monkeypatch.setitem(sys.modules, 'streamlit', fake_st)
-
-    from sirin.ui import attention_explorer
-
-    monkeypatch.setattr(attention_explorer, 'render_marvel_demo', lambda st: calls.append(('marvel', st)))
-    monkeypatch.setattr(ui, '_attention_tools_sidebar', lambda st: calls.append(('sidebar', st)))
-    monkeypatch.setattr(ui, '_appearance_sidebar', lambda st: calls.append(('appearance', st)))
-
-    ui.main()
-
-    assert any(kind == 'marvel' for kind, _ in calls)
-    assert not any(kind == 'sidebar' for kind, _ in calls)
-    assert not any(kind == 'appearance' for kind, _ in calls)
-    assert not any(kind == 'markdown' and '>SIRIN</h1>' in body for kind, body in calls)
-    assert not any(kind == 'caption' and 'Semantic Inconsistency' in body for kind, body in calls)
-
-
-def test_sidebar_clear_chat_button_resets_session_state(monkeypatch):
-    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
-    st = _SidebarHarness(button_values={'Clear chat': True})
-    st.session_state['messages'] = [{'role': 'user', 'content': 'stuck'}]
-    st.session_state['pending'] = 'queued'
-
     ui._sidebar(st)
 
-    assert st.session_state['messages'] == []
-    assert 'pending' not in st.session_state
-    assert st.rerun_called
+    headings = ' '.join(st.html_calls)
+    assert 'sirin-side-heading' in headings
+    assert 'Detector' in headings and 'Generator' in headings
+    assert 'layer 24 · τ = 0.38 · SHA-256-verified checkpoint' in st.caption_calls
+    assert (
+        'Device: cuda · bf16 · one shared model for generation and probing'
+        in st.caption_calls
+    )
 
 
-def test_sidebar_unload_gpu_models_button_calls_unloader(monkeypatch):
+def test_sidebar_hides_checkpoint_input_for_bundled_psiloqa_preset(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
-    called = []
-    monkeypatch.setattr(ui, '_unload_cached_models', lambda: called.append(True))
-    st = _SidebarHarness(button_values={'Unload GPU models': True})
+    st = _SidebarHarness()
 
-    ui._sidebar(st)
+    cfg = ui._sidebar(st)
 
-    assert called == [True]
+    assert 'Using built-in PsiloQA checkpoint' in st.caption_calls
+    assert not any(label == 'Checkpoint directory' for label, _ in st.text_input_calls)
+    assert cfg['checkpoint_dir'] == ''
+    assert ui._detector_setup_error(cfg) is None
 
 
-def test_sidebar_load_demo_replay_populates_chat_without_gpu(monkeypatch):
+def test_sidebar_still_shows_checkpoint_input_for_preset_needing_a_path(monkeypatch):
+    from sirin.ui import presets
+
     monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
-    st = _SidebarHarness(button_values={'Load A* recorded generation': True})
+    preset = _Preset(name='Probing — Sequence TabPFN (checkpoint)', family='probing')
+    preset.requires_checkpoint = True
+    monkeypatch.setattr(presets, 'list_presets', lambda: [preset])
 
-    ui._sidebar(st)
+    st = _SidebarHarness(
+        selectbox_values={'Backend': 'HF'},
+        text_values={'Checkpoint directory': '/tmp/probe'},
+    )
+    cfg = ui._sidebar(st)
 
-    assert len(st.session_state['messages']) == 2
-    assert st.session_state['messages'][0]['role'] == 'user'
-    assert st.session_state['messages'][1]['content'] == 'One'
-    assert st.session_state['messages'][1]['artifact']['gold_answer'] == '2'
-    assert st.session_state['messages'][1]['artifact']['evidence_quotes'] == list(ui.RECORDED_DEMO_QUOTES)
-    assert st.session_state['messages'][1]['view']['probability'] == 0.9983455751552265
-    assert st.rerun_called
+    assert any(label == 'Checkpoint directory' for label, _ in st.text_input_calls)
+    assert 'Using built-in PsiloQA checkpoint' not in st.caption_calls
+    assert cfg['checkpoint_dir'] == '/tmp/probe'
 
 
 def test_api_provider_model_is_editable_not_allowlisted(monkeypatch):
@@ -361,7 +899,7 @@ def test_hf_model_is_editable_not_allowlisted(monkeypatch):
     cfg = ui._sidebar(st)
 
     assert cfg['model_path'] == 'Qwen/Qwen3.5-35B-A3B'
-    assert ('Model', 'Qwen/Qwen3.5-4B') in st.text_input_calls
+    assert ('Model', 'Qwen/Qwen3-4B') in st.text_input_calls
     assert not any(label == 'Model' for label, _ in st.selectbox_calls)
 
 
@@ -391,7 +929,7 @@ def test_device_map_memory_uses_only_freest_two_gpus_by_default(monkeypatch):
         @staticmethod
         def mem_get_info(idx):
             free_gib = [1, 80, 72, 64][idx]
-            return free_gib * 1024 ** 3, 80 * 1024 ** 3
+            return free_gib * 1024**3, 80 * 1024**3
 
     class FakeTorch:
         cuda = FakeCuda
@@ -419,7 +957,7 @@ def test_device_map_memory_skips_gpus_that_fail_memory_probe(monkeypatch):
             if idx == 0:
                 raise RuntimeError('CUDA out of memory')
             free_gib = [0, 80, 72][idx]
-            return free_gib * 1024 ** 3, 80 * 1024 ** 3
+            return free_gib * 1024**3, 80 * 1024**3
 
     class FakeTorch:
         cuda = FakeCuda
@@ -640,7 +1178,9 @@ def test_minmax_normalizes_and_survives_flat_and_empty():
 
 def test_token_uncertainty_view_is_uncalibrated_and_normalized():
     detector = _FakeDetector('token', 'uncertainty', calibrated=False)
-    view = ui.detection_view_model(([[2.0, 0.5, 3.0]], [[1, 0, 1]], None), 'abc', detector)
+    view = ui.detection_view_model(
+        ([[2.0, 0.5, 3.0]], [[1, 0, 1]], None), 'abc', detector
+    )
     assert view['level'] == 'token'
     assert view['calibrated'] is False
     assert view['norm_scores'] == [0.6, 0.0, 1.0]
@@ -654,26 +1194,6 @@ def test_sequence_uncertainty_view_keeps_raw_score():
     assert view['calibrated'] is False
     assert view['raw_prob'] == 5.3
     assert view['threshold'] == 0.7
-
-
-def test_sequence_probing_token_view_broadcasts_tabpfn_score():
-    view = {
-        'level': 'sequence',
-        'family': 'probing',
-        'probability': 0.82,
-        'prediction': 1,
-        'calibrated': True,
-    }
-
-    token_view = ui._sequence_probing_token_view(view, 'Red Rocks and Larimer Lounge.')
-
-    assert token_view['level'] == 'token'
-    assert token_view['display_mode'] == 'sequence-broadcast'
-    assert token_view['family'] == 'probing'
-    assert token_view['scores'] == [0.82, 0.82, 0.82, 0.82, 0.82]
-    assert token_view['predictions'] == [1, 1, 1, 1, 1]
-    assert token_view['scale_label'] == 'sequence TabPFN score'
-    assert 'broadcast' in token_view['signal_note']
 
 
 class _FakeExpander:
@@ -707,7 +1227,13 @@ class _FakeSt:
 def test_visualizers_render_result_smoke():
     from sirin.ui import visualizers
 
-    seq = {'level': 'sequence', 'probability': 0.8, 'prediction': 1, 'calibrated': True, 'threshold': 0.5}
+    seq = {
+        'level': 'sequence',
+        'probability': 0.8,
+        'prediction': 1,
+        'calibrated': True,
+        'threshold': 0.5,
+    }
     tok = {
         'level': 'token',
         'answer': 'abc',
@@ -715,371 +1241,34 @@ def test_visualizers_render_result_smoke():
         'norm_scores': [0.2, 0.8, 0.5],
         'calibrated': False,
     }
-    claim = {'level': 'claim', 'claims': [{'fact': 'x', 'prob': 0.4, 'pred': 0}], 'overall_prob': 0.4, 'overall_pred': 0}
+    claim = {
+        'level': 'claim',
+        'claims': [{'fact': 'x', 'prob': 0.4, 'pred': 0}],
+        'overall_prob': 0.4,
+        'overall_pred': 0,
+    }
     for view in (seq, tok, claim):
         fake = _FakeSt()
         visualizers.render_result(fake, view)
         assert fake.rendered, f'nothing rendered for {view["level"]}'
 
 
-def test_render_analysis_adds_probing_tabpfn_broadcast_token_view():
-    calls = []
+def test_default_detector_input_guard_is_30k(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_MAX_DETECTOR_INPUT_CHARS', raising=False)
 
-    class Visualizers:
-        @staticmethod
-        def render_result(st, view):
-            calls.append(view)
-
-    ui._render_analysis(
-        _FakeSt(),
-        {
-            'content': 'Red Rocks and Larimer Lounge.',
-            'view': {
-                'level': 'sequence',
-                'family': 'probing',
-                'probability': 0.82,
-                'prediction': 1,
-                'calibrated': True,
-            },
-        },
-        Visualizers,
-    )
-
-    assert [view['level'] for view in calls] == ['sequence', 'token']
-    assert calls[1]['scale_label'] == 'sequence TabPFN score'
+    assert ui._detector_input_size_error('x' * 30_000) is None
+    assert 'limit 30,000' in ui._detector_input_size_error('x' * 30_001)
 
 
-def test_run_turn_replays_recorded_demo_without_generator_or_detector(monkeypatch):
-    from sirin.ui import visualizers
+def test_only_exact_recorded_prompts_bypass_the_live_size_guard(monkeypatch):
+    from sirin.ui.demo_cases import get_demo_case
 
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-
-        def spinner(self, body):
-            raise AssertionError('recorded demo should not start live generation or detection')
-
-        def error(self, body):
-            self.errors.append(body)
-
-    monkeypatch.setattr(ui, 'load_generator', lambda *a, **k: (_ for _ in ()).throw(AssertionError('generator called')))
-    monkeypatch.setattr(ui, '_build_detector', lambda *a, **k: (_ for _ in ()).throw(AssertionError('detector called')))
-
-    msg = ui._run_turn(
-        St(),
-        ui.RECORDED_DEMO_PROMPT,
-        {'use_hydra': False, 'checkpoint_dir': ''},
-        visualizers,
-    )
-
-    assert msg['content'] == 'One'
-    assert msg['artifact']['source'] == 'recorded_offline_replay'
-    assert msg['artifact']['gold_answer'] == '2'
-    assert msg['view']['probability'] == 0.9983455751552265
-    assert msg['token_view']['answer'] == 'One'
-
-
-def test_run_turn_preloads_probing_detector_before_generation(monkeypatch):
-    class Spinner:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-
-        def spinner(self, body):
-            return Spinner()
-
-        def error(self, body):
-            self.errors.append(body)
-
-    def fail_detector(cfg):
-        raise RuntimeError('CUDA out of memory. PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True')
-
-    monkeypatch.setattr(ui, '_build_detector', fail_detector)
-    monkeypatch.setattr(
-        ui,
-        'load_generator',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('generator loaded')),
-    )
-    monkeypatch.setattr(
-        ui,
-        'generate_answer',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('generation called')),
-    )
-
-    msg = ui._run_turn(
-        St(),
-        'ordinary prompt',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 192,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        },
-        object(),
-    )
-
-    assert msg['content'].startswith('Detection setup failed before generation')
-    assert 'Unload GPU models' in msg['content']
-    assert 'CUDA out of memory' not in msg['content']
-    assert 'PYTORCH_CUDA_ALLOC_CONF' not in msg['content']
-
-
-def test_run_turn_preflights_large_prompt_detector_before_generation(monkeypatch):
-    class Detector:
-        def detect(self, samples):
-            raise RuntimeError(
-                'CUDA out of memory. Tried to allocate 1024.00 MiB. '
-                'PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True'
-            )
-
-    class Spinner:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-
-        def spinner(self, body):
-            return Spinner()
-
-        def error(self, body):
-            self.errors.append(body)
-
-    monkeypatch.setattr(ui, '_build_detector', lambda cfg: Detector())
-    monkeypatch.setattr(
-        ui,
-        'load_generator',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('generator loaded')),
-    )
-    monkeypatch.setattr(
-        ui,
-        'generate_answer',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('generation called')),
-    )
-
-    msg = ui._run_turn(
-        St(),
-        'long prompt',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 192,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        },
-        object(),
-    )
-
-    assert msg['content'].startswith('Detection setup failed before generation')
-    assert 'Unload GPU models' in msg['content']
-    assert 'CUDA out of memory' not in msg['content']
-
-
-def test_detector_error_message_explains_hidden_size_mismatch():
-    msg = ui._detector_error_message(
-        RuntimeError('Feature 0 shape mismatch: expected (6, 1, 2048), got (6, 1, 2560)'),
-        after_generation=False,
-        cfg={'model_path': 'Qwen/Qwen3.5-35B-A3B'},
-    )
-
-    assert msg.startswith('Detection setup failed before generation')
-    assert 'checkpoint/model hidden-size mismatch' in msg
-    assert 'expects hidden size 2048' in msg
-    assert 'produced 2560' in msg
-    assert 'Selected model: `Qwen/Qwen3.5-35B-A3B`' in msg
-    assert 'Unload GPU models' in msg
-
-
-def test_run_turn_retries_once_when_preflight_looks_like_stale_extractor(monkeypatch):
-    class Spinner:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-
-        def spinner(self, body):
-            return Spinner()
-
-        def error(self, body):
-            self.errors.append(body)
-
-    class Detector:
-        def __init__(self, stale=False):
-            self.stale = stale
-            self.last_method_scores = None
-            self.feature_processor = None
-
-        def detect(self, samples):
-            if self.stale:
-                raise RuntimeError(
-                    'Feature 0 shape mismatch: expected (6, 1, 2048), got (6, 1, 2560)'
-                )
-            return ([0.2], [0], None)
-
-    builds = []
-    unloads = []
-
-    def build_detector(cfg):
-        builds.append(cfg)
-        return Detector(stale=len(builds) == 1)
-
-    monkeypatch.setattr(ui, '_build_detector', build_detector)
-    monkeypatch.setattr(ui, '_selected_hf_hidden_size', lambda model_path: 2048)
-    monkeypatch.setattr(ui, '_unload_cached_models', lambda: unloads.append(True))
-    monkeypatch.setattr(ui, 'load_generator', lambda *a, **k: object())
-    monkeypatch.setattr(ui, 'generate_answer', lambda *a, **k: 'Answer')
-    monkeypatch.setattr(
-        ui,
-        'detection_view_model',
-        lambda result, answer, detector: {
-            'level': 'sequence',
-            'family': 'probing',
-            'probability': 0.2,
-        },
-    )
-
-    class Visualizers:
-        @staticmethod
-        def render_result(st, view):
-            pass
-
-    msg = ui._run_turn(
-        St(),
-        'prompt',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 192,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        },
-        Visualizers,
-    )
-
-    assert len(builds) == 2
-    assert unloads == [True]
-    assert msg['content'] == 'Answer'
-    assert 'detector_error' not in msg
-
-
-def test_run_turn_rejects_oversized_detector_input_before_generation(monkeypatch):
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-
-        def error(self, body):
-            self.errors.append(body)
-
+    case = get_demo_case('681a1674')
+    prompt = case['answer_prompt']
     monkeypatch.setenv('SIRIN_UI_MAX_DETECTOR_INPUT_CHARS', '10')
-    monkeypatch.setattr(
-        ui,
-        '_build_detector',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('detector built')),
-    )
-    monkeypatch.setattr(
-        ui,
-        'load_generator',
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError('generator loaded')),
-    )
 
-    msg = ui._run_turn(
-        St(),
-        'prompt that is too long',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 192,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        },
-        object(),
-    )
-
-    assert msg['content'].startswith('Detection setup failed before generation')
-    assert 'Detector input is too large' in msg['content']
-    assert 'SIRIN_UI_MAX_DETECTOR_INPUT_CHARS' in msg['content']
-
-
-def test_run_turn_skips_detector_when_generated_answer_exceeds_guard(monkeypatch):
-    class Detector:
-        def detect(self, samples):
-            return ([0.2], [0], None)
-
-    class Spinner:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.warnings = []
-
-        def spinner(self, body):
-            return Spinner()
-
-        def warning(self, body):
-            self.warnings.append(body)
-
-    monkeypatch.setenv('SIRIN_UI_MAX_DETECTOR_INPUT_CHARS', '40')
-    monkeypatch.setattr(ui, '_build_detector', lambda cfg: Detector())
-    monkeypatch.setattr(ui, 'load_generator', lambda *a, **k: object())
-    monkeypatch.setattr(ui, 'generate_answer', lambda *a, **k: 'A' * 80)
-
-    msg = ui._run_turn(
-        St(),
-        'short',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 192,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-            'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
-        },
-        object(),
-    )
-
-    assert msg['content'] == 'A' * 80
-    assert msg['detector_error'].startswith('Detector skipped')
-    assert 'Detector input is too large' in msg['detector_error']
+    assert ui._detector_input_size_error(prompt, 'A generated answer.') is None
+    assert ui._detector_input_size_error(prompt + 'changed')
 
 
 def test_sequence_gauge_score_has_explicit_contrast():
@@ -1102,65 +1291,6 @@ def test_sequence_gauge_score_has_explicit_contrast():
     assert '99.8%' in html
     assert 'color:#8f123c' in html
     assert 'background:#fff1f5' in html
-
-
-def test_run_turn_detector_oom_preserves_answer_and_sanitizes_error(monkeypatch):
-    class Adapter:
-        pass
-
-    class Detector:
-        def detect(self, samples):
-            raise RuntimeError(
-                'CUDA out of memory. Tried to allocate 1.19 GiB. '
-                'PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True'
-            )
-
-    class Spinner:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    class St(_FakeSt):
-        def __init__(self):
-            super().__init__()
-            self.errors = []
-            self.warnings = []
-
-        def spinner(self, body):
-            return Spinner()
-
-        def error(self, body):
-            self.errors.append(body)
-
-        def warning(self, body):
-            self.warnings.append(body)
-
-    monkeypatch.setattr(ui, 'load_generator', lambda *a, **k: Adapter())
-    monkeypatch.setattr(ui, 'generate_answer', lambda *a, **k: 'One')
-    monkeypatch.setattr(ui, '_build_detector', lambda cfg: Detector())
-
-    msg = ui._run_turn(
-        St(),
-        'ordinary prompt',
-        {
-            'backend': 'HF',
-            'model_path': 'Qwen/Qwen3.5-35B-A3B',
-            'device': 'cuda',
-            'max_tokens': 1,
-            'temperature': 0.0,
-            'use_hydra': False,
-            'checkpoint_dir': '',
-        },
-        object(),
-    )
-
-    assert msg['content'] == 'One'
-    assert msg['detector_error'].startswith('Detector skipped')
-    assert 'Unload GPU models' in msg['detector_error']
-    assert 'CUDA out of memory' not in msg['detector_error']
-    assert 'PYTORCH_CUDA_ALLOC_CONF' not in msg['detector_error']
 
 
 class _Detector:
@@ -1193,11 +1323,11 @@ def test_strip_span_tags_removes_markers():
 
 
 def test_token_judge_answer_source_prefers_stripped_generation():
-    judge = _Detector(
-        'token', 'judge', True, last_generations=['wa[SPAN]ter[/SPAN]']
-    )
+    judge = _Detector('token', 'judge', True, last_generations=['wa[SPAN]ter[/SPAN]'])
     scores = [0.1, 0.2, 0.3, 0.4, 0.5]  # len 5 == len('water')
-    view = ui.detection_view_model(([scores], [[0, 0, 1, 1, 0]], None), 'CHAT-ANSWER', judge)
+    view = ui.detection_view_model(
+        ([scores], [[0, 0, 1, 1, 0]], None), 'CHAT-ANSWER', judge
+    )
     assert view['answer'] == 'water'
     assert view['answer_source'] == 'generation'
     assert view['tagged_generation'] == 'wa[SPAN]ter[/SPAN]'
@@ -1211,7 +1341,9 @@ def test_token_uncertainty_answer_source_is_original():
 
 
 def test_sequence_verdict_suppresses_reasoning():
-    judge = _Detector('sequence', 'judge', False, display_mode='verdict', last_generations=['1'])
+    judge = _Detector(
+        'sequence', 'judge', False, display_mode='verdict', last_generations=['1']
+    )
     view = ui.detection_view_model(([2.3], [1], None), 'answer', judge)
     assert view['display_mode'] == 'verdict'
     assert view['reasoning'] is None
@@ -1221,7 +1353,11 @@ def test_sequence_verdict_suppresses_reasoning():
 def test_claim_openai_view_is_uncalibrated():
     judge = _Detector('claim', 'judge', False)
     judge.claim_results = [
-        {'overall_prob': 3.1, 'overall_pred': 1, 'facts': [{'fact': 'a', 'prob': 2.2, 'pred': 1}]}
+        {
+            'overall_prob': 3.1,
+            'overall_pred': 1,
+            'facts': [{'fact': 'a', 'prob': 2.2, 'pred': 1}],
+        }
     ]
     view = ui.detection_view_model(([3.1], [1], None), 'answer', judge)
     assert view['level'] == 'claim'
@@ -1240,9 +1376,9 @@ def test_styles_inject_substitutes_placeholders_and_honors_motion():
     styles.inject_global_styles(_S(), motion='subtle')
     css = calls[0]
     assert '@@' not in css  # every placeholder substituted
-    assert 'data:image/jpeg;base64,' in css
-    assert '@keyframes sirin-drift-subtle' in css
-    assert 'sirin-drift-subtle' in css  # subtle animation wired
+    assert 'url("app/static/silk_bg.jpg")' in css  # silk served as a static file, not base64
+    assert '@keyframes sirin-breathe-subtle' in css
+    assert 'sirin-breathe-subtle' in css  # subtle animation wired
 
     static_calls = []
 

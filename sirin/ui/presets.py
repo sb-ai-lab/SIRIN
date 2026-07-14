@@ -8,18 +8,38 @@ so importing this module stays cheap and never loads torch.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from sirin.ui.providers import OPENROUTER_PROVIDER, provider_models, resolve_api_provider
+from sirin.definitions import DetectionTaskType
+from sirin.ui.providers import (
+    OPENROUTER_PROVIDER,
+    provider_models,
+    resolve_api_provider,
+)
 
 # default zero-shot uncertainty methods that need no attention maps (sdpa-safe).
 _SEQ_UNC_METHODS = ['MeanTokenEntropy', 'Perplexity']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
-_DEFAULT_HF_MODEL = 'Qwen/Qwen3.5-4B'
-_SEQUENCE_TABPFN_LAYERS = [-6, -5, -4, -3, -2, -1]
+_DEFAULT_HF_MODEL = 'Qwen/Qwen3-4B'
+PSILOQA_TOKEN_LINEAR_PRESET = 'Probing — Token Linear · PsiloQA/Qwen3-4B'
+PSILOQA_MODEL_ID = 'Qwen/Qwen3-4B'
+PSILOQA_MODEL_REVISION = '1cfa9a7208912126459214e8b04321603b3df60c'
+PSILOQA_CHECKPOINT_DIR = str(
+    Path(__file__).resolve().parents[2]
+    / 'demo/checkpoints/qwen3_4b_psiloqa_span_linear'
+)
+# External (unbundled) sibling checkpoint. Derived from the repo location instead of a hardcoded
+# home path; honored only as a last-resort fallback after the env override. Not bundled/verified,
+# so it is deliberately NOT exposed as a preset ``builtin_checkpoint`` (no false availability).
+ANSWERABILITY_CHECKPOINT_DIR = str(
+    Path(__file__).resolve().parents[4]
+    / 'trust_assistant/checkpoints/probing/answerability_tabpfn/Hiddens_L_TabPFN'
+)
+_SEQUENCE_TABPFN_LAYERS = [20, 35, 36, 37, 38, 39]
 _JUDGE_PROMPT = (
     "You verify whether the assistant response is faithful to the provided context. "
     "Reply with 1 if it contains hallucinated, unsupported, or contradicted claims, "
@@ -30,26 +50,35 @@ _JUDGE_PROMPT = (
 @dataclass
 class Preset:
     name: str
-    family: str            # 'uncertainty' | 'judge' | 'probing'
-    level: str             # 'sequence' | 'token' | 'claim'
-    calibrated: bool       # True if detect() probs are in [0, 1]
+    family: str  # 'uncertainty' | 'judge' | 'probing'
+    level: str  # 'sequence' | 'token' | 'claim'
+    calibrated: bool  # True only when the score has calibrated probability semantics.
     requires_checkpoint: bool
     description: str
     build: Callable[..., Any]
+    task: str = DetectionTaskType.HALLUCINATION_DETECTION.value
     display_mode: str = 'gauge'
     is_judge: bool = False
+    builtin_checkpoint: str | None = None  # bundled, SHA-256-verified; no path input needed.
 
 
 def _hf_adapter(device: str, generator_adapter: Any) -> Any:
-    from sirin.inference.adapters import HfModelAdapter
-
-    if isinstance(generator_adapter, HfModelAdapter):
+    if callable(getattr(generator_adapter, 'generate_hiddens', None)):
         return generator_adapter  # reuse the loaded generator; one model in VRAM.
+    from sirin.inference.adapters import HfModelAdapter
     from sirin.models.inference import HFConfig
 
     return HfModelAdapter(
-        HFConfig(model_path=_DEFAULT_HF_MODEL, device=device, attn_implementation='sdpa')
+        HFConfig(
+            model_path=_DEFAULT_HF_MODEL, device=device, attn_implementation='sdpa'
+        )
     )
+
+
+def _uncertainty_adapter(device: str, generator_adapter: Any) -> Any:
+    if generator_adapter is not None:
+        return generator_adapter
+    return _hf_adapter(device, None)
 
 
 def _tag(
@@ -58,11 +87,13 @@ def _tag(
     level: str,
     calibrated: bool,
     display_mode: str | None = None,
+    task: str = DetectionTaskType.HALLUCINATION_DETECTION.value,
 ) -> Any:
     detector._ui_family = family
     detector._ui_level = level
     detector._ui_calibrated = calibrated
     detector._ui_display_mode = display_mode
+    detector._ui_task = task
     return detector
 
 
@@ -85,6 +116,9 @@ def _build_uncertainty(
     judge_model: str | None = None,
     judge_api_key: str | None = None,
     api_provider: str = OPENROUTER_PROVIDER,
+    uncertainty_threshold: float | None = None,
+    uncertainty_max_new_tokens: int | None = None,
+    uncertainty_threshold_source: str | None = None,
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.processors import (
@@ -100,25 +134,39 @@ def _build_uncertainty(
         UncertaintyFeatureProcessorConfig,
     )
 
-    extractor = _hf_adapter(device, generator_adapter)
+    extractor = _uncertainty_adapter(device, generator_adapter)
     feature_config = UncertaintyFeatureProcessorConfig(
         uncertainty_methods=_TOK_UNC_METHODS if level == 'token' else _SEQ_UNC_METHODS,
         model_kwargs={'instruct': True},  # apply the chat template inside lm-polygraph
+        max_new_tokens=uncertainty_max_new_tokens or 256,
     )
     detector_config = UncertaintyDetectorConfig(aggregation_method='mean')
     if level == 'token':
-        processor = TokenUncertaintyFeatureProcessor(config=feature_config, extractor=extractor)
-        detector = TokenUncertaintyDetector(config=detector_config, feature_processor=processor)
+        processor = TokenUncertaintyFeatureProcessor(
+            config=feature_config, extractor=extractor
+        )
+        detector = TokenUncertaintyDetector(
+            config=detector_config, feature_processor=processor
+        )
     else:
-        processor = SequenceUncertaintyFeatureProcessor(config=feature_config, extractor=extractor)
-        detector = SequenceUncertaintyDetector(config=detector_config, feature_processor=processor)
-    return _tag(
+        processor = SequenceUncertaintyFeatureProcessor(
+            config=feature_config, extractor=extractor
+        )
+        detector = SequenceUncertaintyDetector(
+            config=detector_config, feature_processor=processor
+        )
+    detector = _tag(
         detector,
         'uncertainty',
         level,
         calibrated=False,
         display_mode='heatmap' if level == 'token' else 'raw',
     )
+    detector._ui_threshold = uncertainty_threshold
+    if uncertainty_threshold is not None:
+        detector.threshold = float(uncertainty_threshold)
+        detector._ui_threshold_source = uncertainty_threshold_source
+    return detector
 
 
 def _build_uncertainty_sequence(
@@ -176,7 +224,9 @@ def _build_openai_judge(
     from sirin.models.detection import OpenAIJudgeConfig
     from sirin.models.inference import OpenAIConfig
 
-    model_path, api_key, base_url = _resolve_judge(judge_model, judge_api_key, api_provider)
+    model_path, api_key, base_url = _resolve_judge(
+        judge_model, judge_api_key, api_provider
+    )
     model = OpenAIModelAdapter(
         OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
     )
@@ -199,24 +249,40 @@ def _build_openai_token_judge(
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.judging import TokenOpenAIJudge
+    from sirin.detection.judging.judges.utils.prompts import (
+        SPAN_TAG_SYSTEM_PROMPT,
+        SPAN_TAG_USER_PROMPT,
+    )
     from sirin.inference.adapters import OpenAIModelAdapter
     from sirin.models.detection import OpenAIJudgeConfig
     from sirin.models.inference import OpenAIConfig
 
-    model_path, api_key, base_url = _resolve_judge(judge_model, judge_api_key, api_provider)
+    model_path, api_key, base_url = _resolve_judge(
+        judge_model, judge_api_key, api_provider
+    )
     model = OpenAIModelAdapter(
         OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
     )
     judge = TokenOpenAIJudge(
-        # temperature > 0 so the num_beams generations DIFFER — a character's score is their span-tag
-        # agreement (a [0,1] consensus). At temperature 0 all generations are identical and the
-        # "consensus" collapses to a single deterministic 0/1 pass.
-        config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.7),
+        # Span-tag prompts make the model echo the answer verbatim with [SPAN]…[/SPAN] around
+        # hallucinated parts (the 0/1 verdict prompt emitted no tags -> always all-clear).
+        # temperature > 0 so the num_beams generations DIFFER — a character's score is their
+        # span-tag agreement (a [0,1] consensus). At temperature 0 the consensus collapses to a
+        # single deterministic 0/1 pass.
+        config=OpenAIJudgeConfig(
+            system_prompt=SPAN_TAG_SYSTEM_PROMPT,
+            user_prompt=SPAN_TAG_USER_PROMPT,
+            temperature=0.7,
+        ),
         model_adapter=model,
     )
     # calibrated=True: the char scores are already fraction-in-[0,1], so show them absolute (a clean
     # answer reads all-clear) instead of min-max-stretching a near-binary array to a misleading mid-grey.
-    return _tag(judge, 'judge', 'token', calibrated=True, display_mode='heatmap')
+    judge = _tag(judge, 'judge', 'token', calibrated=True, display_mode='heatmap')
+    # Honest disclosure fields for the run record (NEVER the base_url or the api key).
+    judge._ui_judge_provider = api_provider
+    judge._ui_judge_model = model_path
+    return judge
 
 
 def _build_probing_sequence_tabpfn(
@@ -248,11 +314,105 @@ def _build_probing_sequence_tabpfn(
         extractor=extractor,
     )
     detector = SequenceTabPFNProbingDetector(
-        config=ProbingDetectorConfig(device='cpu', max_length=1),
+        config=ProbingDetectorConfig(device=device, max_length=1),
         feature_processor=processor,
     )
     detector.load(checkpoint_dir)
-    return _tag(detector, 'probing', 'sequence', calibrated=True, display_mode='gauge')
+    return _tag(detector, 'probing', 'sequence', calibrated=False, display_mode='gauge')
+
+
+def load_psiloqa_probe_manifest(checkpoint_dir: str | None = None) -> dict[str, Any]:
+    checkpoint = Path(checkpoint_dir or PSILOQA_CHECKPOINT_DIR)
+    manifest_path = checkpoint / 'manifest.json'
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f'PsiloQA probe manifest not found: {manifest_path}')
+    manifest = json.loads(manifest_path.read_text())
+    expected = {
+        'detector': 'token_linear_probe',
+        'model_id': PSILOQA_MODEL_ID,
+        'model_revision': PSILOQA_MODEL_REVISION,
+        'use_chat_template': False,
+        'checkpoint_format': 'sirin_token_linear_v1',
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ValueError(
+                f'Invalid PsiloQA probe manifest {key}: expected {value!r}, '
+                f'got {manifest.get(key)!r}'
+            )
+    int(manifest['hidden_state_index'])
+    float(manifest['threshold'])
+    return manifest
+
+
+def _build_probing_token_linear_psiloqa(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Build the locked live PsiloQA probe; layer and threshold come from its manifest."""
+    from sirin.definitions import SideType
+    from sirin.detection.probing import TokenLinearProbingDetector
+    from sirin.detection.processors import HiddensProcessor
+    from sirin.inference.adapters import HfModelAdapter
+    from sirin.models.detection import HiddensProcessorConfig, ProbingDetectorConfig
+    from sirin.models.inference import HFConfig, TokenLocatorConfig
+
+    checkpoint = checkpoint_dir or PSILOQA_CHECKPOINT_DIR
+    manifest = load_psiloqa_probe_manifest(checkpoint)
+    adapter_config = getattr(generator_adapter, 'config', None)
+    if (
+        getattr(adapter_config, 'model_path', None) == PSILOQA_MODEL_ID
+        and getattr(adapter_config, 'revision', None) == PSILOQA_MODEL_REVISION
+        and getattr(adapter_config, 'use_chat_template', None) is False
+    ):
+        extractor = generator_adapter
+    else:
+        extractor = HfModelAdapter(
+            HFConfig(
+                model_path=PSILOQA_MODEL_ID,
+                revision=PSILOQA_MODEL_REVISION,
+                device=device,
+                model_dtype='bf16',
+                attn_implementation='sdpa',
+                use_chat_template=False,
+                padding='longest',
+                padding_side='right',
+            )
+        )
+    processor = HiddensProcessor(
+        config=HiddensProcessorConfig(
+            layers=[int(manifest['hidden_state_index'])],
+            side=SideType.RIGHT,
+            pooling_type='none',
+            cache_features=False,
+            token_locator_config=TokenLocatorConfig(locate_answer_start=True),
+        ),
+        extractor=extractor,
+    )
+    detector = TokenLinearProbingDetector(
+        config=ProbingDetectorConfig(
+            device=device,
+            batch_size=1,
+            threshold=float(manifest['threshold']),
+        ),
+        feature_processor=processor,
+    )
+    detector.load(checkpoint)
+    detector.threshold = float(manifest['threshold'])
+    detector._ui_threshold = detector.threshold
+    detector._ui_threshold_source = str(manifest.get('threshold_method') or 'manifest')
+    detector._ui_score_semantics = str(manifest.get('score_semantics') or '')
+    detector._ui_manifest = manifest
+    return _tag(
+        detector,
+        'probing',
+        'token',
+        calibrated=False,
+        display_mode='threshold-spans',
+    )
 
 
 def _hf_hidden_size(model_path: str) -> int | None:
@@ -261,7 +421,7 @@ def _hf_hidden_size(model_path: str) -> int | None:
     try:
         from transformers import AutoConfig
 
-        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=False)
     except Exception:
         return None
     hidden_size = getattr(config, 'hidden_size', None)
@@ -329,7 +489,7 @@ def _build_probing_answerability(
     checkpoint_dir = (
         checkpoint_dir
         or os.getenv('SIRIN_ANSWERABILITY_CKPT')
-        or '/home/jovyan/parchiev/magistr/trust_assistant/checkpoints/probing/answerability_tabpfn/Hiddens_L_TabPFN'
+        or ANSWERABILITY_CHECKPOINT_DIR
     )
     extractor = HfModelAdapter(
         HFConfig(
@@ -367,7 +527,14 @@ def _build_probing_answerability(
         feature_processor=processor,
     )
     detector.load(checkpoint_dir)
-    return _tag(detector, 'probing', 'sequence', calibrated=True, display_mode='gauge')
+    return _tag(
+        detector,
+        'probing',
+        'sequence',
+        calibrated=False,
+        display_mode='gauge',
+        task=DetectionTaskType.QUERY_ANSWERABILITY.value,
+    )
 
 
 PRESETS: dict[str, Preset] = {
@@ -375,12 +542,27 @@ PRESETS: dict[str, Preset] = {
         name="Probing — Sequence TabPFN (checkpoint)",
         family='probing',
         level='sequence',
-        calibrated=True,
+        calibrated=False,
         requires_checkpoint=True,
-        description="TabPFN probe on hidden states — calibrated [0,1]. Needs a trained checkpoint directory.",
+        description="TabPFN hidden-state probe — raw score with a validation-selected decision threshold. Needs a trained checkpoint directory.",
         build=_build_probing_sequence_tabpfn,
         display_mode='gauge',
         is_judge=False,
+    ),
+    PSILOQA_TOKEN_LINEAR_PRESET: Preset(
+        name=PSILOQA_TOKEN_LINEAR_PRESET,
+        family='probing',
+        level='token',
+        calibrated=False,
+        requires_checkpoint=True,
+        description=(
+            'Live token linear probe on fresh Qwen3-4B hidden states for the curated '
+            'PsiloQA span demo. Raw sigmoid score; not a calibrated probability.'
+        ),
+        build=_build_probing_token_linear_psiloqa,
+        display_mode='threshold-spans',
+        is_judge=False,
+        builtin_checkpoint=PSILOQA_CHECKPOINT_DIR,
     ),
     "Uncertainty — Sequence (zero-shot)": Preset(
         name="Uncertainty — Sequence (zero-shot)",
@@ -430,10 +612,11 @@ PRESETS: dict[str, Preset] = {
         name="Probing — Answerability TabPFN (checkpoint)",
         family='probing',
         level='sequence',
-        calibrated=True,
+        calibrated=False,
         requires_checkpoint=True,
-        description="Answerability TabPFN probe on Qwen3.5-4B hidden states. Uses the fixed trust_assistant checkpoint by default.",
+        description="Answerability TabPFN hidden-state probe — raw thresholded score, not a calibrated probability.",
         build=_build_probing_answerability,
+        task=DetectionTaskType.QUERY_ANSWERABILITY.value,
         display_mode='gauge',
         is_judge=False,
     ),
@@ -442,6 +625,42 @@ PRESETS: dict[str, Preset] = {
 
 def list_presets() -> list[Preset]:
     return list(PRESETS.values())
+
+
+def _preset_layer_threshold(
+    preset: Preset, checkpoint_dir: str | None
+) -> tuple[int | None, float | None]:
+    """Layer and decision threshold a preset statically exposes, without loading the model.
+
+    Only the PsiloQA token-linear probe publishes a single hidden-state layer and threshold (via its
+    manifest); every other preset resolves them at build time, so returns ``(None, None)`` here.
+    """
+    if preset.name != PSILOQA_TOKEN_LINEAR_PRESET:
+        return None, None
+    source = checkpoint_dir or preset.builtin_checkpoint or PSILOQA_CHECKPOINT_DIR
+    try:
+        manifest = load_psiloqa_probe_manifest(source)
+        return int(manifest['hidden_state_index']), float(manifest['threshold'])
+    except Exception:
+        return None, None
+
+
+def detector_census_caption(preset: Preset, checkpoint_dir: str | None = None) -> str:
+    """One-line sidebar census meta in the recovered demo's language.
+
+    Shows only facts the preset actually provides: the resolved probe layer, its decision threshold,
+    and (for a bundled, integrity-checked checkpoint) the SHA-256 provenance. Returns '' when a preset
+    has nothing census-worthy to add, so the caller can fall back to the preset description.
+    """
+    parts: list[str] = []
+    layer, threshold = _preset_layer_threshold(preset, checkpoint_dir)
+    if layer is not None:
+        parts.append(f'layer {layer}')
+    if threshold is not None:
+        parts.append(f'τ = {threshold:.2f}')
+    if preset.builtin_checkpoint:
+        parts.append('SHA-256-verified checkpoint')
+    return ' · '.join(parts)
 
 
 def _level_of(detector: Any) -> str:
@@ -500,5 +719,13 @@ def describe_detector(detector: Any) -> dict[str, Any]:
         'level': level,
         'calibrated': bool(calibrated),
         'display_mode': display_mode,
-        'threshold': getattr(detector, 'threshold', None),
+        'threshold': getattr(
+            detector, '_ui_threshold', getattr(detector, 'threshold', None)
+        ),
+        'threshold_source': getattr(detector, '_ui_threshold_source', None),
+        'task': getattr(
+            detector,
+            '_ui_task',
+            DetectionTaskType.HALLUCINATION_DETECTION.value,
+        ),
     }

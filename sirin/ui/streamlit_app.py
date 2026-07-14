@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-import base64
+import hashlib
 import json
 import math
 import os
 import re
 import shlex
+import traceback
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sirin.ui.path_policy import (
     is_trusted_local,
     require_checkpoint_path,
 )
+from sirin.ui.demo_cases import load_demo_cases
 from sirin.ui.providers import (
     ANTHROPIC_PROVIDER,
     CUSTOM_PROVIDER,
@@ -23,9 +27,31 @@ from sirin.ui.providers import (
     provider_models,
     resolve_api_provider,
 )
-from sirin.ui.styles import risk_color, risk_ink
+from sirin.ui.styles import risk_color
 
 LOGO_PATH = Path(__file__).parent / 'assets' / 'logo.png'
+REPO_ROOT = Path(__file__).resolve().parents[2]
+LONGMEMEVAL_PROFILE_PATH = Path(__file__).parent / 'assets' / 'longmemeval_qwen35.json'
+
+
+def load_longmemeval_profile(
+    path: str | Path = LONGMEMEVAL_PROFILE_PATH,
+) -> dict[str, Any]:
+    payload = json.loads(Path(path).read_text(encoding='utf-8'))
+    if not isinstance(payload, dict) or payload.get('schema_version') != 1:
+        raise ValueError('LongMemEval UI profile must use schema version 1')
+    repo_root = Path(__file__).resolve().parents[2]
+    for task in payload.get('checkpoints', {}).values():
+        for checkpoint in task.values():
+            checkpoint_path = Path(str(checkpoint.get('path') or ''))
+            if checkpoint_path and not checkpoint_path.is_absolute():
+                checkpoint['portable_path'] = str(checkpoint_path)
+                checkpoint['path'] = str((repo_root / checkpoint_path).resolve())
+    return payload
+
+
+LONGMEMEVAL_PROFILE = load_longmemeval_profile()
+LIVE_CAPTURE_DIR = REPO_ROOT / 'output' / 'sirin_a_star_demo' / 'provenance' / 'live'
 
 
 def _cache_resource(func):
@@ -35,11 +61,6 @@ def _cache_resource(func):
         return st.cache_resource(show_spinner=False)(func)
     except Exception:
         return func
-
-
-@_cache_resource
-def _logo_data_uri() -> str:
-    return 'data:image/png;base64,' + base64.b64encode(LOGO_PATH.read_bytes()).decode()
 
 
 def build_sample(prompt: str, answer: str) -> list[dict[str, str]]:
@@ -60,10 +81,7 @@ def _segment_values(
 ) -> list[Any | None]:
     values = values or []
     if len(values) == len(text):
-        return [
-            max(values[start:end], default=None)
-            for start, end, _ in segments
-        ]
+        return [max(values[start:end], default=None) for start, end, _ in segments]
     if len(values) == len(segments):
         return list(values)
 
@@ -108,8 +126,8 @@ def score_heatmap(
     segment_scores = _segment_values(text, segments, scores)
     segment_preds = _segment_values(text, segments, predictions)
     spans = []
-    for index, ((start, end, piece), score, pred) in enumerate(
-        zip(segments, segment_scores, segment_preds)
+    for (start, end, piece), score, pred in zip(
+        segments, segment_scores, segment_preds
     ):
         score_num = _to_float(score)
         pred_value = _pred_attr(pred)
@@ -143,7 +161,11 @@ def score_heatmap(
         attrs.append(f'title="{escape(title)}"')
         attrs.append(f'style="{style}"')
         spans.append(f'<span {" ".join(attrs)}>{_html_piece(piece)}</span>')
-    return '<span class="sirin-heatmap" style="line-height:2.25;white-space:pre-wrap;">' + ''.join(spans) + '</span>'
+    return (
+        '<span class="sirin-heatmap" style="line-height:2.25;white-space:pre-wrap;">'
+        + ''.join(spans)
+        + '</span>'
+    )
 
 
 def _to_plain(value: Any) -> Any:
@@ -222,7 +244,9 @@ def _describe(detector: Any) -> dict[str, Any]:
             'family': 'unknown',
             'calibrated': True,
             'threshold': None,
+            'threshold_source': None,
             'display_mode': None,
+            'task': 'hallucination',
         }
     try:
         from sirin.ui import presets
@@ -232,16 +256,21 @@ def _describe(detector: Any) -> dict[str, Any]:
             'family': info.get('family', 'unknown'),
             'calibrated': bool(info.get('calibrated', True)),
             'threshold': info.get('threshold', getattr(detector, 'threshold', None)),
+            'threshold_source': info.get('threshold_source'),
             'display_mode': info.get('display_mode'),
+            'task': info.get('task', 'hallucination'),
         }
     except (KeyError, AttributeError) as e:
         from loguru import logger as lg
+
         lg.debug(f"Detector metadata lookup failed: {e}")
         return {
             'family': 'unknown',
             'calibrated': True,
             'threshold': getattr(detector, 'threshold', None),
+            'threshold_source': getattr(detector, '_ui_threshold_source', None),
             'display_mode': None,
+            'task': 'hallucination',
         }
 
 
@@ -277,10 +306,12 @@ _NO_FINAL_ANSWER = 'No final answer produced after the hidden thinking block.'
 
 
 def _split_thinking(text: str) -> tuple[str, str | None]:
-    match = re.search(r'<think>\s*(.*?)\s*</think>\s*', text, flags=re.IGNORECASE | re.DOTALL)
+    match = re.search(
+        r'<think>\s*(.*?)\s*</think>\s*', text, flags=re.IGNORECASE | re.DOTALL
+    )
     if not match:
         return _split_json_reasoning(text, None)
-    visible = (text[:match.start()] + text[match.end():]).strip()
+    visible = (text[: match.start()] + text[match.end() :]).strip()
     thinking = match.group(1).strip()
     return _split_json_reasoning(visible, thinking or None)
 
@@ -288,14 +319,24 @@ def _split_thinking(text: str) -> tuple[str, str | None]:
 def _split_json_reasoning(text: str, thinking: str | None) -> tuple[str, str | None]:
     if not str(text or '').strip() and thinking:
         return _NO_FINAL_ANSWER, thinking
+    candidate = str(text or '').strip()
+    fence = re.fullmatch(
+        r'```(?:json)?\s*(.*?)\s*```',
+        candidate,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if fence:
+        candidate = fence.group(1)
     try:
-        obj = json.loads(text)
+        obj = json.loads(candidate)
     except (TypeError, ValueError):
         return text, thinking
     if not isinstance(obj, dict) or 'answer' not in obj or 'reasoning' not in obj:
         return text, thinking
     answer = obj.get('answer')
-    visible = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+    visible = (
+        answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+    )
     reasoning = str(obj.get('reasoning') or '').strip()
     hidden = '\n\n'.join(part for part in (thinking, reasoning) if part)
     return visible.strip(), hidden or None
@@ -304,15 +345,27 @@ def _split_json_reasoning(text: str, thinking: str | None) -> tuple[str, str | N
 def _pick_answer_text(
     n_scores: int, detector: Any, chat_answer: str, family: str
 ) -> tuple[str, str, str | None]:
-    # per-char scores align to whichever answer text has the SAME length. Judges score
-    # their own tag-stripped generation; probing/uncertainty score the original answer. Pick by
-    # length match so we never hard-code the (disputed) original-vs-regenerated question.
+    # Per-char scores align to whichever answer text has the same length. Judges score their own
+    # tag-stripped generation; probing/uncertainty normally score the original answer.
     gens = getattr(detector, 'last_generations', None)
-    tagged = gens[0] if isinstance(gens, list) and gens and isinstance(gens[0], str) else None
+    tagged = (
+        gens[0]
+        if isinstance(gens, list) and gens and isinstance(gens[0], str)
+        else None
+    )
     generated = getattr(detector, 'last_generated_text', None)
 
     if family == 'judge' and tagged is not None:
-        candidates = [(_strip_span_tags(tagged), 'generation'), (chat_answer or '', 'original')]
+        candidates = [
+            (_strip_span_tags(tagged), 'generation'),
+            (chat_answer or '', 'original'),
+        ]
+    elif family == 'uncertainty' and generated:
+        candidates = (
+            [(chat_answer or '', 'original')]
+            if generated == chat_answer
+            else [(generated, 'generation')]
+        )
     else:
         candidates = [(chat_answer or '', 'original')]
         if generated:
@@ -346,6 +399,8 @@ def detection_view_model(
             'overall_pred': _overall(rows, 'overall_pred'),
             'calibrated': info['calibrated'],
             'family': info['family'],
+            'task': info['task'],
+            'attribution_scope': 'claim',
             'reasoning': reasoning,
         }
 
@@ -354,29 +409,105 @@ def detection_view_model(
     if level == 'token' or (level is None and _is_nested_list(probs)):
         first_preds = _first(preds)
         scores = list(_first(probs) or [])
+        absolute_raw_scores = (
+            info['family'] == 'probing'
+            and info.get('display_mode') == 'threshold-spans'
+        )
         norm = (
             [_clamp01(s) for s in scores]
-            if info['calibrated']
+            if info['calibrated'] or absolute_raw_scores
             else _minmax(scores)
         )
         answer_text, answer_source, tagged = _pick_answer_text(
             len(scores), detector, answer, info['family']
         )
-        return {
+        predictions = first_preds if isinstance(first_preds, list) else []
+        if not scores or not predictions:
+            raise ValueError('Token detector returned empty scores or predictions.')
+        if len(scores) != len(answer_text) or len(predictions) != len(answer_text):
+            raise ValueError(
+                'Token detector output alignment mismatch: '
+                f'{len(answer_text)} answer characters, {len(scores)} scores, '
+                f'and {len(predictions)} predictions.'
+            )
+        view = {
             'level': 'token',
             'display_mode': info.get('display_mode') or 'heatmap',
             'scores': scores,
-            'predictions': first_preds if isinstance(first_preds, list) else [],
+            'predictions': predictions,
             'answer': answer_text,
             'answer_source': answer_source,
+            'aligned': len(answer_text) == len(scores),
             'calibrated': info['calibrated'],
             'family': info['family'],
+            'task': info['task'],
+            'threshold': info.get('threshold'),
+            'threshold_source': info.get('threshold_source'),
+            'attribution_scope': 'token',
             'norm_scores': norm,
             'spans': spans,
             'tagged_generation': tagged,
             # tagged_generation already surfaces a judge's annotated answer.
             'reasoning': None,
         }
+        if absolute_raw_scores:
+            view.update(
+                scale_label='raw linear-probe score',
+                signal_note=(
+                    'Fresh hidden-state linear-probe scores; raw sigmoid output, '
+                    'not a calibrated probability.'
+                ),
+            )
+        consensus = getattr(detector, 'last_consensus', None) or []
+        if info['family'] == 'judge' and consensus:
+            # last_spans are offsets into the raw tagged generation, NOT the answer characters; the
+            # aligned per-character k/n scores are authoritative, so drop the raw spans before they
+            # shadow char_scores in the presenter.
+            view['spans'] = None
+            first = consensus[0]
+            requested, valid = first.get('requested'), first.get('valid')
+            temperature = first.get('temperature')
+            view.update(
+                scale_label='span-tag agreement across sampled judge annotations',
+                signal_note=(
+                    f"Each character's score is the fraction of {valid}/{requested} judge samples "
+                    'that tagged it. Agreement is judge consensus, not a calibrated probability and '
+                    'not ground truth.'
+                ),
+            )
+            disclosures = []
+            judge_model = getattr(detector, '_ui_judge_model', None)
+            provider_label = getattr(detector, '_ui_judge_provider', None)
+            if judge_model:
+                disclosures.append(f'Judge model: {judge_model}')
+            if provider_label:
+                disclosures.append(f'Judge provider: {provider_label}')
+            if isinstance(valid, int) and isinstance(requested, int):
+                disclosures.append(f'Judge samples: {valid}/{requested} verbatim-aligned')
+            if temperature is not None:
+                disclosures.append(f'Judge temperature: {temperature}')
+            if disclosures:
+                view['judge_disclosures'] = disclosures
+            if isinstance(valid, int) and isinstance(requested, int) and 0 < valid < requested:
+                view['run_warnings'] = [
+                    f'{requested - valid} of {requested} judge samples were not '
+                    'verbatim and were excluded.'
+                ]
+        trace = getattr(detector, 'last_generation_trace', None)
+        if isinstance(trace, dict) and trace.get('text') == answer_text:
+            view.update(
+                token_pieces=list(trace.get('pieces') or []),
+                token_offsets=list(trace.get('offsets') or []),
+                scale_label='relative heuristic token uncertainty',
+                signal_note=(
+                    'Uncalibrated arithmetic mean of chosen-token NLL and '
+                    f'{trace.get("entropy_scope", "model-vocabulary")} token entropy '
+                    'from this exact streamed answer; min-max normalized only within '
+                    'this answer. Color ranks tokens here and is not evidence, a '
+                    'probability, or a verdict.'
+                ),
+            )
+        return view
 
     probability = _first(probs)
     is_multiclass = isinstance(probability, list)
@@ -398,6 +529,12 @@ def detection_view_model(
         if is_multiclass and probability
         else None
     )
+    generated_text = getattr(detector, 'last_generated_text', None)
+    scored_answer = (
+        str(generated_text)
+        if info['family'] == 'uncertainty' and generated_text
+        else answer
+    )
     return {
         'level': 'sequence',
         'display_mode': display_mode,
@@ -405,11 +542,16 @@ def detection_view_model(
         'prediction': _first(preds),
         'calibrated': info['calibrated'],
         'threshold': info['threshold'],
+        'threshold_source': info.get('threshold_source'),
         'family': info['family'],
+        'task': info['task'],
+        'attribution_scope': 'sequence',
+        'answer': scored_answer,
+        'answer_source': 'generation' if scored_answer != answer else 'original',
         'raw_prob': None if info['calibrated'] else _to_float(probability),
         'class_probs': class_probs,
         'class_index': class_index,
-        'generated_text': getattr(detector, 'last_generated_text', None),
+        'generated_text': generated_text,
         # in verdict mode show a reasoning model's chain, but not a bare '0'/'1'.
         'reasoning': (
             (reasoning if reasoning and len(str(reasoning).strip()) > 3 else None)
@@ -458,14 +600,14 @@ def _clean_path_field(value: Any) -> str:
     )[0].strip(' `|')
 
 
-_LARGE_HF_MODEL_RE = re.compile(r'(?<!\d)(?:3[0-9]|[4-9]\d|[1-9]\d{2,})B', re.IGNORECASE)
-_FEATURE_SHAPE_MISMATCH_RE = re.compile(
-    r'Feature \d+ shape mismatch: expected \(([^)]*)\), got \(([^)]*)\)'
+_LARGE_HF_MODEL_RE = re.compile(
+    r'(?<!\d)(?:3[0-9]|[4-9]\d|[1-9]\d{2,})B', re.IGNORECASE
 )
 _AUTO_DEVICE_MAP_GPUS_ENV = 'SIRIN_UI_AUTO_DEVICE_MAP_GPUS'
 _MAX_DETECTOR_INPUT_CHARS_ENV = 'SIRIN_UI_MAX_DETECTOR_INPUT_CHARS'
-_DEFAULT_MAX_DETECTOR_INPUT_CHARS = 12_000
-_DETECTOR_PREFLIGHT_ANSWER = 'SIRIN detector preflight answer.'
+_DEFAULT_MAX_DETECTOR_INPUT_CHARS = 30_000
+_DEFAULT_UI_GENERATION_TOKENS = 192
+_HF_GENERATION_MAX_TIME_SECONDS = 60.0
 
 
 def _looks_large_hf_model(model_path: str) -> bool:
@@ -481,10 +623,10 @@ def _device_map_max_memory() -> dict[int, str]:
         candidates: list[tuple[int, int]] = []
         for idx in range(torch.cuda.device_count()):
             try:
-                free_bytes, _total_bytes = torch.cuda.mem_get_info(idx)
+                free_bytes, _ = torch.cuda.mem_get_info(idx)
             except Exception:
                 continue
-            usable_gib = int((free_bytes / (1024 ** 3)) * 0.85)
+            usable_gib = int((free_bytes / (1024**3)) * 0.85)
             if usable_gib >= 8:
                 candidates.append((idx, usable_gib))
         try:
@@ -499,31 +641,42 @@ def _device_map_max_memory() -> dict[int, str]:
 
 def _make_hf_config(model_path: str, device: str) -> Any:
     from sirin.models.inference import HFConfig
+    from sirin.ui import presets
 
     model_path = _clean_field(model_path)
     device = _clean_field(device)
-    auto_device_map = (
-        device.lower() in ('auto', 'device_map:auto', 'device-map:auto')
-        or (device.lower() == 'cuda' and _looks_large_hf_model(model_path))
+    auto_device_map = device.lower() in (
+        'auto',
+        'device_map:auto',
+        'device-map:auto',
+    ) or (device.lower() == 'cuda' and _looks_large_hf_model(model_path))
+    revision = (
+        LONGMEMEVAL_PROFILE['model'].get('revision')
+        if model_path == LONGMEMEVAL_PROFILE['model']['path']
+        else presets.PSILOQA_MODEL_REVISION
+        if model_path == presets.PSILOQA_MODEL_ID
+        else None
     )
     if auto_device_map:
         return HFConfig(
             model_path=model_path,
+            revision=revision,
             device=None,
             device_map='auto',
             max_memory=_device_map_max_memory() or None,
             attn_implementation='sdpa',
         )
-    return HFConfig(model_path=model_path, device=device)
+    return HFConfig(model_path=model_path, device=device, revision=revision)
 
 
-JUDGE_MODELS = [
-    'openai/gpt-3.5-turbo',
-    'nvidia/nemotron-3-super-120b-a12b:free',
-]
-HF_MODELS = ['Qwen/Qwen3.5-4B', 'Qwen/Qwen2.5-3B-Instruct']
+HF_MODELS = ['Qwen/Qwen3-4B', 'Qwen/Qwen2.5-3B-Instruct', 'Qwen/Qwen3.5-4B']
 LOCAL_DEVICES = ['cuda', 'cpu']
-API_BACKENDS = (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, CUSTOM_PROVIDER)
+API_BACKENDS = (
+    OPENAI_PROVIDER,
+    OPENROUTER_PROVIDER,
+    ANTHROPIC_PROVIDER,
+    CUSTOM_PROVIDER,
+)
 
 
 @_cache_resource
@@ -532,6 +685,7 @@ def load_generator(
     model_path: str,
     device: str,
     custom_base_url: str = '',
+    api_key: str = '',
 ) -> Any:
     model_path = _clean_field(model_path)
     device = _clean_field(device)
@@ -544,7 +698,8 @@ def load_generator(
         from sirin.inference.adapters.openai_adapter import OpenAIModelAdapter
         from sirin.models.inference import OpenAIConfig
 
-        provider = resolve_api_provider(backend, custom_base_url)
+        # An explicit pasted key wins; '' falls back to the provider env var inside resolve.
+        provider = resolve_api_provider(backend, custom_base_url, api_key=api_key or None)
         return OpenAIModelAdapter(
             OpenAIConfig(
                 model_path=model_path,
@@ -568,7 +723,7 @@ def _unload_cached_models() -> None:
         ModelManager.unload_all_models()
     except Exception:
         pass
-    for func in (load_generator, load_detector, build_preset_detector):
+    for func in (load_generator, load_detector):
         clear = getattr(func, 'clear', None)
         if clear:
             clear()
@@ -590,14 +745,33 @@ def generate_answer(
     prompt: str,
     max_tokens: int,
     temperature: float,
+    messages: list[dict[str, str]] | None = None,
 ) -> str:
-    inputs: list[Any] = (
-        [prompt] if backend == 'vLLM' else [[{'role': 'user', 'content': prompt}]]
+    if messages and backend == 'vLLM':
+        if not adapter.is_loaded:
+            adapter.load()
+        tokenizer = adapter.tokenizer or adapter.model.get_tokenizer()
+        inputs: list[Any] = [
+            tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        ]
+    elif messages:
+        inputs = [messages]
+    else:
+        inputs = (
+            [prompt] if backend == 'vLLM' else [[{'role': 'user', 'content': prompt}]]
+        )
+    sample_kwargs = (
+        {'max_time': _HF_GENERATION_MAX_TIME_SECONDS} if backend == 'HF' else {}
     )
     return adapter.sample(
         inputs,
         max_tokens=max_tokens,
         temperature=temperature,
+        **sample_kwargs,
     )[0]
 
 
@@ -625,12 +799,14 @@ def load_detector(
     adapter = hydra.utils.instantiate(cfg.model_adapter)
     processor = hydra.utils.instantiate(cfg.feature_processor, extractor=adapter)
     detector = hydra.utils.instantiate(cfg.detector, feature_processor=processor)
+    task = getattr(cfg, 'task_type', None)
+    if task is not None:
+        detector._ui_task = getattr(task, 'value', str(task))
     if checkpoint_dir:
         detector.load(require_checkpoint_path(checkpoint_dir))
     return detector
 
 
-@_cache_resource
 def build_preset_detector(
     preset_name: str,
     device: str,
@@ -649,18 +825,51 @@ def build_preset_detector(
     gen_base_url = _clean_field(gen_base_url)
     judge_model = _clean_field(judge_model)
     preset = presets.PRESETS[preset_name]
+    sequence_uq = LONGMEMEVAL_PROFILE['uncertainty']['sequence']
+    hallucination_threshold = sequence_uq['thresholds']['hallucination_strict']
+    use_longmemeval_uq = (
+        preset_name == 'Uncertainty — Sequence (zero-shot)'
+        and gen_model == LONGMEMEVAL_PROFILE['model']['path']
+        and hallucination_threshold.get('runtime_compatible', False)
+    )
     generator_adapter = None
-    if gen_backend == 'HF' and preset.family in ('uncertainty', 'probing'):
-        generator_adapter = load_generator('HF', gen_model, device)
+    locked_psiloqa_probe = preset_name == presets.PSILOQA_TOKEN_LINEAR_PRESET
+    if preset.family == 'uncertainty' or (
+        gen_backend == 'HF'
+        and preset.family == 'probing'
+        and not locked_psiloqa_probe
+    ):
+        generator_adapter = load_generator(gen_backend, gen_model, device, gen_base_url)
     checkpoint_dir = require_checkpoint_path(checkpoint_dir) if checkpoint_dir else ''
-    return preset.build(
+    detector = preset.build(
         device=device,
         checkpoint_dir=checkpoint_dir or None,
         generator_adapter=generator_adapter,
         judge_model=judge_model or None,
         judge_api_key=judge_api_key or None,
         api_provider=judge_provider,
+        uncertainty_threshold=(
+            hallucination_threshold['value'] if use_longmemeval_uq else None
+        ),
+        uncertainty_max_new_tokens=(
+            sequence_uq['max_new_tokens'] if use_longmemeval_uq else None
+        ),
+        uncertainty_threshold_source=(
+            'LongMemEval-S hallucination_strict; Qwen3.5-35B-A3B; '
+            'full-set optimal threshold (n=409)'
+            if use_longmemeval_uq
+            else None
+        ),
     )
+    if (
+        preset_name == LONGMEMEVAL_PROFILE['ui']['default_preset']
+        and gen_model == LONGMEMEVAL_PROFILE['model']['path']
+    ):
+        detector._ui_threshold_source = (
+            'LongMemEval-S hallucination_strict; Qwen3.5-35B-A3B; '
+            'optimal threshold selected on the checkpoint validation split'
+        )
+    return detector
 
 
 SUGGESTIONS = [
@@ -669,126 +878,60 @@ SUGGESTIONS = [
     'Context: Marie Curie won Nobel Prizes in Physics (1903) and Chemistry (1911).\nQuestion: How many Nobel Prizes did Marie Curie win, and in what fields?',
 ]
 
-RECORDED_DEMO_SCORE = 0.9983455751552265
-RECORDED_DEMO_ANSWER = 'One'
-RECORDED_DEMO_GOLD = '2'
-RECORDED_DEMO_QUOTES = (
-    'they re-watched Avengers: Endgame yesterday',
-    're-watched Spider-Man: No Way Home',
-)
-RECORDED_DEMO_PROMPT = """Answer the user's question based only on the provided context.
 
-User Question: How many Marvel movies did I re-watch?
+def _api_key_input(st: Any, provider: str, *, label: str) -> str:
+    """Masked API-key input for one provider; the pasted key lives only in session memory.
 
-Relevant Context:
-[Context 1]
-Content: The user reiterated on 2023-05-21T12:58:00 their interest in movies with a similar sense of scale and action to Avengers: Endgame, having re-watched the Marvel film recently.
-
-[Context 2]
-Content: On 2023-05-27T13:09:00, a user who enjoys Marvel movies and re-watched Spider-Man: No Way Home requested recommendations for non-Marvel superhero films.
-
-Return a very concise answer."""
-
-
-def _is_recorded_demo_prompt(prompt: str) -> bool:
-    prompt_l = prompt.lower()
-    return all(
-        needle in prompt_l
-        for needle in (
-            'how many marvel movies did i re-watch',
-            'avengers: endgame',
-            'spider-man: no way home',
-        )
+    Keyed by provider (``api_key:{provider}``) so a key never follows a provider switch, and so the
+    judge and generator blocks can share one widget when both target the same provider. The key is
+    never persisted, logged, exported, or echoed; the env var stays a fallback resolved off the empty
+    return here. Caption is three-state: pasted / env detected / neither.
+    """
+    store_key = f'api_key:{provider}'
+    pasted = st.text_input(
+        label,
+        type='password',
+        key=store_key,
+        help='Kept only in this browser session — never saved, logged, or exported.',
     )
-
-
-def _recorded_demo_message() -> dict[str, Any]:
-    return {
-        'role': 'assistant',
-        'content': RECORDED_DEMO_ANSWER,
-        'artifact': {
-            'source': 'recorded_offline_replay',
-            'sample_id': '681a1674',
-            'model': 'Qwen/Qwen3.5-35B-A3B',
-            'dataset': 'LongMemEval-s',
-            'run_id': '20260703_120500',
-            'generated_output': RECORDED_DEMO_ANSWER,
-            'gold_answer': RECORDED_DEMO_GOLD,
-            'evidence_quotes': list(RECORDED_DEMO_QUOTES),
-            'detector_input': 'hidden states only; no gold answer or failure label',
-        },
-        'view': {
-            'level': 'sequence',
-            'display_mode': 'gauge',
-            'probability': RECORDED_DEMO_SCORE,
-            'prediction': 1,
-            'threshold': 0.5,
-            'calibrated': True,
-            'family': 'probing',
-            'reasoning': (
-                'Recorded LongMemEval/Qwen3.5-35B-A3B run for sample 681a1674. '
-                'The generated answer was "One", while the evidence mentions two re-watched '
-                'Marvel movies: Avengers: Endgame and Spider-Man: No Way Home.'
-            ),
-        },
-        'token_view': {
-            'level': 'token',
-            'display_mode': 'heatmap',
-            'answer': RECORDED_DEMO_ANSWER,
-            'scores': [RECORDED_DEMO_SCORE],
-            'norm_scores': [RECORDED_DEMO_SCORE],
-            'predictions': [1],
-            'calibrated': True,
-            'family': 'probing',
-        },
-    }
-
-
-def _recorded_demo_messages() -> list[dict[str, Any]]:
-    return [
-        {'role': 'user', 'content': RECORDED_DEMO_PROMPT},
-        _recorded_demo_message(),
-    ]
-
-
-def _hero(st: Any) -> None:
-    st.html(
-        '<div style="background:var(--sirin-surface);border:1px solid var(--sirin-border);border-radius:18px;'
-        'padding:1.5rem 1.7rem;margin:0.2rem 0 1.1rem;box-shadow:0 20px 50px var(--sirin-shadow);'
-        'backdrop-filter:blur(18px) saturate(135%);-webkit-backdrop-filter:blur(18px) saturate(135%);">'
-        '<div style="font-family:var(--sirin-mono);font-size:0.72rem;letter-spacing:0.16em;'
-        'text-transform:uppercase;color:var(--sirin-hot);margin-bottom:0.55rem;">'
-        'Hallucination &amp; answerability detection</div>'
-        '<div style="font-size:1.55rem;font-weight:700;letter-spacing:-0.015em;'
-        'margin-bottom:0.45rem;">Chat with a model — then see what SIRIN sees.</div>'
-        '<div style="color:var(--sirin-muted);max-width:62ch;line-height:1.6;">'
-        'Give a question together with its context. SIRIN generates the answer, then flags '
-        'unfaithful or unanswerable content at the sequence, token, or claim level.</div>'
-        '<div style="margin-top:1.1rem;display:inline-flex;flex-direction:column;gap:0.2rem;'
-        'font-family:var(--sirin-mono);font-size:0.82rem;background:var(--sirin-surface-2);'
-        'border:1px solid var(--sirin-border);border-radius:10px;padding:0.65rem 0.85rem;'
-        'color:var(--sirin-muted);">'
-        '<span><span style="color:var(--sirin-mint);">Context:</span> The Eiffel Tower is in Paris.</span>'
-        '<span><span style="color:var(--sirin-mint);">Question:</span> In which city is the Eiffel Tower?</span>'
-        '</div></div>'
-    )
+    key_env = API_PROVIDER_KEY_ENVS.get(provider, '')
+    if pasted:
+        st.caption(':material/key: Key set for this session.')
+    elif key_env and os.getenv(key_env):
+        st.caption(f':material/key: ✓ {key_env} detected.')
+    else:
+        st.caption(f':red[:material/key_off: Paste a key or set {key_env}.]')
+    return str(pasted or '')
 
 
 def _sidebar(st: Any) -> dict[str, Any]:
     from sirin.ui import presets
 
+    key_rendered: set[str] = set()
+
     with st.sidebar:
-        st.header(':material/tune: Detector')
+        st.html('<p class="sirin-side-heading">Detector</p>')
         preset_objs = presets.list_presets()
+        local_profile = LONGMEMEVAL_PROFILE if is_trusted_local() else None
+        default_preset = (
+            local_profile['ui']['default_preset']
+            if local_profile
+            else presets.PSILOQA_TOKEN_LINEAR_PRESET
+        )
         names = [p.name for p in preset_objs]
+        if default_preset in names:
+            names.remove(default_preset)
+            names.insert(0, default_preset)
         by_name = {p.name: p for p in preset_objs}
         preset_name = st.selectbox('Preset', names)
         preset = by_name[preset_name]
-        st.caption(preset.description)
+        census = presets.detector_census_caption(preset)
+        st.caption(census or preset.description)
 
         is_judge = bool(getattr(preset, 'is_judge', False)) or preset.family == 'judge'
         judge_provider = OPENROUTER_PROVIDER
-        judge_model = JUDGE_MODELS[0]
+        judge_model = ''
+        judge_api_key = ''
         if is_judge:
             judge_provider = st.selectbox(
                 'Judge provider',
@@ -798,71 +941,110 @@ def _sidebar(st: Any) -> dict[str, Any]:
                 'Judge model',
                 value=provider_models(judge_provider)[0],
             )
-            key_env = API_PROVIDER_KEY_ENVS[judge_provider]
-            has_key = bool(os.getenv(key_env))
-            if has_key:
-                st.caption(f':material/key: {key_env} detected.')
-            else:
-                st.caption(f':red[:material/key_off: Set {key_env} to use the API judge.]')
+            judge_api_key = _api_key_input(st, judge_provider, label='Judge API key')
+            key_rendered.add(judge_provider)
 
         checkpoint_dir = ''
         if preset.requires_checkpoint:
-            checkpoint_dir = st.text_input(
-                'Checkpoint directory',
-                value='',
-                help="Leave blank to use this preset's built-in checkpoint (if any).",
-            )
+            checkpoint_default = ''
+            if local_profile:
+                default = local_profile['ui']['default_checkpoint']
+                if default['preset'] == preset_name:
+                    checkpoint_default = local_profile['checkpoints'][default['task']][
+                        default['detector']
+                    ]['path']
+            if getattr(preset, 'builtin_checkpoint', None) and not checkpoint_default:
+                st.caption('Using built-in PsiloQA checkpoint')
+            else:
+                checkpoint_dir = st.text_input(
+                    'Checkpoint directory',
+                    value=checkpoint_default,
+                    key=f'checkpoint_dir:{preset_name}',
+                    help="Leave blank to use this preset's built-in checkpoint (if any).",
+                )
 
         st.divider()
-        st.header(':material/smart_toy: Generator')
-        backends = ['HF', OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, 'vLLM']
+        st.html('<p class="sirin-side-heading">Generator</p>')
+        backends = [
+            'HF',
+            OPENAI_PROVIDER,
+            OPENROUTER_PROVIDER,
+            ANTHROPIC_PROVIDER,
+            'vLLM',
+        ]
         if is_trusted_local():
             backends.append(CUSTOM_PROVIDER)
         backend = st.selectbox('Backend', backends)
         custom_base_url = ''
+        gen_api_key = ''
         if backend in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER):
             model_path = st.text_input('Model', value=provider_models(backend)[0])
             device = 'cpu'
+            if backend in key_rendered:
+                # Judge and generator target the same provider — one pasted key serves both.
+                gen_api_key = str(st.session_state.get(f'api_key:{backend}', '') or '')
+                st.caption(f':material/key: Using the {backend} key pasted above.')
+            else:
+                gen_api_key = _api_key_input(st, backend, label='API key')
+                key_rendered.add(backend)
         elif backend == CUSTOM_PROVIDER:
-            model_path = st.text_input('Model', value='')
-            custom_base_url = st.text_input('API base URL', value='')
+            generation_api = (
+                local_profile.get('generation_api', {}) if local_profile else {}
+            )
+            model_path = st.text_input(
+                'Model', value=(local_profile['model']['path'] if local_profile else '')
+            )
+            custom_base_url = st.text_input(
+                'API base URL', value=str(generation_api.get('base_url') or '')
+            )
             device = 'cpu'
         else:
-            model_path = st.text_input('Model', value=HF_MODELS[0])
+            model_path = st.text_input(
+                'Model',
+                value=(
+                    local_profile['model']['path'] if local_profile else HF_MODELS[0]
+                ),
+                key='generator_local_model',
+            )
             if is_trusted_local():
-                device = st.text_input('Device', value='cuda')
+                device = st.text_input(
+                    'Device',
+                    value=(
+                        local_profile['model']['device'] if local_profile else 'cuda'
+                    ),
+                )
             else:
                 device = st.selectbox('Device', LOCAL_DEVICES)
-        max_tokens = st.number_input('Max tokens', min_value=1, value=8192)
-        temperature = st.slider('Temperature', min_value=0.0, max_value=2.0, value=0.7)
-        if st.button('Clear chat', key='clear_chat'):
-            st.session_state['messages'] = []
-            st.session_state.pop('pending', None)
-            if hasattr(st, 'rerun'):
-                st.rerun()
-        if st.button('Load A* recorded generation', key='load_demo_replay'):
-            st.session_state['messages'] = _recorded_demo_messages()
-            st.session_state.pop('pending', None)
-            if hasattr(st, 'rerun'):
-                st.rerun()
-        if st.button('Unload GPU models', key='unload_gpu_models'):
-            _unload_cached_models()
+        if backend == 'HF':
+            st.caption(
+                f'Device: {device} · bf16 · one shared model for '
+                'generation and probing'
+            )
+        else:
+            st.caption(f'{backend} · remote generation')
+        max_tokens = st.number_input(
+            'Max tokens',
+            min_value=1,
+            value=(
+                local_profile['ui']['max_tokens']
+                if local_profile
+                else _DEFAULT_UI_GENERATION_TOKENS
+            ),
+            key='generation_max_tokens',
+        )
+        temperature = st.slider(
+            'Temperature',
+            min_value=0.0,
+            max_value=2.0,
+            value=(local_profile['ui']['temperature'] if local_profile else 0.7),
+            key='generation_temperature',
+        )
 
         use_hydra = False
         config_dir = _default_config_dir()
         config_name = 'train'
         overrides_text = 'train_dataset_path=null eval_dataset_path=null'
         hydra_checkpoint = ''
-        if is_trusted_local():
-            with st.expander('Advanced: Hydra detector', icon=':material/build:'):
-                use_hydra = st.checkbox('Use Hydra config instead of preset', value=False)
-                config_dir = st.text_input('Config directory', value=_default_config_dir())
-                config_name = st.text_input('Config name', value='train')
-                overrides_text = st.text_area(
-                    'Hydra overrides',
-                    value='train_dataset_path=null eval_dataset_path=null',
-                )
-                hydra_checkpoint = st.text_input('Hydra checkpoint directory', value='')
 
     return {
         'backend': backend,
@@ -874,6 +1056,9 @@ def _sidebar(st: Any) -> dict[str, Any]:
         'preset_name': preset_name,
         'judge_provider': judge_provider,
         'judge_model': _clean_field(judge_model),
+        # Session-only pasted keys (never persisted/exported); '' means fall back to the env var.
+        'judge_api_key': judge_api_key,
+        'api_key': gen_api_key,
         'checkpoint_dir': _clean_path_field(checkpoint_dir),
         'use_hydra': use_hydra,
         'config_dir': _clean_path_field(config_dir),
@@ -900,13 +1085,29 @@ def _build_detector(cfg: dict[str, Any]) -> Any:
         cfg.get('custom_base_url', ''),
         cfg['judge_model'],
         cfg.get('judge_provider', OPENROUTER_PROVIDER),
-        '',  # preset resolves the provider-specific API key from the environment.
+        # Pasted key wins; '' lets the preset resolve the provider env var as fallback.
+        cfg.get('judge_api_key', ''),
     )
 
 
 def _detector_setup_error(cfg: dict[str, Any]) -> str | None:
-    path = cfg.get('hydra_checkpoint') if cfg.get('use_hydra') else cfg.get('checkpoint_dir')
+    if (
+        cfg.get('preset_name') == 'Probing — Sequence TabPFN (checkpoint)'
+        and cfg.get('backend')
+        and cfg.get('backend') != 'HF'
+    ):
+        return (
+            'Sequence probing requires the HF backend so SIRIN can extract hidden '
+            'states from the selected generator model.'
+        )
+    path = (
+        cfg.get('hydra_checkpoint')
+        if cfg.get('use_hydra')
+        else cfg.get('checkpoint_dir')
+    )
     if not path:
+        if cfg.get('preset_name') == 'Probing — Sequence TabPFN (checkpoint)':
+            return 'This preset needs a trained checkpoint directory.'
         return None
     try:
         require_checkpoint_path(path)
@@ -919,21 +1120,6 @@ def _detector_setup_error(cfg: dict[str, Any]) -> str | None:
     return None
 
 
-def _should_preload_detector(cfg: dict[str, Any]) -> bool:
-    if cfg.get('use_hydra') or cfg.get('backend') != 'HF':
-        return False
-    preset = str(cfg.get('preset_name') or '')
-    return preset.startswith('Probing —') or preset.startswith('Uncertainty —')
-
-
-def _should_preflight_detector_input(cfg: dict[str, Any]) -> bool:
-    return _should_preload_detector(cfg) and _looks_large_hf_model(str(cfg.get('model_path') or ''))
-
-
-def _preflight_detector_input(detector: Any, prompt: str) -> None:
-    detector.detect([build_sample(prompt, _DETECTOR_PREFLIGHT_ANSWER)])
-
-
 def _max_detector_input_chars() -> int:
     try:
         return max(1, int(os.getenv(_MAX_DETECTOR_INPUT_CHARS_ENV, '')))
@@ -941,432 +1127,453 @@ def _max_detector_input_chars() -> int:
         return _DEFAULT_MAX_DETECTOR_INPUT_CHARS
 
 
-def _detector_input_size_error(prompt: str, answer: str = _DETECTOR_PREFLIGHT_ANSWER) -> str | None:
+def _detector_input_size_error(
+    prompt: str,
+    answer: str = '',
+) -> str | None:
     size = len(prompt) + len(answer)
     limit = _max_detector_input_chars()
+    if any(prompt == case['answer_prompt'] for case in load_demo_cases().values()):
+        limit = max(limit, size)
     if size <= limit:
         return None
     return (
         f'Detector input is too large for the live UI guard ({size:,} characters; '
-        f'limit {limit:,}). Use the mini prompt from docs/ui_example.md or set '
+        f'limit {limit:,}). Shorten the input or set '
         f'`{_MAX_DETECTOR_INPUT_CHARS_ENV}` higher before starting Streamlit.'
     )
 
 
-def _prepare_detector_for_turn(cfg: dict[str, Any], prompt: str) -> Any:
-    detector = _build_detector(cfg)
-    if _should_preflight_detector_input(cfg):
-        _preflight_detector_input(detector, prompt)
-        _release_generation_cache()
-    return detector
-
-
-def _shape_mismatch_sizes(error: Exception) -> tuple[int, int] | None:
-    match = _FEATURE_SHAPE_MISMATCH_RE.search(str(error))
-    if not match:
-        return None
-    expected = tuple(int(part.strip()) for part in match.group(1).split(','))
-    got = tuple(int(part.strip()) for part in match.group(2).split(','))
-    return expected[-1], got[-1]
-
-
-def _selected_hf_hidden_size(model_path: str) -> int | None:
-    from sirin.ui.presets import _hf_hidden_size
-
-    return _hf_hidden_size(model_path)
-
-
-def _looks_like_stale_extractor(error: Exception, cfg: dict[str, Any]) -> bool:
-    sizes = _shape_mismatch_sizes(error)
-    if sizes is None or cfg.get('backend') != 'HF':
-        return False
-    expected, got = sizes
-    selected = _selected_hf_hidden_size(_clean_field(cfg.get('model_path')))
-    return selected == expected and got != expected
-
-
-def _release_generation_cache() -> None:
-    try:
-        import gc
-
-        gc.collect()
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
-
-
 def requires_external_confirmation(cfg: dict[str, Any]) -> bool:
-    return cfg.get('backend') in API_BACKENDS or str(cfg.get('preset_name', '')).startswith('Judge — API')
+    if cfg.get('backend') == CUSTOM_PROVIDER:
+        host = urlparse(str(cfg.get('custom_base_url') or '')).hostname
+        if host in {'127.0.0.1', 'localhost', '::1'}:
+            return False
+    return cfg.get('backend') in API_BACKENDS or str(
+        cfg.get('preset_name', '')
+    ).startswith('Judge — API')
 
 
-def _external_confirmed(st: Any, cfg: dict[str, Any]) -> bool:
+def _external_confirmed(
+    st: Any,
+    cfg: dict[str, Any],
+    *,
+    key: str = 'external_api_consent',
+) -> bool:
     if not requires_external_confirmation(cfg):
         return True
     with st.sidebar:
         return st.checkbox(
             'Allow external API calls',
             value=False,
-            key='external_api_consent',
+            key=key,
             help='Context, questions, generated answers, and judge prompts may be sent to the selected external API provider.',
         )
 
 
-def _run_turn(st: Any, prompt: str, cfg: dict[str, Any], visualizers: Any) -> dict[str, Any]:
-    message: dict[str, Any] = {'role': 'assistant', 'content': ''}
-    if _is_recorded_demo_prompt(prompt):
-        message = _recorded_demo_message()
-        st.markdown(message['content'])
-        _render_analysis(st, message, visualizers)
-        return message
+def _inspection_prompt(context: str, question: str) -> str:
+    return f'Context:\n{context.strip()}\n\nQuestion:\n{question.strip()}'
 
+
+def _appearance_sidebar(st: Any, *, key_prefix: str = '') -> None:
+    def store_workspace_appearance() -> None:
+        if key_prefix != 'sirin.workspace.v2.':
+            return
+        stored = st.session_state.get('sirin.workspace.v2.view_state')
+        stored = dict(stored) if isinstance(stored, dict) else {}
+        appearance = {
+            'theme': str(st.session_state.get(f'{key_prefix}ui_theme', 'Light')).lower(),
+            'motion': str(st.session_state.get(f'{key_prefix}bg_motion', 'Subtle')).lower(),
+        }
+        stored['appearance'] = appearance
+        st.session_state['sirin.workspace.v2.view_state'] = stored
+
+    with st.sidebar:
+        st.divider()
+        st.html('<p class="sirin-side-heading">Appearance</p>')
+        st.selectbox(
+            'Theme',
+            ['Light', 'Dark'],
+            key=f'{key_prefix}ui_theme',
+            on_change=store_workspace_appearance,
+        )
+        st.selectbox(
+            'Background motion',
+            ['Subtle', 'Static', 'Lively'],
+            key=f'{key_prefix}bg_motion',
+            on_change=store_workspace_appearance,
+            help='Silk backdrop animation. Static is lightest for low-power devices.',
+        )
+
+
+_V2_COMPONENT_KEY = 'sirin.workspace.v2'
+_V2_SESSION_KEY = 'sirin.workspace.v2.session'
+_V2_VIEW_STATE_KEY = 'sirin.workspace.v2.view_state'
+
+
+def _hydrate_v2_appearance(st: Any) -> None:
+    component_state = st.session_state.get(_V2_COMPONENT_KEY)
+    appearance = (
+        component_state.get('appearance')
+        if hasattr(component_state, 'get')
+        else None
+    )
+    if not isinstance(appearance, dict):
+        return
+    theme = {'light': 'Light', 'dark': 'Dark'}.get(
+        str(appearance.get('theme', '')).lower()
+    )
+    motion = {
+        'static': 'Static',
+        'subtle': 'Subtle',
+        'lively': 'Lively',
+    }.get(str(appearance.get('motion', '')).lower())
+    if theme:
+        st.session_state['sirin.workspace.v2.ui_theme'] = theme
+    if motion:
+        st.session_state['sirin.workspace.v2.bg_motion'] = motion
+
+
+def _pending_workspace(st: Any) -> str | None:
+    """Return the workspace the client just navigated to via the transient viewState event.
+
+    Client-side tab switches arrive as a one-shot ``viewState`` trigger on the component state.
+    Reading it here — before the payload is built — lets a pure navigation reconcile within its own
+    natural rerun without an extra ``st.rerun()`` and without the payload reverting the client's
+    optimistic switch.
+    """
+    component_state = st.session_state.get(_V2_COMPONENT_KEY)
+    view_state = component_state.get('viewState') if hasattr(component_state, 'get') else None
+    workspace = view_state.get('workspace') if isinstance(view_state, dict) else None
+    return workspace if workspace in {'analyze', 'runs', 'diagnostics'} else None
+
+
+def _v2_modules() -> tuple[Any, ...] | None:
+    try:
+        from sirin.ui.workspace import (
+            ActionEnvelope,
+            CapabilitySet,
+            DiagnosticsSummary,
+            RunEngine,
+            SetupSnapshot,
+            WorkspaceController,
+            WorkspaceSession,
+        )
+        from sirin.ui.workspace.component import render_workspace
+    except (ImportError, ModuleNotFoundError):
+        return None
+    return (
+        ActionEnvelope,
+        CapabilitySet,
+        DiagnosticsSummary,
+        RunEngine,
+        SetupSnapshot,
+        WorkspaceController,
+        WorkspaceSession,
+        render_workspace,
+    )
+
+
+def _dto(model: Any, values: dict[str, Any]) -> Any:
+    """Build a workspace DTO while tolerating additive backend fields."""
+    fields = getattr(model, 'model_fields', {})
+    filtered = {name: values[name] for name in fields if name in values}
+    return model.model_validate(filtered)
+
+
+def _request_value(request: Any, name: str, default: Any = '') -> Any:
+    if isinstance(request, dict):
+        return request.get(name, default)
+    return getattr(request, name, default)
+
+
+def _render_v2_native_attention(st: Any, tool: str) -> None:
+    with st.sidebar:
+        st.header(':material/troubleshoot: Diagnostics')
+        if st.button('Return to SIRIN workspace', key='sirin_v2_attention_return'):
+            st.session_state['attention_tool'] = ''
+            st.rerun()
+        st.caption('Trusted-local native attention tooling.')
+    _appearance_sidebar(st, key_prefix='sirin.workspace.v2.')
+    if tool == 'explorer':
+        from sirin.ui import attention_explorer
+
+        attention_explorer.render(st)
+        return
+    from sirin.ui import live_attention
+
+    live_attention.render(st)
+
+
+def _v2_prompt(request: Any) -> str:
+    context = str(_request_value(request, 'context') or '').strip()
+    question = str(_request_value(request, 'question') or '').strip()
+    prompt = str(_request_value(request, 'prompt') or '').strip()
+    mode = str(_request_value(request, 'mode') or '')
+    if prompt and (not context or mode == 'recordedReplay'):
+        return prompt
+    if context or question:
+        if not context or not question:
+            raise ValueError('Context and question are required.')
+        return _inspection_prompt(context, question)
+    if not prompt:
+        raise ValueError('Enter a prompt or a context and question.')
+    return prompt
+
+
+def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
+    (
+        ActionEnvelope,
+        CapabilitySet,
+        DiagnosticsSummary,
+        RunEngine,
+        SetupSnapshot,
+        WorkspaceController,
+        WorkspaceSession,
+        render_workspace,
+    ) = modules
+
+    from sirin.inference.model_manager import ModelManager
+    from sirin.ui.workspace.run_engine import ConsentRequiredError
+
+    cfg = _sidebar(st)
+    external_confirmed = _external_confirmed(
+        st,
+        cfg,
+        key='sirin.workspace.v2.external_api_consent',
+    )
     setup_error = _detector_setup_error(cfg)
-    if setup_error:
-        answer = f"Detection setup failed: {setup_error}"
-        message['content'] = answer
-        st.error(answer)
-        return message
+    _appearance_sidebar(st, key_prefix='sirin.workspace.v2.')
 
-    if _should_preload_detector(cfg):
-        size_error = _detector_input_size_error(prompt)
+    # Keys never enter any derived artifact (digest, snapshot, provenance) — drop them here.
+    digest_cfg = {k: v for k, v in cfg.items() if k not in {'api_key', 'judge_api_key'}}
+    setup_digest = hashlib.sha256(
+        json.dumps(digest_cfg, sort_keys=True, default=str).encode('utf-8')
+    ).hexdigest()
+    from sirin.ui import presets
+    from sirin.ui.workspace.contracts import derive_score_semantics
+
+    preset = presets.PRESETS[cfg['preset_name']]
+    detector_family = preset.family
+    detector_level = 'token' if 'Token' in cfg['preset_name'] else 'sequence'
+    calibrated = bool(getattr(preset, 'calibrated', False))
+    preset_layer = getattr(preset, 'layer', None)
+    if not isinstance(preset_layer, int) or preset_layer < 0:
+        preset_layer = None
+    score_semantics = derive_score_semantics(
+        calibrated=calibrated,
+        family=detector_family,
+        level=detector_level,
+    )
+    model_id = cfg['model_path']
+    if Path(model_id).is_absolute():
+        model_id = Path(model_id).name
+    setup_values = {
+        'task': 'answerability'
+        if 'Answerability' in cfg['preset_name']
+        else 'faithfulness',
+        'detector_preset': cfg['preset_name'],
+        'detector_family': detector_family,
+        'detector_level': detector_level,
+        'model_id': model_id or None,
+        'provider_label': cfg['backend'],
+        'calibrated': calibrated,
+        'score_semantics': score_semantics,
+        'layer': preset_layer,
+    }
+    setup = _dto(SetupSnapshot, setup_values)
+    model_loaded = bool(getattr(ModelManager, '_active_models', {}))
+    trusted_local = is_trusted_local()
+    capabilities = _dto(
+        CapabilitySet,
+        {
+            'trusted_local': trusted_local,
+            'external_calls': external_confirmed,
+            'external_calls_confirmed': external_confirmed,
+            'can_generate': external_confirmed and setup_error is None,
+            'can_detect': external_confirmed and setup_error is None,
+            'can_diagnose': is_trusted_local(),
+            'can_capture': is_trusted_local(),
+            'can_unload': is_trusted_local(),
+            'can_import': True,
+            'can_export': True,
+            'detailed_diagnostics': trusted_local,
+            'can_refresh_diagnostics': trusted_local,
+            'can_capture_attention': False,
+            'can_unload_models': trusted_local,
+            'can_open_cached_attention': trusted_local,
+            'can_open_live_attention': trusted_local,
+        },
+    )
+    diagnostics = _dto(
+        DiagnosticsSummary,
+        {
+            'runtime': 'Python · Streamlit',
+            'device': cfg['device'] if trusted_local and model_loaded else 'Loads on first run',
+            'model_loaded': model_loaded,
+            'active_model': model_id if model_loaded else None,
+            'attention_available': trusted_local,
+            # Shared-safe redaction is already stated once by the diagnostics privacy banner; do not
+            # echo it here. Only trusted-local carries an extra, non-redundant message.
+            'message': 'Native attention tools are available.' if trusted_local else None,
+        },
+    )
+
+    def generate(request: Any, _setup: Any) -> str:
+        if requires_external_confirmation(cfg) and not external_confirmed:
+            raise ConsentRequiredError(
+                'External API calls need your consent. Turn on “Allow external '
+                'API calls” in the sidebar, then run again.'
+            )
+        prompt = _v2_prompt(request)
+        adapter = load_generator(
+            cfg['backend'],
+            cfg['model_path'],
+            cfg['device'],
+            cfg.get('custom_base_url', ''),
+            cfg.get('api_key', ''),
+        )
+        raw = generate_answer(
+            adapter,
+            cfg['backend'],
+            prompt,
+            cfg['max_tokens'],
+            cfg['temperature'],
+        )
+        answer, _reason = _split_thinking(raw)
+        return answer
+
+    def detect(answer: str, request: Any, _setup: Any) -> dict[str, Any]:
+        if requires_external_confirmation(cfg) and not external_confirmed:
+            raise ConsentRequiredError(
+                'External API calls need your consent. Turn on “Allow external '
+                'API calls” in the sidebar, then run again.'
+            )
+        prompt = _v2_prompt(request)
+        setup_error = _detector_setup_error(cfg)
+        if setup_error:
+            raise ValueError(f'Detection setup failed: {setup_error}')
+        size_error = _detector_input_size_error(prompt, answer)
         if size_error:
-            answer = f'Detection setup failed before generation: {size_error}'
-            message['content'] = answer
-            st.error(answer)
-            return message
+            raise ValueError(size_error)
+        detector = _build_detector(cfg)
+        result = detector.detect([build_sample(prompt, answer.strip())])
+        view = detection_view_model(result, answer.strip(), detector)
+        return view
 
-    detector = None
-    if _should_preload_detector(cfg):
+    def trusted_diagnostic(operation: Any) -> None:
+        if not is_trusted_local():
+            raise ValueError('Trusted-local mode is required for this action.')
         try:
-            with st.spinner('Preparing SIRIN detector...'):
-                detector = _prepare_detector_for_turn(cfg, prompt)
-        except Exception as error:  # noqa: BLE001 - fail before the user waits for generation
-            if _looks_like_stale_extractor(error, cfg):
-                try:
-                    _unload_cached_models()
-                    with st.spinner('Preparing SIRIN detector...'):
-                        detector = _prepare_detector_for_turn(cfg, prompt)
-                    error = None
-                except Exception as retry_error:  # noqa: BLE001 - surface retry failure below
-                    error = retry_error
-            if error is None:
-                pass
-            else:
-                _release_generation_cache()
-                answer = _detector_error_message(error, after_generation=False, cfg=cfg)
-                message['content'] = answer
-                st.error(answer)
-                return message
+            with ModelManager.exclusive_run():
+                operation()
+        except RuntimeError:
+            raise ValueError('Model runtime is busy; try again after the active run.') from None
+        except Exception:
+            raise ValueError('The diagnostics action failed.') from None
 
-    try:
-        with st.spinner('Generating answer...'):
-            adapter = load_generator(
-                cfg['backend'],
-                cfg['model_path'],
-                cfg['device'],
-                cfg.get('custom_base_url', ''),
-            )
-            answer = generate_answer(
-                adapter,
-                cfg['backend'],
-                prompt,
-                cfg['max_tokens'],
-                cfg['temperature'],
-            )
-    except Exception as error:  # noqa: BLE001 - surface any backend failure to the user
-        _release_generation_cache()
-        answer = f"Generation failed: {error}"
-        message['content'] = answer
-        st.error(answer)
-        return message
-
-    _release_generation_cache()
-    answer, thinking = _split_thinking(answer)
-    message['content'] = answer
-    if thinking:
-        message['hidden_thinking'] = thinking
-    st.markdown(answer)
-    _render_hidden_thinking(st, message)
-    if answer == _NO_FINAL_ANSWER:
-        return message
-    size_error = _detector_input_size_error(prompt, answer)
-    if size_error:
-        message['detector_error'] = f'Detector skipped: {size_error}'
-        if hasattr(st, 'warning'):
-            st.warning(message['detector_error'])
-        else:
-            st.error(message['detector_error'])
-        return message
-
-    try:
-        with st.spinner('Running SIRIN detector...'):
-            detector = detector or _build_detector(cfg)
-            result = detector.detect([build_sample(prompt, answer)])
-            view = detection_view_model(result, answer, detector)
-            message['view'] = view
-            message['method_scores'] = getattr(detector, 'last_method_scores', None)
-            processor = getattr(detector, 'feature_processor', None)
-            message['debug'] = debug_summary(getattr(processor, 'last_debug', None))
-    except Exception as error:  # noqa: BLE001 - detector loading/running can fail many ways
-        _release_generation_cache()
-        message['detector_error'] = _detector_error_message(error, cfg=cfg)
-        if hasattr(st, 'warning'):
-            st.warning(message['detector_error'])
-        else:
-            st.error(message['detector_error'])
-        return message
-
-    _render_analysis(st, message, visualizers)
-    return message
-
-
-def _detector_error_message(
-    error: Exception,
-    *,
-    after_generation: bool = True,
-    cfg: dict[str, Any] | None = None,
-) -> str:
-    text = str(error)
-    sizes = _shape_mismatch_sizes(error)
-    if sizes is not None:
-        expected, got = sizes
-        prefix = 'Detection failed' if after_generation else 'Detection setup failed before generation'
-        selected = _clean_field((cfg or {}).get('model_path'))
-        selected_text = f' Selected model: `{selected}`.' if selected else ''
-        return (
-            f'{prefix}: checkpoint/model hidden-size mismatch. '
-            f'The checkpoint expects hidden size {expected}, but the current extractor produced '
-            f'{got}.{selected_text} If the Model field is `Qwen/Qwen3.5-35B-A3B`, click "Unload GPU models" '
-            'or restart Streamlit to clear the cached extractor; otherwise set Model to a checkpoint-compatible model.'
-        )
-    if 'out of memory' in text.lower() and 'cuda' in text.lower():
-        action = (
-            'Click "Unload GPU models" or restart Streamlit to clear the loaded model, then rerun '
-            'with `Max tokens` set to 192 for the live 35B probing demo. If two GPUs are still '
-            'tight, launch with `SIRIN_UI_AUTO_DEVICE_MAP_GPUS=4` before opening the UI.'
-        )
-        if not after_generation:
-            return (
-                'Detection setup failed before generation: GPU out of memory while preparing the '
-                f'SIRIN detector. {action}'
-            )
-        return (
-            'Detector skipped: GPU out of memory after generation. The answer is shown above. '
-            f'{action}'
-        )
-    if after_generation:
-        return f'Detection failed: {text}'
-    return f'Detection setup failed before generation: {text}'
-
-
-def _render_hidden_thinking(st: Any, message: dict[str, Any]) -> None:
-    thinking = message.get('hidden_thinking')
-    if thinking:
-        with st.expander('Model thinking', expanded=False):
-            st.write(thinking)
-
-
-def _sequence_probing_token_view(view: dict[str, Any], answer: str) -> dict[str, Any] | None:
-    if view.get('level') != 'sequence' or view.get('family') != 'probing':
-        return None
-    score = _to_float(view.get('probability'))
-    if score is None:
-        return None
-    segments = _segments(answer)
-    n_tokens = sum(1 for _, _, piece in segments if not piece.isspace())
-    if n_tokens == 0:
-        return None
-    pred = view.get('prediction')
-    return {
-        'level': 'token',
-        'display_mode': 'sequence-broadcast',
-        'answer': answer,
-        'scores': [score] * n_tokens,
-        'norm_scores': [_clamp01(score)] * n_tokens,
-        'predictions': [pred] * n_tokens,
-        'calibrated': bool(view.get('calibrated', True)),
-        'family': 'probing',
-        'scale_label': 'sequence TabPFN score',
-        'signal_note': (
-            'Sequence-level TabPFN score broadcast across generated answer tokens. '
-            'This is not a separately trained per-token probe.'
+    diagnostic_actions = {
+        'refreshDiagnostics': lambda: trusted_diagnostic(lambda: None),
+        'unloadModels': lambda: trusted_diagnostic(_unload_cached_models),
+        'openCachedAttention': lambda: trusted_diagnostic(
+            lambda: st.session_state.__setitem__('attention_tool', 'explorer')
+        ),
+        'openLiveAttention': lambda: trusted_diagnostic(
+            lambda: st.session_state.__setitem__('attention_tool', 'live')
         ),
     }
 
-
-def _render_analysis(st: Any, message: dict[str, Any], visualizers: Any) -> None:
-    view = message.get('view')
-    if not view:
-        return
-    visualizers.render_result(st, view)
-    token_view = message.get('token_view') or _sequence_probing_token_view(
-        view,
-        str(message.get('content') or ''),
+    session = WorkspaceSession(st.session_state, key=_V2_SESSION_KEY)
+    previous_setup = st.session_state.get('sirin.workspace.v2.setup_digest')
+    if previous_setup is not None and previous_setup != setup_digest:
+        session.state.setup_revision += 1
+    st.session_state['sirin.workspace.v2.setup_digest'] = setup_digest
+    # Execution-compatibility signature (preset/model/backend/task only, not appearance or generation
+    # knobs) lets a late action survive a benign setup bump instead of being forced to resubmit.
+    setup_signature = hashlib.sha256(
+        json.dumps(
+            {
+                'preset': cfg['preset_name'],
+                'model': cfg['model_path'],
+                'backend': cfg['backend'],
+                'task': setup_values['task'],
+            },
+            sort_keys=True,
+        ).encode('utf-8')
+    ).hexdigest()
+    session.note_setup(setup_signature)
+    session.recover_interrupted()
+    controller = WorkspaceController(
+        session,
+        RunEngine(generate=generate, detect=detect),
+        diagnostic_actions=diagnostic_actions,
     )
-    if token_view:
-        visualizers.render_result(st, token_view)
-    method_scores = message.get('method_scores')
-    if method_scores:
-        with st.expander('Per-method uncertainty', icon=':material/query_stats:'):
-            visualizers._render_method_scores(st, method_scores)
-    if message.get('debug'):
-        with st.expander('Debug', icon=':material/bug_report:'):
-            st.json(message['debug'])
-    artifact = message.get('artifact')
-    if artifact:
-        _render_artifact_provenance(st, artifact)
-
-
-def _render_artifact_provenance(st: Any, artifact: dict[str, Any]) -> None:
-    evidence = artifact.get('evidence_quotes') or []
-    evidence_lines = '\n'.join(f'- `{quote}`' for quote in evidence)
-    with st.expander('Recorded artifact provenance', expanded=False):
-        st.markdown(
-            '**Recorded offline replay, not a live generation.**\n\n'
-            f'- Source: `{artifact.get("source", "unknown")}`\n'
-            f'- Dataset: `{artifact.get("dataset", "unknown")}`\n'
-            f'- Sample ID: `{artifact.get("sample_id", "unknown")}`\n'
-            f'- Run ID: `{artifact.get("run_id", "unknown")}`\n'
-            f'- Generator: `{artifact.get("model", "unknown")}`\n'
-            f'- Generated output shown in chat: `{artifact.get("generated_output", "")}`\n'
-            f'- Gold answer loaded from metadata: `{artifact.get("gold_answer", "")}`\n'
-            f'- Detector input: `{artifact.get("detector_input", "unknown")}`\n\n'
-            'Retrieved evidence loaded from the recorded sample metadata, not from the model answer:\n'
-            f'{evidence_lines}'
-        )
-
-
-def _set_attention_tool(st: Any, tool: str) -> None:
-    st.session_state['attention_tool'] = tool
-    if hasattr(st, 'rerun'):
+    controller.seed_landing(setup)
+    stored_view = st.session_state.get(_V2_VIEW_STATE_KEY)
+    stored_view = stored_view if isinstance(stored_view, dict) else {}
+    # A client-side tab switch reaches the server as a transient viewState event. Fold it into the
+    # canonical view BEFORE the payload is built so this rerun already reflects the clicked tab (no
+    # reverting flash) and needs no extra st.rerun(). Server-initiated view changes still win: they
+    # update the stored canonical, which this same read consults when no navigation event is pending.
+    workspace = _pending_workspace(st) or stored_view.get('workspace', 'analyze')
+    if workspace not in {'analyze', 'runs', 'diagnostics'}:
+        workspace = 'analyze'
+    view_state = {
+        'workspace': workspace,
+        'appearance': {
+            'theme': str(
+                st.session_state.get('sirin.workspace.v2.ui_theme', 'Light')
+            ).lower(),
+            'motion': str(
+                st.session_state.get('sirin.workspace.v2.bg_motion', 'Subtle')
+            ).lower(),
+        },
+    }
+    st.session_state[_V2_VIEW_STATE_KEY] = view_state
+    payload_model = controller.build_payload(
+        setup=setup,
+        capabilities=capabilities,
+        diagnostics=diagnostics,
+        view_state=view_state,
+    )
+    payload = payload_model.model_dump(mode='json', by_alias=True, exclude_none=True)
+    event = render_workspace(payload, key=_V2_COMPONENT_KEY) or {}
+    action_data = event.get('action')
+    if action_data:
+        action = ActionEnvelope.model_validate(action_data)
+        controller.handle(action, setup=setup, submission_error=setup_error)
         st.rerun()
-
-
-def _attention_tools_sidebar(st: Any) -> str:
-    with st.sidebar:
-        st.divider()
-        st.header(':material/troubleshoot: Attention tools')
-        active = str(st.session_state.get('attention_tool', '') or '')
-        if active:
-            if st.button('Back to chat', key='attention_back_to_chat'):
-                _set_attention_tool(st, '')
-                return ''
-            return active
-        st.caption('Open diagnostics without leaving Chat as the main workflow.')
-        if st.button('A* Marvel demo', key='attention_open_marvel_demo'):
-            _set_attention_tool(st, 'marvel_demo')
-        if st.button('Cached explorer', key='attention_open_explorer'):
-            _set_attention_tool(st, 'explorer')
-        if st.button('Live capture', key='attention_open_live'):
-            _set_attention_tool(st, 'live')
-        return str(st.session_state.get('attention_tool', '') or '')
-
-
-def _appearance_sidebar(st: Any) -> None:
-    with st.sidebar:
-        st.divider()
-        st.header(':material/palette: Appearance')
-        st.selectbox('Theme', ['Light', 'Dark'], key='ui_theme')
-        st.selectbox(
-            'Background motion',
-            ['Lively', 'Subtle', 'Static'],
-            key='bg_motion',
-            help='Silk backdrop animation. Static is lightest for low-power devices.',
-        )
+    if controller.advance():
+        st.rerun()
 
 
 def main() -> None:
     import streamlit as st
 
-    from sirin.ui import styles, visualizers
+    from sirin.ui import styles
+
+    modules = _v2_modules()
+    if modules is None:
+        raise RuntimeError(
+            "The unified SIRIN workspace is unavailable. Install the UI dependencies "
+            "and packaged component assets before starting Streamlit."
+        )
+    key_prefix = 'sirin.workspace.v2.'
+    _hydrate_v2_appearance(st)
+    motion = str(st.session_state.get(f'{key_prefix}bg_motion', 'Subtle')).lower()
+    theme = str(st.session_state.get(f'{key_prefix}ui_theme', 'Light')).lower()
 
     st.set_page_config(page_title='SIRIN', page_icon=str(LOGO_PATH), layout='wide')
-    motion = str(st.session_state.get('bg_motion', 'Lively')).lower()
-    theme = str(st.session_state.get('ui_theme', 'Light')).lower()
     styles.inject_global_styles(st, motion=motion, theme=theme)
-
     attention_tool = str(st.session_state.get('attention_tool', '') or '')
-    if attention_tool == 'marvel_demo':
-        from sirin.ui import attention_explorer
-
-        attention_explorer.render_marvel_demo(st)
+    if attention_tool in {'explorer', 'live'} and is_trusted_local():
+        _render_v2_native_attention(st, attention_tool)
         return
+    if attention_tool:
+        st.session_state['attention_tool'] = ''
+    _render_v2_workspace(st, modules)
 
-    st.markdown(
-        f'<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'
-        f'<img src="{_logo_data_uri()}" width="48" style="display:block;" alt="" aria-hidden="true"/>'
-        f'<h1 style="margin:0;font-size:2.5rem;font-weight:700;line-height:1;">SIRIN</h1>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        'Semantic Inconsistency Recognition & Inspection Nexus — '
-        'chat, then inspect hallucination & answerability signals.'
-    )
 
-    if attention_tool == 'explorer':
-        _attention_tools_sidebar(st)
-        from sirin.ui import attention_explorer
-
-        attention_explorer.render(st)
-        _appearance_sidebar(st)
-        return
-    if attention_tool == 'live':
-        _attention_tools_sidebar(st)
-        from sirin.ui import live_attention
-
-        live_attention.render(st)
-        _appearance_sidebar(st)
-        return
-
-    cfg = _sidebar(st)
-    external_confirmed = _external_confirmed(st, cfg)
-    _attention_tools_sidebar(st)
-    _appearance_sidebar(st)
-
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-
-    if not st.session_state.messages:
-        _hero(st)
-        st.markdown('###### Quick starts')
-        labels = [suggestion.split('\n')[0] for suggestion in SUGGESTIONS]
-        choice = st.pills(
-            'Suggestions',
-            labels,
-            selection_mode='single',
-            label_visibility='collapsed',
-        )
-        if choice:
-            st.session_state.pending = SUGGESTIONS[labels.index(choice)]
-            st.rerun()
-
-    for message in st.session_state.messages:
-        avatar = str(LOGO_PATH) if message['role'] == 'assistant' else None
-        with st.chat_message(message['role'], avatar=avatar):
-            st.markdown(message['content'])
-            if message['role'] == 'assistant':
-                _render_hidden_thinking(st, message)
-                _render_analysis(st, message, visualizers)
-
-    incoming = st.chat_input('Enter context + question...')
-    if not incoming and st.session_state.get('pending'):
-        incoming = st.session_state.pop('pending')
-
-    if incoming:
-        if not external_confirmed:
-            st.warning(
-                'External API calls are disabled until you confirm the sidebar disclosure.'
-            )
-            return
-        st.session_state.messages.append({'role': 'user', 'content': incoming})
-        with st.chat_message('user'):
-            st.markdown(incoming)
-        with st.chat_message('assistant', avatar=str(LOGO_PATH)):
-            message = _run_turn(st, incoming, cfg, visualizers)
-        st.session_state.messages.append(message)
 
 
 if __name__ == '__main__':
