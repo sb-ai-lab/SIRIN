@@ -19,6 +19,7 @@ from sirin.detection.processors import (
     FeatureProcessorBase,
     HiddensProcessor,
 )
+from sirin.detection.processors.teacher_forcing import use_teacher_forcing
 from sirin.inference.adapters import (
     HfModelAdapter,
     ModelAdapterBase,
@@ -97,21 +98,40 @@ def estimate_uncertainty(
     output_attentions: bool = False,
     top_logprobs: int = 5,
     max_new_tokens: int = 100,
+    teacher_forced: bool = False,
+    chat_template_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[np.ndarray], List[str], List[List[int]]]:
+    """Score `assistant_outputs` (teacher_forced=True) or a fresh greedy generation
+    from `user_inputs` (teacher_forced=False, lm-polygraph's default).
+
+    Teacher forcing is required whenever the label attaches to the stored response
+    rather than to whatever the model would say now.
+    """
     blackbox_supports_logprobs = (
         getattr(model, 'supports_logprobs', False) if model_type == 'Blackbox' else False
     )
+    stat_calculators = register_default_stat_calculators(
+        model_type=model_type,
+        output_hidden_states=not isinstance(model, WhiteboxModelvLLM),
+        output_attentions=output_attentions,
+        blackbox_supports_logprobs=blackbox_supports_logprobs,
+        top_logprobs=top_logprobs,
+    )
+    if teacher_forced:
+        if model_type != 'Whitebox':
+            raise ValueError('Teacher-forced uncertainty needs a whitebox model.')
+        stat_calculators = use_teacher_forcing(
+            stat_calculators,
+            output_attentions=output_attentions,
+            n_alternatives=top_logprobs,
+            max_response_tokens=max_new_tokens,
+            chat_template_kwargs=chat_template_kwargs,
+        )
     man = UEManager(
         Dataset(user_inputs, assistant_outputs, batch_size=batch_size),
         model,
         estimators,
-        available_stat_calculators=register_default_stat_calculators(
-            model_type=model_type,
-            output_hidden_states=not isinstance(model, WhiteboxModelvLLM),
-            output_attentions=output_attentions,
-            blackbox_supports_logprobs=blackbox_supports_logprobs,
-            top_logprobs=top_logprobs,
-        ),
+        available_stat_calculators=stat_calculators,
         builder_env_stat_calc=BuilderEnvironmentStatCalculator(model),
         generation_metrics=[],
         ue_metrics=[],
@@ -218,6 +238,8 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
             output_attentions=_needs_attention(self.config),
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
+            teacher_forced=getattr(self.config, 'teacher_forced', False),
+            chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
         self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
         self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.
@@ -271,7 +293,6 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
 
     def _initialize_uncertainty_methods(self) -> Dict[str, Any]:
         """Initialize uncertainty estimation methods"""
-        methods = {}
         method_map = {
             'MonteCarloSequenceEntropy': estimators.MonteCarloSequenceEntropy,
             'MonteCarloNormalizedSequenceEntropy': estimators.MonteCarloNormalizedSequenceEntropy,
@@ -281,6 +302,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'LexicalSimilarity': estimators.LexicalSimilarity,
             'ClaimConditionedProbability': estimators.ClaimConditionedProbability,
             'RAUQ': estimators.RAUQ,
+            'Focus': estimators.Focus,
             'SAR': estimators.SAR,
             # Experimental features:
             'TokenSAR': estimators.TokenSAR,
@@ -294,12 +316,13 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'FisherRao': estimators.FisherRao,
             'SelfCertainty': estimators.SelfCertainty,
         }
-
-        methods = [
-            method_map[method_name]() for method_name in self.config.uncertainty_methods
+        # Estimators such as Focus and RAUQ take constructor arguments (IDF corpus,
+        # spaCy model, instruct-tuned alpha); `method_kwargs` supplies them per method.
+        kwargs = getattr(self.config, 'method_kwargs', None) or {}
+        return [
+            method_map[name](**dict(kwargs.get(name, {})))
+            for name in self.config.uncertainty_methods
         ]
-
-        return methods
 
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
@@ -414,6 +437,8 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             output_attentions=_needs_attention(self.config),
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
+            teacher_forced=getattr(self.config, 'teacher_forced', False),
+            chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
         self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
         self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.

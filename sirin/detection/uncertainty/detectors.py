@@ -1,10 +1,12 @@
 import joblib
+from itertools import combinations
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 from pathlib import Path
 from loguru import logger as lg
+from sklearn.metrics import roc_auc_score
 
 from sirin.definitions import BASIC_METRICS, INPUT_COL, TARGET_COL, DetectionLevel
 from sirin.detection.base import DetectorBase
@@ -43,12 +45,124 @@ class UncertaintyDetectorBase(DetectorBase):
         """Setup detector model (uncertainty-based detection doesn't need additional models)"""
         pass
 
+    def fit_score_normalizer(self, uncertainties: np.ndarray) -> None:
+        """Fit per-estimator normalization statistics on raw train scores.
+
+        Label-free: only the marginal distribution of each estimator is used. Call
+        once on the calibration split before `detect`, otherwise `_normalize_scores`
+        passes scores through unchanged.
+        """
+        if getattr(self.config, 'score_normalization', 'none') == 'none' or uncertainties.ndim == 1:
+            return
+        if len(uncertainties) < 50:
+            # `rank` maps onto the empirical CDF of this sample; with a handful of
+            # points every test score collapses onto the same few quantiles and the
+            # aggregate goes constant (ROC-AUC 0.5).
+            lg.warning(
+                f'Fitting score normalization on only {len(uncertainties)} samples; '
+                'quantiles will be coarse and scores may tie. Use a larger split.'
+            )
+        self.feature_stats['score_mean'] = np.nanmean(uncertainties, axis=0)
+        std = np.nanstd(uncertainties, axis=0)
+        std[std == 0] = 1.0
+        self.feature_stats['score_std'] = std
+        self.feature_stats['score_median'] = np.nanmedian(uncertainties, axis=0)
+        # Sorted train columns are the empirical CDF used by `rank` normalization.
+        self.feature_stats['score_sorted'] = np.sort(
+            np.where(np.isnan(uncertainties), self.feature_stats['score_median'], uncertainties),
+            axis=0,
+        )
+
+    def _normalize_scores(self, uncertainties: np.ndarray) -> np.ndarray:
+        """Put estimators on a common scale using the fitted train statistics."""
+        method = getattr(self.config, 'score_normalization', 'none')
+        if method == 'none' or uncertainties.ndim == 1:
+            return uncertainties
+        if 'score_median' not in self.feature_stats:
+            lg.warning(
+                f"score_normalization='{method}' but no statistics fitted; "
+                'aggregating raw scores. Call fit_score_normalizer on the train split.'
+            )
+            return uncertainties
+
+        # Focus yields NaN when a response has no keyword (NER/POS) tokens -- its
+        # score is undefined there. Impute the train median so it contributes
+        # neutrally rather than propagating NaN through the mean.
+        median = self.feature_stats['score_median']
+        uncertainties = np.where(np.isnan(uncertainties), median, uncertainties)
+
+        if method == 'zscore':
+            return (uncertainties - self.feature_stats['score_mean']) / self.feature_stats['score_std']
+        if method == 'rank':
+            sorted_train = self.feature_stats['score_sorted']
+            n = sorted_train.shape[0]
+            return np.stack(
+                [
+                    np.searchsorted(sorted_train[:, i], uncertainties[:, i], side='right') / n
+                    for i in range(uncertainties.shape[1])
+                ],
+                axis=1,
+            )
+        raise ValueError(f'Unknown score_normalization: {method}')
+
+    # Aggregations searched by `aggregation_method="auto"`.
+    _AUTO_AGGREGATIONS = {
+        'mean': lambda a: np.mean(a, axis=-1),
+        'max': lambda a: np.max(a, axis=-1),
+        'min': lambda a: np.min(a, axis=-1),
+        'median': lambda a: np.median(a, axis=-1),
+    }
+
+    def fit_score_selection(self, uncertainties: np.ndarray, targets) -> None:
+        """Pick the estimator subset + aggregation that maximizes train ROC-AUC.
+
+        Estimators are not interchangeable: some are redundant (RAUQ and Focus are
+        both attention-based and correlate strongly), and which one carries signal
+        depends on the task. A fixed average over all of them tracks the *middle*
+        estimator, not the best. This searches non-empty subsets x aggregations once,
+        on train, and freezes the winner. The only labels used are the train targets.
+        """
+        if self.config.aggregation_method != 'auto' or uncertainties.ndim == 1:
+            return
+        scores = self._normalize_scores(uncertainties)
+        y = np.asarray(targets)
+        n_methods = scores.shape[1]
+
+        best = None
+        for size in range(1, n_methods + 1):
+            for subset in combinations(range(n_methods), size):
+                for agg_name, agg in self._AUTO_AGGREGATIONS.items():
+                    if size == 1 and agg_name != 'mean':
+                        continue  # every aggregation is the identity on one estimator
+                    auc = roc_auc_score(y, agg(scores[:, list(subset)]))
+                    if best is None or auc > best[0]:
+                        best = (auc, list(subset), agg_name)
+
+        auc, subset, agg_name = best
+        self.feature_stats['selected_subset'] = subset
+        self.feature_stats['selected_aggregation'] = agg_name
+        names = list(self.feature_processor.config.uncertainty_methods or [])
+        chosen = [names[i] for i in subset] if len(names) == n_methods else subset
+        lg.info(f'Selected UE fusion on train: {agg_name} over {chosen} (train ROC-AUC {auc:.3f})')
+
     def _aggregate_uncertainties(self, uncertainties: np.ndarray) -> np.ndarray:
         """Aggregate multiple uncertainty scores using configured method"""
         if uncertainties.ndim == 1:
             return uncertainties
 
+        uncertainties = self._normalize_scores(uncertainties)
         aggregation_method = self.config.aggregation_method
+
+        if aggregation_method == 'auto':
+            if 'selected_subset' not in self.feature_stats:
+                lg.warning(
+                    "aggregation_method='auto' but no selection fitted; using the mean. "
+                    'Call fit_score_selection on the train split.'
+                )
+                return np.mean(uncertainties, axis=-1)
+            subset = self.feature_stats['selected_subset']
+            agg = self._AUTO_AGGREGATIONS[self.feature_stats['selected_aggregation']]
+            return agg(uncertainties[:, subset])
 
         if aggregation_method == 'mean':
             return np.mean(uncertainties, axis=-1)
@@ -69,11 +183,17 @@ class UncertaintyDetectorBase(DetectorBase):
         )
 
     def _weighted_aggregation(self, uncertainties: np.ndarray) -> np.ndarray:
-        """Perform weighted aggregation of uncertainties"""
-        method_names = self.feature_processor.config.uncertainty_methods or []
-        weights = np.array(
-            [self.config.method_weights.get(method, 1.0) for method in method_names]
-        )
+        """Perform weighted aggregation of uncertainties.
+
+        `method_weights` is keyed by estimator *name*, so the names have to come from
+        the feature processor's config — looking weights up by estimator object would
+        silently miss every key and make this a plain mean.
+        """
+        method_names = list(self.feature_processor.config.uncertainty_methods or [])
+        unknown = set(self.config.method_weights) - set(method_names)
+        if unknown:
+            lg.warning(f'method_weights names not among the estimators, ignored: {sorted(unknown)}')
+        weights = np.array([self.config.method_weights.get(name, 1.0) for name in method_names])
         weights = weights / np.sum(weights)
         return np.average(uncertainties, axis=-1, weights=weights)
 
@@ -160,20 +280,38 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
     ):
         super().__init__(config, feature_processor)
 
+    def _raw_scores(self, samples) -> Tuple[np.ndarray, Optional[List[int]]]:
+        """Per-estimator uncertainty scores, (n_samples, n_estimators), unnormalized."""
+        samples, group_ids = self._split_context_samples(samples)
+        uncertainty_scores, _ = self.feature_processor(samples)
+        self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
+        self.last_method_scores = getattr(self.feature_processor, 'last_method_scores', None)
+        return np.array(uncertainty_scores[0].flatten(start_dim=1)), group_ids
+
     def train(
         self,
         train_data: InputsDataset,
         val_data: Optional[InputsDataset] = None,
         logger: Optional[LoggerBase] = None,
     ) -> DetectionResult:
-        """Fit the detector using uncertainty features"""
+        """Fit score normalization, the fusion rule, and the decision threshold.
 
-        # only threshold calibration
-        inputs = val_data[INPUT_COL] if val_data is not None else train_data[INPUT_COL]
-        targets = val_data[TARGET_COL] if val_data is not None else train_data[TARGET_COL]
+        All three are fit on `train_data`, never on the eval split. The normalizer is
+        label-free; the fusion rule (`aggregation_method="auto"`) and the threshold
+        read train targets. Scores are extracted once and reused, since extraction is
+        the only expensive part -- so the thin `val` slice is deliberately not used
+        for fitting, where its ~300 samples would make rank quantiles coarse and
+        subset selection noisy.
+        """
+        inputs = train_data[INPUT_COL]
+        targets = train_data[TARGET_COL]
         metrics_config = self._get_classification_metrics_config()
 
-        probs, preds, _ = self.detect(inputs)
+        raw_scores, group_ids = self._raw_scores(inputs)
+        self.fit_score_normalizer(raw_scores)
+        self.fit_score_selection(raw_scores, targets)
+        probs = self._aggregate_uncertainties(raw_scores)
+
         val_targets = np.array(targets)
         self.threshold = calibrate_threshold(
             probs,
@@ -183,6 +321,14 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
             self.config.fixed_threshold,
         )
         lg.info(f"Set detection threshold to: {self.threshold}")
+
+        preds = (probs > self.threshold).astype(int)
+        preds, probs = self._aggregate_context_predictions(
+            group_ids,
+            preds,
+            probs,
+            binary=(self.config.num_classification_heads <= 2),
+        )
         result_metrics = calculate_classification_metrics(
             val_targets, probs, preds, metrics=metrics_config
         )
@@ -204,18 +350,14 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         **kwargs,
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Detect hallucinations at sequence level using uncertainty scores"""
-        samples, group_ids = self._split_context_samples(samples)
         generation_trace = kwargs.get('generation_trace')
         if generation_trace is not None:
+            samples, group_ids = self._split_context_samples(samples)
             return self._detect_generation_trace(
                 samples, group_ids, generation_trace, labels
             )
 
-        uncertainty_scores, _ = self.feature_processor(samples)
-        self.last_generated_text = getattr(self.feature_processor, 'last_generated_text', None)
-        self.last_method_scores = getattr(self.feature_processor, 'last_method_scores', None)
-
-        uncertainty_scores = np.array(uncertainty_scores[0].flatten(start_dim=1))
+        uncertainty_scores, group_ids = self._raw_scores(samples)
         aggregated_scores = self._aggregate_uncertainties(uncertainty_scores)
 
         predictions = (aggregated_scores > self.threshold).astype(int)
