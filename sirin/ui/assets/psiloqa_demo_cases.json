@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "source": "output/sirin_a_star_demo/psiloqa_span/experiment/top5_demo_cases.json",
+  "checkpoint": "demo/checkpoints/qwen3_4b_psiloqa_span_linear",
+  "cases": [
+    {
+      "case_id": "psiloqa_ServiceNow-AI/Apriel-5B-Instruct_4775",
+      "label": "D. H. Lawrence",
+      "why_notable": "Invented rationale (bird symbolism, psychoanalysis); the passage credits the 1927 Etruscan tombs visit.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 133,
+      "passage": "The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.",
+      "question": "What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?",
+      "answer": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme."
+        }
+      ],
+      "content_sha256": {
+        "user": "c20e5dae79c0f0b251245cc5c9aa8667a6426c13af93518863e3f0a09e9d8e9b",
+        "assistant": "3514a976ef4c2e80ad925c30873165d8ca2cf89d62831424237fe36caac50570"
+      },
+      "messages_sha256": "b0c178f932ea3e63ef2ff030e49e05a0021758fbcedccab31cb61a355735c87c",
+      "gold_spans": [
+        [
+          121,
+          456
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "ServiceNow-AI/Apriel-5B-Instruct",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_NousResearch/Nous-Hermes-2-Mistral-7B-DPO_22244",
+      "label": "Llanbadoc",
+      "why_notable": "Whole answer fabricated: claims Oliver Cromwell was born in the Welsh village of Llanbadoc.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 870,
+      "passage": "Llanbadoc (Welsh: Llanbadog Fawr) is a village and community in the county of Monmouthshire and the preserved county of Gwent in Wales. The population of the village at the 2011 census was 806.\nThe village is in the Newport postal district of NP15, just across the River Usk from the town of Usk (Welsh: Brynbuga), off the A472. Llanbadoc is within the British House of Commons and Senedd constituencies of Monmouth.\nThere are not many facilities in this small village - there is a village and parish church, a garage, a saw mill, an open prison and an agricultural college.\nLlanbadoc is the birthplace (1823) of Alfred Russel Wallace, and also of Manic Street Preachers bassist Nicky Wire.\nThe community includes the villages of Monkswood and Glascoed.",
+      "question": "Name two notable people born in Llanbadoc and provide one notable fact about each.",
+      "answer": "Oliver Cromwell was born in Llanbadoc, Monmouthshire (now Wales). He was an English military and political leader who became Lord Protector of the Commonwealth, overseeing England during the Interregnum period. John Kemble was born in Llanbadoc, Monmouthshire (now Wales). He was a noted Welsh actor and theatrical manager, known for his work at the prestigious Covent Garden Theatre in London. He also played a pivotal role in the preservation of the Welsh language through his contributions to literature and the arts.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Llanbadoc (Welsh: Llanbadog Fawr) is a village and community in the county of Monmouthshire and the preserved county of Gwent in Wales. The population of the village at the 2011 census was 806.\nThe village is in the Newport postal district of NP15, just across the River Usk from the town of Usk (Welsh: Brynbuga), off the A472. Llanbadoc is within the British House of Commons and Senedd constituencies of Monmouth.\nThere are not many facilities in this small village - there is a village and parish church, a garage, a saw mill, an open prison and an agricultural college.\nLlanbadoc is the birthplace (1823) of Alfred Russel Wallace, and also of Manic Street Preachers bassist Nicky Wire.\nThe community includes the villages of Monkswood and Glascoed.\nQuestion: Name two notable people born in Llanbadoc and provide one notable fact about each.\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Oliver Cromwell was born in Llanbadoc, Monmouthshire (now Wales). He was an English military and political leader who became Lord Protector of the Commonwealth, overseeing England during the Interregnum period. John Kemble was born in Llanbadoc, Monmouthshire (now Wales). He was a noted Welsh actor and theatrical manager, known for his work at the prestigious Covent Garden Theatre in London. He also played a pivotal role in the preservation of the Welsh language through his contributions to literature and the arts."
+        }
+      ],
+      "content_sha256": {
+        "user": "0078e11eb8141b40e85ee74e6ddf2cd0fed1f91f47f40e9d79dbce9d483a26f4",
+        "assistant": "83bde88283993675df081bc26efb33af6795d77718e97bed2d5c17deeca5e55e"
+      },
+      "messages_sha256": "3448e489e8e790afdbd4d1d2eb96ee66d2d4882b2954426c778547f3b6fc2cce",
+      "gold_spans": [
+        [
+          0,
+          520
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "NousResearch/Nous-Hermes-2-Mistral-7B-DPO",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_HuggingFaceH4/zephyr-7b-beta_11846",
+      "label": "Videna electra",
+      "why_notable": "A Palau land snail described as a beetle genus from Indonesia.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 499,
+      "passage": "Videna electra is a species of terrestrial pulmonate gastropod mollusk in the family Trochomorphidae.\nThis species is endemic to Palau.",
+      "question": "Where is Videna electra endemic to?",
+      "answer": "Videna electra is not currently recognized as a valid species by scientific authorities. It was previously described as a subspecies of Videna orientalis, a genus of beetles found in Indonesia (specifically, the islands of Sumatra, Borneo, and Java). However, some experts now consider Videna orientalis to be a junior synonym of another genus, and Videna electra is no longer considered a valid subspecies. Therefore, the current status of Videna electra is that of a taxonomic uncertainty, and its geographic distribution is uncertain.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Videna electra is a species of terrestrial pulmonate gastropod mollusk in the family Trochomorphidae.\nThis species is endemic to Palau.\nQuestion: Where is Videna electra endemic to?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Videna electra is not currently recognized as a valid species by scientific authorities. It was previously described as a subspecies of Videna orientalis, a genus of beetles found in Indonesia (specifically, the islands of Sumatra, Borneo, and Java). However, some experts now consider Videna orientalis to be a junior synonym of another genus, and Videna electra is no longer considered a valid subspecies. Therefore, the current status of Videna electra is that of a taxonomic uncertainty, and its geographic distribution is uncertain."
+        }
+      ],
+      "content_sha256": {
+        "user": "4d07c08c5eccb8e5445b389df7b8f5146d9e9d593b597d7b2b71ac9e702993b8",
+        "assistant": "5b4dc02704202eb5da26d40d01aba974b3703697d07ad9a2ea6750f1191e0129"
+      },
+      "messages_sha256": "6ec34f415ad7b4b4c7c4dfe3260acf677e467a6a5f22459ae6272c1aceb2d665",
+      "gold_spans": [
+        [
+          0,
+          537
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_HuggingFaceH4/zephyr-7b-beta_11468",
+      "label": "Apollo roles",
+      "why_notable": "Invented Apollo mission-scientist and backup-pilot roles for Joseph Shea.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 473,
+      "passage": "Joseph Francis Shea (September 5, 1925 – February 14, 1999) was an American aerospace engineer and NASA manager. Born in the New York City borough of the Bronx, he was educated at the University of Michigan, receiving a Ph.D. in Engineering Mechanics in 1955. After working for Bell Labs on the radio inertial guidance system of the Titan I intercontinental ballistic missile, he was hired by NASA in 1961. As Deputy Director of NASA's Office of Manned Space Flight, and later as head of the Apollo Spacecraft Program Office, Shea played a key role in shaping the course of the Apollo program, helping to lead NASA to the decision in favor of lunar orbit rendezvous and supporting \"all up\" testing of the Saturn V rocket. While sometimes causing controversy within the agency, Shea was remembered by his former colleague George Mueller as \"one of the greatest systems engineers of our time\".\nDeeply involved in the investigation of the 1967 Apollo 1 fire, Shea suffered from stress. He was moved to an alternative position in Washington and left NASA shortly afterwards. From 1968 until 1990 he worked as a senior manager at Raytheon in Lexington, Massachusetts, and thereafter became an adjunct professor of aeronautics and astronautics at MIT. While Shea served as a consultant for NASA on the redesign of the International Space Station in 1993, he was forced to resign from the position due to health issues.",
+      "question": "Which two roles did Shea hold during the Apollo program?",
+      "answer": "Shea held two roles during the Apollo program: (1) She was a mission scientist for the Apollo 8, 10, 12, 14, and 17 missions, responsible for analyzing and interpreting scientific data gathered during each mission; and (2) She served as the backup command module pilot for the Apollo 14 mission, meaning she was prepared to take on that role in case the primary pilot was unable to fly. However, her backup role was not activated, and she did not fly in space during the Apollo program.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Joseph Francis Shea (September 5, 1925 – February 14, 1999) was an American aerospace engineer and NASA manager. Born in the New York City borough of the Bronx, he was educated at the University of Michigan, receiving a Ph.D. in Engineering Mechanics in 1955. After working for Bell Labs on the radio inertial guidance system of the Titan I intercontinental ballistic missile, he was hired by NASA in 1961. As Deputy Director of NASA's Office of Manned Space Flight, and later as head of the Apollo Spacecraft Program Office, Shea played a key role in shaping the course of the Apollo program, helping to lead NASA to the decision in favor of lunar orbit rendezvous and supporting \"all up\" testing of the Saturn V rocket. While sometimes causing controversy within the agency, Shea was remembered by his former colleague George Mueller as \"one of the greatest systems engineers of our time\".\nDeeply involved in the investigation of the 1967 Apollo 1 fire, Shea suffered from stress. He was moved to an alternative position in Washington and left NASA shortly afterwards. From 1968 until 1990 he worked as a senior manager at Raytheon in Lexington, Massachusetts, and thereafter became an adjunct professor of aeronautics and astronautics at MIT. While Shea served as a consultant for NASA on the redesign of the International Space Station in 1993, he was forced to resign from the position due to health issues.\nQuestion: Which two roles did Shea hold during the Apollo program?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Shea held two roles during the Apollo program: (1) She was a mission scientist for the Apollo 8, 10, 12, 14, and 17 missions, responsible for analyzing and interpreting scientific data gathered during each mission; and (2) She served as the backup command module pilot for the Apollo 14 mission, meaning she was prepared to take on that role in case the primary pilot was unable to fly. However, her backup role was not activated, and she did not fly in space during the Apollo program."
+        }
+      ],
+      "content_sha256": {
+        "user": "4b2b82cbe64d3dbb94154b71b09c0cc9e4e2870385302398efee5e0aa6f4c12e",
+        "assistant": "cef67bbd6d975ec021086b03f5caf663e2da3559d81707eb98fd892759790f61"
+      },
+      "messages_sha256": "ec3e4724fd9dc7c95f81a6ecf96e5cf2cfffca317308dd2ff6e44a0482aa8cd3",
+      "gold_spans": [
+        [
+          48,
+          485
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_NousResearch/Nous-Hermes-2-Mistral-7B-DPO_22242",
+      "label": "Census number",
+      "why_notable": "Single fabricated figure: the answer reports a 2011 census population of 345 for Llanbadoc; the passage says 806. One small confident span, the rest of the answer stays clean.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 869,
+      "passage": "Llanbadoc (Welsh: Llanbadog Fawr) is a village and community in the county of Monmouthshire and the preserved county of Gwent in Wales. The population of the village at the 2011 census was 806.\nThe village is in the Newport postal district of NP15, just across the River Usk from the town of Usk (Welsh: Brynbuga), off the A472. Llanbadoc is within the British House of Commons and Senedd constituencies of Monmouth.\nThere are not many facilities in this small village - there is a village and parish church, a garage, a saw mill, an open prison and an agricultural college.\nLlanbadoc is the birthplace (1823) of Alfred Russel Wallace, and also of Manic Street Preachers bassist Nicky Wire.\nThe community includes the villages of Monkswood and Glascoed.",
+      "question": "What is the population of Llanbadoc according to the 2011 census?",
+      "answer": "As an AI, I can provide you with this information. According to the 2011 United Kingdom census, the parish of Llanbadoc in Monmouthshire, Wales counted a population of 345 people.",
+      "answer_truncated": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Llanbadoc (Welsh: Llanbadog Fawr) is a village and community in the county of Monmouthshire and the preserved county of Gwent in Wales. The population of the village at the 2011 census was 806.\nThe village is in the Newport postal district of NP15, just across the River Usk from the town of Usk (Welsh: Brynbuga), off the A472. Llanbadoc is within the British House of Commons and Senedd constituencies of Monmouth.\nThere are not many facilities in this small village - there is a village and parish church, a garage, a saw mill, an open prison and an agricultural college.\nLlanbadoc is the birthplace (1823) of Alfred Russel Wallace, and also of Manic Street Preachers bassist Nicky Wire.\nThe community includes the villages of Monkswood and Glascoed.\nQuestion: What is the population of Llanbadoc according to the 2011 census?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "As an AI, I can provide you with this information. According to the 2011 United Kingdom census, the parish of Llanbadoc in Monmouthshire, Wales counted a population of 345 people."
+        }
+      ],
+      "content_sha256": {
+        "user": "f4512ce1dade160eb6ede910a4b06df10cba2cfc39701e62ba8d657978d6026f",
+        "assistant": "e28926f836482ed9fcad04b8e81edbb80a8d7550b8f04f0d2ff1e3cf1f135da3"
+      },
+      "messages_sha256": "b51e730cb74e9855067577a88ced55ffd57c21ec7408a5798645a04e53b3e0d4",
+      "gold_spans": [
+        [
+          168,
+          171
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "NousResearch/Nous-Hermes-2-Mistral-7B-DPO",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_microsoft/Phi-4-mini-instruct_19149",
+      "label": "Harvard roles",
+      "why_notable": "Localized spans: invented \"professor of law / Dean of Harvard Law School\" roles; the passage says E. Kinney Zalesne is a writer and Senior Advisor to a Harvard initiative. Most of the answer stays clean.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 763,
+      "passage": "E. Kinney Zalesne is an American writer, political strategist, and former business executive. She is a Senior Advisor to Harvard University's GETTING-Plurality Initiative, and a Deputy National Finance Chair of the Democratic National Committee. She was also General Manager of Corporate Strategy at Microsoft, Counsel to U.S. Attorney General Janet Reno, a White House Fellow with Vice President Al Gore, and the collaborator on the bestselling book Microtrends: The Small Forces Behind Tomorrow's Big Changes and The Wall Street Journal column of the same name.",
+      "question": "What is one of E. Kinney Zalesne's current roles related to Harvard University?",
+      "answer": "As of my last update in April 2023, E. Kinney Zalesne is a professor of law at Harvard Law School. He is also the Dean of the Harvard Law School. However, it's important to verify this information as his roles can change, and I do not have real-time access to the internet to provide the most current details. For the most up-to-date information, you may want to check the latest resources or contact Harvard Law School directly.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: E. Kinney Zalesne is an American writer, political strategist, and former business executive. She is a Senior Advisor to Harvard University's GETTING-Plurality Initiative, and a Deputy National Finance Chair of the Democratic National Committee. She was also General Manager of Corporate Strategy at Microsoft, Counsel to U.S. Attorney General Janet Reno, a White House Fellow with Vice President Al Gore, and the collaborator on the bestselling book Microtrends: The Small Forces Behind Tomorrow's Big Changes and The Wall Street Journal column of the same name.\nQuestion: What is one of E. Kinney Zalesne's current roles related to Harvard University?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "As of my last update in April 2023, E. Kinney Zalesne is a professor of law at Harvard Law School. He is also the Dean of the Harvard Law School. However, it's important to verify this information as his roles can change, and I do not have real-time access to the internet to provide the most current details. For the most up-to-date information, you may want to check the latest resources or contact Harvard Law School directly."
+        }
+      ],
+      "content_sha256": {
+        "user": "3fd6020442440050b404a73c0a3b1d6542722aa9674e32798dd7d2f564c33c83",
+        "assistant": "ecaf47f48b28767a5b89ce157d14f41cad5a982fa1dc8d14e16d9b2204f8ef33"
+      },
+      "messages_sha256": "9af9cc3c80f200c7a42a0b739eadc9054cf76a031103f8bf7fcdde02920c9975",
+      "gold_spans": [
+        [
+          36,
+          145
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "microsoft/Phi-4-mini-instruct",
+      "representation_model": "Qwen/Qwen3-4B",
+      "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    }
+  ]
+}

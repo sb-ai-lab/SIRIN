@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sample_id": "ef66a6e5",
+  "answer": "1 sport (tennis)",
+  "answer_sha256": "1e3620d40641252c717b85c570955b06fa98583cdbe9d8d657f98c5d226207f8",
+  "model": "Qwen/Qwen3.5-35B-A3B",
+  "model_revision": "59d61f3ce65a6d9863b86d2e96597125219dc754",
+  "runtime": {
+    "vllm": "0.19.1",
+    "transformers": "5.8.0",
+    "torch": "2.10.0+cu126",
+    "tensor_parallel_size": 4,
+    "expert_parallel": true,
+    "speculative_method": "mtp",
+    "speculative_tokens": 10
+  },
+  "request_artifact": {
+    "path": "output/sirin_a_star_demo/provenance/ef66a6e5_vllm_request.json",
+    "sha256": "2a601974506c0651f8865c7e45a2f7f77c53710a3855d6267d947119a4dd2036"
+  },
+  "response_artifact": {
+    "path": "output/sirin_a_star_demo/provenance/ef66a6e5_vllm_response.json",
+    "sha256": "c53842c5e3322ff516a26993be079c78679087f3b82b35a704d520384db6697b"
+  },
+  "prompt_sha256": "e40f335ee8a0db16a8d3b1089a10b14da8ba70b10ede2b063bcfa700c072742b",
+  "messages_sha256": "006aaf6b6a218e1fe36e2ce020c4400f059c00fe8363305931d2300871600c00",
+  "generation": {
+    "backend": "vLLM OpenAI-compatible API",
+    "temperature": 0.0,
+    "max_tokens": 96,
+    "top_logprobs": 20,
+    "seed": 42,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "metric": "mean(chosen-token NLL, top-20 token entropy)",
+  "normalization": "per-answer min-max for color only",
+  "aggregation": "mean",
+  "token_ids": [16, 10239, 318, 1893, 24353, 8],
+  "token_pieces": ["1", " sport", " (", "ten", "nis", ")"],
+  "token_offsets": [[0, 1], [1, 7], [7, 9], [9, 12], [12, 15], [15, 16]],
+  "chosen_token_nll": [
+    0.5802955031394958,
+    0.5394303798675537,
+    0.23152337968349457,
+    0.1279710978269577,
+    0.000009417489309271332,
+    0.00047052756417542696
+  ],
+  "top20_entropy": [
+    0.7146144124785049,
+    0.9309216889019611,
+    0.5372231882702078,
+    0.37370561876349634,
+    0.00013143303927799877,
+    0.004551227559029889
+  ],
+  "top20_mass": [
+    0.9999707537982628,
+    0.9998867311734949,
+    0.9999946205673489,
+    0.9999473877232652,
+    0.9999998927802295,
+    0.9999982011418374
+  ],
+  "raw_scores": [
+    0.6474549578090003,
+    0.7351760343847574,
+    0.38437328397685117,
+    0.25083835829522705,
+    0.00007042526429363505,
+    0.002510877561602658
+  ],
+  "normalized_scores": [
+    0.8806687427120665,
+    1.0,
+    0.5227859153086407,
+    0.3411318454377885,
+    0.0,
+    0.0033198662437482498
+  ]
+}
