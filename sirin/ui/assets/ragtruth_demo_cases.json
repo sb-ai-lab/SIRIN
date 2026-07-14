@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "source": "/home/jovyan/ybelikova/sirin-final/data/datasets/ragtruth_qa",
+  "split": "test",
+  "cases": [
+    {
+      "case_id": "ragtruth_qa_gpt-4-0613_0",
+      "label": "RAGTruth: Bowel movement & weight",
+      "why_notable": "Faithful gpt-4 answer with zero hallucination spans — the supported baseline that stays grounded in the passages.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 0,
+      "source_id": 15320,
+      "task_type": "QA",
+      "context": "passage 1:Weight Loss and Calories. Your caloric intake and expenditure, rather than your bowel movements, are tied to healthy weight loss. Throughout the day, you consume calories in the form of food and drinks, which your body uses for energy.At the same time, your body burns calories at various rates, depending on the activities you perform.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 2:Photo Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 3:A decrease in body weight after having a bowel movement does not come from a loss of body fat in stools. Body fat loss comes from creating a calorie deficit, which forces your body to burn stored fat for energy. A small amount of certain forms of fat, such as cholesterol, is normal in your feces.he fat in stools does not come from a loss of body fat, but rather from dietary fat intake that is not properly absorbed. Malabsorption of dietary fats may be caused by digestive conditions, such as celiac disease and Crohn's disease, pancreatitis, liver disease or cystic fibrosis.",
+      "question": "when you have a bowel movement do you lose weight",
+      "answer": "While you may technically lose a small amount of weight after a bowel movement, this does not come from a loss of body fat. The decrease in body weight does not come from fat loss in stools, but rather from the elimination of undigested food and waste. Weight loss is primarily tied to your caloric intake and expenditure, not bowel movements. Unless your scale is highly accurate, you're unlikely to notice a difference in your body weight before and after a bowel movement.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nwhen you have a bowel movement do you lose weight\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Weight Loss and Calories. Your caloric intake and expenditure, rather than your bowel movements, are tied to healthy weight loss. Throughout the day, you consume calories in the form of food and drinks, which your body uses for energy.At the same time, your body burns calories at various rates, depending on the activities you perform.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 2:Photo Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 3:A decrease in body weight after having a bowel movement does not come from a loss of body fat in stools. Body fat loss comes from creating a calorie deficit, which forces your body to burn stored fat for energy. A small amount of certain forms of fat, such as cholesterol, is normal in your feces.he fat in stools does not come from a loss of body fat, but rather from dietary fat intake that is not properly absorbed. Malabsorption of dietary fats may be caused by digestive conditions, such as celiac disease and Crohn's disease, pancreatitis, liver disease or cystic fibrosis.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "While you may technically lose a small amount of weight after a bowel movement, this does not come from a loss of body fat. The decrease in body weight does not come from fat loss in stools, but rather from the elimination of undigested food and waste. Weight loss is primarily tied to your caloric intake and expenditure, not bowel movements. Unless your scale is highly accurate, you're unlikely to notice a difference in your body weight before and after a bowel movement."
+        }
+      ],
+      "content_sha256": {
+        "user": "06ec0e9fff8872ce5081845ec7eb7104dbccdcc969b55d61f934b918389bdab4",
+        "assistant": "75d008d595933261d900ff54df9b35e57a0cf119faa833ab05752360f01c8966"
+      },
+      "messages_sha256": "36d903fe6f330cd4dd9ae77da71fd10f416d27315d7107590734eee6baaf9a0c",
+      "gold_spans": [],
+      "gold_visibility": "hidden",
+      "source_answer_model": "gpt-4-0613",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_llama-2-7b-chat_4",
+      "label": "RAGTruth: Carbon footprint",
+      "why_notable": "One localized fabrication (Subtle Baseless): the closing list of reduction tactics is invented, not supported by any passage.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 4,
+      "source_id": 15302,
+      "task_type": "QA",
+      "context": "passage 1:Your carbon footprint measures the environmental impact of your lifestyle. Everything you do has an impact --- positive or negative --- on the environment. That's the concept behind your carbon footprint, which is one method of measuring the environmental effect of your lifestyle. A carbon footprint, measured in tons, indicates the amount of carbon dioxide and other greenhouse gases that are produced as a result of your daily activities. You can reduce your footprint by changing the way you live your life. Even seemingly tiny changes can make a significant difference.\n\npassage 2:It all comes back to the average carbon footprint. The average per capita carbon footprint is 6 tons per year. In the U.S. the average is 20 tons per year, and a third of that is created by automobile emissions -- meaning your car itself can put out over 6 tons of C02 a year -- enough for two people.\n\npassage 3:So what exactly is a carbon footprint? In simplest terms, carbon footprint is the total amount of greenhouse gases produced by various human activities within a given time frame. Carbon footprint is usually measured in tons of carbon dioxide (CO2) released into the atmosphere. Your home has a carbon footprint if you use oil, coal or gas to heat it. That cheeseburger at your favorite restaurant has a carbon footprint: raising the beef and wheat and operating the restaurant all involves greenhouse gases. Your car has a carbon footprint, dependent on the vehicle’s fuel consumption and driving distance.",
+      "question": "what is the effect of carbon footprint",
+      "answer": "Based on the provided passages, the effect of carbon footprint is:\n\nPassage 1 states that carbon footprint measures the environmental impact of one's lifestyle and that even seemingly tiny changes can make a significant difference in reducing one's footprint.\n\nPassage 2 mentions that the average per capita carbon footprint is 6 tons per year, with a third of that created by automobile emissions.\n\nPassage 3 defines carbon footprint as the total amount of greenhouse gases produced by various human activities within a given time frame, and explains that different activities such as heating a home, eating food, and driving a car have a carbon footprint.\n\nTherefore, the effect of carbon footprint is that it measures the environmental impact of one's lifestyle and can be reduced by making changes to daily activities such as using alternative energy sources, conserving energy, and reducing meat consumption.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nwhat is the effect of carbon footprint\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Your carbon footprint measures the environmental impact of your lifestyle. Everything you do has an impact --- positive or negative --- on the environment. That's the concept behind your carbon footprint, which is one method of measuring the environmental effect of your lifestyle. A carbon footprint, measured in tons, indicates the amount of carbon dioxide and other greenhouse gases that are produced as a result of your daily activities. You can reduce your footprint by changing the way you live your life. Even seemingly tiny changes can make a significant difference.\n\npassage 2:It all comes back to the average carbon footprint. The average per capita carbon footprint is 6 tons per year. In the U.S. the average is 20 tons per year, and a third of that is created by automobile emissions -- meaning your car itself can put out over 6 tons of C02 a year -- enough for two people.\n\npassage 3:So what exactly is a carbon footprint? In simplest terms, carbon footprint is the total amount of greenhouse gases produced by various human activities within a given time frame. Carbon footprint is usually measured in tons of carbon dioxide (CO2) released into the atmosphere. Your home has a carbon footprint if you use oil, coal or gas to heat it. That cheeseburger at your favorite restaurant has a carbon footprint: raising the beef and wheat and operating the restaurant all involves greenhouse gases. Your car has a carbon footprint, dependent on the vehicle’s fuel consumption and driving distance.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on the provided passages, the effect of carbon footprint is:\n\nPassage 1 states that carbon footprint measures the environmental impact of one's lifestyle and that even seemingly tiny changes can make a significant difference in reducing one's footprint.\n\nPassage 2 mentions that the average per capita carbon footprint is 6 tons per year, with a third of that created by automobile emissions.\n\nPassage 3 defines carbon footprint as the total amount of greenhouse gases produced by various human activities within a given time frame, and explains that different activities such as heating a home, eating food, and driving a car have a carbon footprint.\n\nTherefore, the effect of carbon footprint is that it measures the environmental impact of one's lifestyle and can be reduced by making changes to daily activities such as using alternative energy sources, conserving energy, and reducing meat consumption."
+        }
+      ],
+      "content_sha256": {
+        "user": "844dc3029a7fc844681ac015d5bc6aa57d54d30bf7d629db84fcb5af7f1b7a24",
+        "assistant": "ae334800c311e41b458fe801ae81c3f631c5e8481e3d1f09c88bda4d9e1db6cb"
+      },
+      "messages_sha256": "5ba908204491c3b25d601b16ae84f2cddbd043fe73f1e97a62e5c382be9affb9",
+      "gold_spans": [
+        [
+          822,
+          913
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "llama-2-7b-chat",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_mistral-7B-instruct_138",
+      "label": "RAGTruth: FEHA vs ADA",
+      "why_notable": "Two conflicting spans (Evident Conflict): the employee-count thresholds for FEHA and the ADA are swapped/misstated versus the passages.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 138,
+      "source_id": 15175,
+      "task_type": "QA",
+      "context": "passage 1:One difference between the FEHA (the Fair Employment and Housing Act) and the ADA (Americans with Disabilities Act) is that the ADA applies to all employers in the private sector that have four to fifteen employees, whereas the FEHA affects more employees, and it doesn’t distinguish between private and public employers like the ADA does.\n\npassage 2:Class Description: This class is designed specifically for supervisors and managers to learn the basic provisions of the California's Fair Employment and Housing Act (FEHA) and the Americans with Disabilities Act (ADA) and understand their responsibilities during the reasonable accommodation process.\n\npassage 3:Probably one of the most important differences between the ADA and FEHA is that with FEHA, a disability is required. Under the ADA, to qualify for disability, a physical or mental impairment substantially limits a major life activity, but the FEHA requires only that a mental and physical disability limit a major life activity; not a substantial limit, but a limit.",
+      "question": "difference between feha and ada",
+      "answer": "Based on the given passages, we can see that the FEHA (Fair Employment and Housing Act) applies to all employers with four to fifteen employees, while the ADA (Americans with Disabilities Act) applies to employers with twenty or more employees. Additionally, the ADA distinguishes between private and public employers, whereas the FEHA does not. Another significant difference is that under the ADA, a person needs to have a physical or mental impairment that substantially limits a major life activity in order to qualify as disabled. However, under the FEHA, a person only needs to have a mental or physical disability that limits a major life activity, not necessarily a substantial limitation.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\ndifference between feha and ada\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:One difference between the FEHA (the Fair Employment and Housing Act) and the ADA (Americans with Disabilities Act) is that the ADA applies to all employers in the private sector that have four to fifteen employees, whereas the FEHA affects more employees, and it doesn’t distinguish between private and public employers like the ADA does.\n\npassage 2:Class Description: This class is designed specifically for supervisors and managers to learn the basic provisions of the California's Fair Employment and Housing Act (FEHA) and the Americans with Disabilities Act (ADA) and understand their responsibilities during the reasonable accommodation process.\n\npassage 3:Probably one of the most important differences between the ADA and FEHA is that with FEHA, a disability is required. Under the ADA, to qualify for disability, a physical or mental impairment substantially limits a major life activity, but the FEHA requires only that a mental and physical disability limit a major life activity; not a substantial limit, but a limit.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on the given passages, we can see that the FEHA (Fair Employment and Housing Act) applies to all employers with four to fifteen employees, while the ADA (Americans with Disabilities Act) applies to employers with twenty or more employees. Additionally, the ADA distinguishes between private and public employers, whereas the FEHA does not. Another significant difference is that under the ADA, a person needs to have a physical or mental impairment that substantially limits a major life activity in order to qualify as disabled. However, under the FEHA, a person only needs to have a mental or physical disability that limits a major life activity, not necessarily a substantial limitation."
+        }
+      ],
+      "content_sha256": {
+        "user": "469e556b97cd380e5622269a4823c105c0c26cfcbfda9d7ce2cb9750677faa4f",
+        "assistant": "0aa7379e1a4d117f8e371975d44db413f54e7d454d73e7742e8f81408dd5d729"
+      },
+      "messages_sha256": "b564641d0f2988015129099721f2b8592455b5fbb09f4dbce83c5a493b6a5cb0",
+      "gold_spans": [
+        [
+          49,
+          144
+        ],
+        [
+          155,
+          244
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "mistral-7B-instruct",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_gpt-3.5-turbo-0613_721",
+      "label": "RAGTruth: Patterned paint rollers",
+      "why_notable": "One conflicting span (Evident Conflict): claims patterned rollers \"stimulate the skin and provide a healthy glow\", which no passage about paint rollers supports.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 721,
+      "source_id": 15308,
+      "task_type": "QA",
+      "context": "passage 1:In fact, homemade texture or decorative paint rollers can work better than the commercial variety because many faux finishes rely on applying a random pattern of texture to your walls, and commercial texture rollers apply paint with a set pattern.\n\npassage 2:I have been using the Dermaroller for a couple of months now and I think it does make a difference in my skin. I have been using the 1mm and it seems like it works better on my face than my neck and chest. When I tried the 1mm on those areas, they got super red, so I stopped. It seems like it is stimulating my skin and it looks younger and I have noticed that it has more of a healthy glow as well. We have so many before and after pictures on our site, so I can see that it does work as well. I have found that they do work best with the serums or moisturizers used right after. We do have a great kit that is perfect for anti-aging.\n\npassage 3:Basic Texture Roller. Place a roller pad with 1-inch or thicker nap (padding) on a roller frame. An old pad that has been used and not thoroughly cleaned (so some of the tufts clump together) works best for this. Stretch and twist rubber bands around the pad at a variety of angles, creating clumps and random patterns with tufts and lines. Apply paint to your walls with this roller as you would with any roller, but slightly adjust the rubber bands periodically as you work to renew the texture.",
+      "question": "how well do patterned rollers work",
+      "answer": "Patterned rollers can work well, especially for creating random textures and decorative finishes on walls. Homemade texture or decorative paint rollers are often more effective than commercial ones because they allow for a variety of patterns and textures. However, it is important to choose the right roller for specific areas, as mentioned in passage 2. Overall, patterned rollers have been found to stimulate the skin and provide a healthy glow, as mentioned in passage 2.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nhow well do patterned rollers work\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:In fact, homemade texture or decorative paint rollers can work better than the commercial variety because many faux finishes rely on applying a random pattern of texture to your walls, and commercial texture rollers apply paint with a set pattern.\n\npassage 2:I have been using the Dermaroller for a couple of months now and I think it does make a difference in my skin. I have been using the 1mm and it seems like it works better on my face than my neck and chest. When I tried the 1mm on those areas, they got super red, so I stopped. It seems like it is stimulating my skin and it looks younger and I have noticed that it has more of a healthy glow as well. We have so many before and after pictures on our site, so I can see that it does work as well. I have found that they do work best with the serums or moisturizers used right after. We do have a great kit that is perfect for anti-aging.\n\npassage 3:Basic Texture Roller. Place a roller pad with 1-inch or thicker nap (padding) on a roller frame. An old pad that has been used and not thoroughly cleaned (so some of the tufts clump together) works best for this. Stretch and twist rubber bands around the pad at a variety of angles, creating clumps and random patterns with tufts and lines. Apply paint to your walls with this roller as you would with any roller, but slightly adjust the rubber bands periodically as you work to renew the texture.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Patterned rollers can work well, especially for creating random textures and decorative finishes on walls. Homemade texture or decorative paint rollers are often more effective than commercial ones because they allow for a variety of patterns and textures. However, it is important to choose the right roller for specific areas, as mentioned in passage 2. Overall, patterned rollers have been found to stimulate the skin and provide a healthy glow, as mentioned in passage 2."
+        }
+      ],
+      "content_sha256": {
+        "user": "5fab24dc2c6348a24c853029cc738033abab0bfa79565ba09c165769286c3819",
+        "assistant": "50ffae491bc01da7c3d7869f62d0618edd17670bb1fabdc421a4927d3437a6b8"
+      },
+      "messages_sha256": "6334f36c246f731440eee60701c30f5d44605bcada62d8768597b4bd295c8aad",
+      "gold_spans": [
+        [
+          356,
+          475
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "gpt-3.5-turbo-0613",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    }
+  ]
+}

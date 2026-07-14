@@ -14,6 +14,9 @@ _PSILOQA_SPAN_ASSET_PATH = (
 _PSILOQA_DEMO_CASES_ASSET_PATH = (
     Path(__file__).with_name('assets') / 'psiloqa_demo_cases.json'
 )
+_RAGTRUTH_DEMO_CASES_ASSET_PATH = (
+    Path(__file__).with_name('assets') / 'ragtruth_demo_cases.json'
+)
 _PSILOQA_SPAN_SEED_ASSET_PATH = (
     Path(__file__).with_name('assets') / 'psiloqa_span_seed.json'
 )
@@ -101,6 +104,29 @@ _PSILOQA_DEMO_CASE_FIELDS = {
     'representation_disclosure',
     'selection_disclosure',
     'annotation_disclosure',
+    'license',
+}
+_RAGTRUTH_DEMO_CASE_FIELDS = {
+    'case_id',
+    'label',
+    'why_notable',
+    'dataset',
+    'split',
+    'dataset_index',
+    'source_id',
+    'task_type',
+    'context',
+    'question',
+    'answer',
+    'messages',
+    'content_sha256',
+    'messages_sha256',
+    'gold_spans',
+    'gold_visibility',
+    'source_answer_model',
+    'selection_disclosure',
+    'annotation_disclosure',
+    'source_disclosure',
     'license',
 }
 _PSILOQA_SPAN_FIELDS = {
@@ -867,6 +893,134 @@ def load_psiloqa_demo_cases(
         if case['gold_visibility'] != 'hidden':
             raise ValueError(
                 f'PsiloQA demo case {case_id} gold spans must be hidden by default'
+            )
+
+        loaded.append(case)
+
+    return loaded
+
+
+def load_ragtruth_demo_cases(
+    path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Load the verified curated RAGTruth QA cases, or [] when the asset is absent.
+
+    Absence is silent by design so shared deployments that do not ship the asset
+    still boot. When the asset is present every message/answer hash is verified and
+    the gold spans are checked for exact bounds; any mismatch raises rather than
+    surfacing tampered or misattributed content. Gold spans may be empty (a
+    clearly-supported answer carries none).
+    """
+    asset_path = (
+        Path(path) if path is not None else _RAGTRUTH_DEMO_CASES_ASSET_PATH
+    )
+    if not asset_path.is_file():
+        return []
+    with asset_path.open(encoding='utf-8') as file:
+        payload = json.load(file)
+
+    if not isinstance(payload, dict) or payload.get('schema_version') != 1:
+        raise ValueError('RAGTruth demo cases must use schema version 1')
+    cases = payload.get('cases')
+    if not isinstance(cases, list) or not cases:
+        raise ValueError('RAGTruth demo cases must contain a non-empty cases list')
+
+    loaded: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_labels: set[str] = set()
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            raise ValueError(f'RAGTruth demo case {index} must be an object')
+        missing = _RAGTRUTH_DEMO_CASE_FIELDS - case.keys()
+        if missing:
+            raise ValueError(
+                f'RAGTruth demo case {index} is missing: {", ".join(sorted(missing))}'
+            )
+
+        case_id = case['case_id']
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError(f'RAGTruth demo case {index} has an invalid case_id')
+        if case_id in seen_ids:
+            raise ValueError(f'Duplicate RAGTruth demo case: {case_id}')
+        seen_ids.add(case_id)
+
+        label = case['label']
+        if not isinstance(label, str) or not label:
+            raise ValueError(f'RAGTruth demo case {case_id} has an invalid label')
+        if label in seen_labels:
+            raise ValueError(f'Duplicate RAGTruth demo case label: {label}')
+        seen_labels.add(label)
+
+        messages = case['messages']
+        if (
+            not isinstance(messages, list)
+            or len(messages) != 2
+            or [message.get('role') for message in messages if isinstance(message, dict)]
+            != ['user', 'assistant']
+            or any(not isinstance(message.get('content'), str) for message in messages)
+        ):
+            raise ValueError(
+                f'RAGTruth demo case {case_id} messages must be exact user/assistant text'
+            )
+
+        content_hashes = case['content_sha256']
+        if not isinstance(content_hashes, dict):
+            raise ValueError(
+                f'RAGTruth demo case {case_id} content SHA-256 values are invalid'
+            )
+        for message in messages:
+            role = message['role']
+            actual_hash = hashlib.sha256(message['content'].encode()).hexdigest()
+            if content_hashes.get(role) != actual_hash:
+                raise ValueError(
+                    f'RAGTruth demo case {case_id} {role} content SHA-256 mismatch'
+                )
+
+        canonical_messages = [
+            {'role': message['role'], 'content': message['content']}
+            for message in messages
+        ]
+        encoded_messages = json.dumps(
+            canonical_messages,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        ).encode()
+        if case['messages_sha256'] != hashlib.sha256(encoded_messages).hexdigest():
+            raise ValueError(
+                f'RAGTruth demo case {case_id} messages SHA-256 mismatch'
+            )
+
+        if messages[1]['content'] != case['answer']:
+            raise ValueError(
+                f'RAGTruth demo case {case_id} answer must match the assistant message'
+            )
+        prompt = messages[0]['content']
+        for field in ('context', 'question'):
+            value = case[field]
+            if not isinstance(value, str) or not value:
+                raise ValueError(
+                    f'RAGTruth demo case {case_id} field {field} must be text'
+                )
+            if value not in prompt:
+                raise ValueError(
+                    f'RAGTruth demo case {case_id} {field} does not appear in the prompt'
+                )
+
+        spans = case['gold_spans']
+        if not isinstance(spans, list) or any(
+            not isinstance(span, list)
+            or len(span) != 2
+            or any(
+                isinstance(offset, bool) or not isinstance(offset, int)
+                for offset in span
+            )
+            or not 0 <= span[0] < span[1] <= len(case['answer'])
+            for span in spans
+        ):
+            raise ValueError(f'RAGTruth demo case {case_id} gold spans are invalid')
+        if case['gold_visibility'] != 'hidden':
+            raise ValueError(
+                f'RAGTruth demo case {case_id} gold spans must be hidden by default'
             )
 
         loaded.append(case)

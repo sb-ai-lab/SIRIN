@@ -5,7 +5,11 @@ from __future__ import annotations
 from functools import lru_cache
 
 from .contracts import ExampleSummary, Provenance, RunMode, RunRequest, TaskType
-from sirin.ui.demo_cases import load_demo_cases, load_psiloqa_demo_cases
+from sirin.ui.demo_cases import (
+    load_demo_cases,
+    load_psiloqa_demo_cases,
+    load_ragtruth_demo_cases,
+)
 
 
 class ExampleRegistry:
@@ -13,6 +17,7 @@ class ExampleRegistry:
         self._summaries: dict[str, ExampleSummary] = {}
         self._requests: dict[str, RunRequest] = {}
         self._load_psiloqa()
+        self._load_ragtruth()
         self._load_recorded_cases()
 
     def _load_psiloqa(self) -> None:
@@ -35,6 +40,42 @@ class ExampleRegistry:
                 label=case['label'],
                 dataset=case['dataset'],
                 context=case['passage'],
+                question=case['question'],
+                prompt=case['messages'][0]['content'],
+                recorded_answer=case['answer'],
+                why_notable=case['why_notable'],
+                provenance=provenance,
+            )
+            self._summaries[summary.id] = summary
+            self._requests[summary.id] = RunRequest(
+                task=TaskType.FAITHFULNESS,
+                mode=RunMode.RECORDED_REPLAY,
+                context=summary.context,
+                question=summary.question,
+                prompt=summary.prompt,
+                supplied_answer=summary.recorded_answer,
+                example_id=summary.id,
+            )
+
+    def _load_ragtruth(self) -> None:
+        for case in load_ragtruth_demo_cases():
+            provenance = Provenance(
+                dataset=case['dataset'],
+                split=case['split'],
+                source_model=case['source_answer_model'],
+                integrity_sha256=case['messages_sha256'],
+                disclosures=[
+                    case['selection_disclosure'],
+                    case['annotation_disclosure'],
+                    case['source_disclosure'],
+                    f"License: {case['license']}",
+                ],
+            )
+            summary = ExampleSummary(
+                id=case['case_id'],
+                label=case['label'],
+                dataset=case['dataset'],
+                context=case['context'],
                 question=case['question'],
                 prompt=case['messages'][0]['content'],
                 recorded_answer=case['answer'],
