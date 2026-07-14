@@ -239,7 +239,12 @@ class RunEngine:
             # surface its own message rather than the generic catch-all.
             return self._failure(running, 'consent_required', str(exc)[:240], started)
         except Exception:
-            return self._failure(running, 'operation_failed', 'The operation failed.', started)
+            correlation_id = str(uuid4())
+            lg.exception(f'Run failed [reference {correlation_id}]')
+            return self._failure(
+                running, 'operation_failed', 'The operation failed.', started,
+                correlation_id=correlation_id,
+            )
 
     @staticmethod
     def _failure(
@@ -247,6 +252,7 @@ class RunEngine:
         code: str,
         message: str,
         started: float | None = None,
+        correlation_id: str | None = None,
     ) -> RunRecord:
         timings = None
         if started is not None:
@@ -258,6 +264,6 @@ class RunEngine:
             'error': PublicError(
                 code=code,
                 message=message,
-                correlation_id=str(uuid4()),
+                correlation_id=correlation_id or str(uuid4()),
             ),
         })
