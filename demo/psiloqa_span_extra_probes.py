@@ -291,8 +291,17 @@ def train_token_tabpfn(train, val, test, args):
     x, extras = _preprocess(sub_x, scale=True, pca_components=args.tabpfn_pca, seed=args.seed)
     clf = TabPFNClassifier(device=args.tabpfn_device, ignore_pretraining_limits=True, random_state=args.seed)
     clf.fit(x, sub_y)
-    val_scores = clf.predict_proba(_apply(extras, val.features.astype(np.float32)))[:, 1]
-    test_scores = clf.predict_proba(_apply(extras, test.features.astype(np.float32)))[:, 1]
+    # Chunked prediction: one giant predict call trips CUDA grid-dim limits ("invalid
+    # configuration argument") with a 25k-token fitted context; ~4k-row chunks stay legal.
+    def _chunked_proba(features: np.ndarray, chunk: int = 4096) -> np.ndarray:
+        parts = [
+            clf.predict_proba(_apply(extras, features[i:i + chunk].astype(np.float32)))[:, 1]
+            for i in range(0, len(features), chunk)
+        ]
+        return np.concatenate(parts)
+
+    val_scores = _chunked_proba(val.features)
+    test_scores = _chunked_proba(test.features)
     threshold = token_char_threshold(val, val_scores)
     return (
         {
