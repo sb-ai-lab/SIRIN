@@ -1485,7 +1485,7 @@ def test_default_detector_input_guard_is_30k(monkeypatch):
 def test_only_exact_recorded_prompts_bypass_the_live_size_guard(monkeypatch):
     from sirin.ui.demo_cases import get_demo_case
 
-    case = get_demo_case('681a1674')
+    case = get_demo_case('e3038f8c')
     prompt = case['answer_prompt']
     monkeypatch.setenv('SIRIN_UI_MAX_DETECTOR_INPUT_CHARS', '10')
 
@@ -1584,6 +1584,45 @@ def test_claim_openai_view_is_uncalibrated():
     view = ui.detection_view_model(([3.1], [1], None), 'answer', judge)
     assert view['level'] == 'claim'
     assert view['calibrated'] is False
+
+
+def test_claim_openai_judge_facts_carry_verdict_not_nll_score():
+    """Regression: ClaimOpenAIJudge must put the 0/1 verdict in ``pred`` and the NLL score in
+    ``prob`` (they were zipped in swapped order, so every claim rendered flagged). Runs the real
+    detect() with a fake adapter + regex SENTENCE split (no network, no local model)."""
+    from sirin.definitions import SplitStrategy
+    from sirin.detection.judging import ClaimOpenAIJudge
+    from sirin.detection.splitters import SplitManager
+    from sirin.models.detection import OpenAIJudgeConfig, SplitConfig
+
+    class FakeAdapter:
+        # per-claim verdict: claim 1 -> '1' (hallucinated), claim 2 -> '0' (grounded).
+        def sample(self, inputs, return_logprobs=False, **kwargs):
+            digits = ['1', '0'][: len(inputs)]
+            logprobs = [[[-0.1, -2.0]] for _ in inputs]  # first-token top-2
+            return (digits, logprobs) if return_logprobs else digits
+
+    judge = object.__new__(ClaimOpenAIJudge)  # bypass model-loading __init__
+    judge.config = OpenAIJudgeConfig(user_prompt='{sample}', temperature=0.0)
+    judge.model_adapter = FakeAdapter()
+    judge.response_splitter_config = SplitConfig(strategy=SplitStrategy.SENTENCE)
+    judge.response_splitter = SplitManager(config=judge.response_splitter_config)
+    judge.split_model = judge.model_adapter
+    judge.threshold = 0.5
+    judge._context_splitter = None
+    judge.claim_results = None
+
+    sample = ui.build_sample('ctx + question', 'Alpha is false. Beta is true.')
+    result = judge.detect([sample])
+    facts = judge.claim_results[0]['facts']
+
+    # pred is the 0/1 verdict, prob is the NLL score — never swapped.
+    assert [f['pred'] for f in facts] == [1, 0]
+    assert facts[0]['prob'] == pytest.approx(0.1)
+
+    view = ui.detection_view_model(result, 'Alpha is false. Beta is true.', judge)
+    assert view['level'] == 'claim'
+    assert [row['pred'] for row in view['claims']] == [1, 0]
 
 
 def test_styles_inject_substitutes_placeholders_and_honors_motion():

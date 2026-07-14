@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from sirin.ui.path_policy import (
+    is_hosted,
     is_trusted_local,
     require_checkpoint_path,
 )
@@ -526,10 +527,29 @@ def detection_view_model(
             if disclosures:
                 view['judge_disclosures'] = disclosures
             if isinstance(valid, int) and isinstance(requested, int) and 0 < valid < requested:
-                view['run_warnings'] = [
-                    f'{requested - valid} of {requested} judge samples were not '
-                    'verbatim and were excluded.'
-                ]
+                # Attribute the exclusions honestly when the judge classified them; without
+                # attribution every dropped sample falls back to the not-verbatim sentence.
+                invalid = first.get('invalid') or {}
+                truncated = invalid.get('truncated', 0)
+                empty = invalid.get('empty', 0)
+                not_verbatim = (requested - valid) - truncated - empty
+                warnings = []
+                if truncated:
+                    warnings.append(
+                        f'{truncated} of {requested} judge samples hit the token limit '
+                        f'mid-reasoning and {"was" if truncated == 1 else "were"} excluded.'
+                    )
+                if empty:
+                    warnings.append(
+                        f'{empty} of {requested} judge samples returned no text and '
+                        f'{"was" if empty == 1 else "were"} excluded.'
+                    )
+                if not_verbatim > 0:
+                    warnings.append(
+                        f'{not_verbatim} of {requested} judge samples were not '
+                        'verbatim and were excluded.'
+                    )
+                view['run_warnings'] = warnings
         trace = getattr(detector, 'last_generation_trace', None)
         if isinstance(trace, dict) and trace.get('text') == answer_text:
             view.update(
@@ -1007,7 +1027,7 @@ def _sidebar(st: Any) -> dict[str, Any]:
 
     with st.sidebar:
         st.html('<p class="sirin-side-heading">Detector</p>')
-        preset_objs = presets.list_presets()
+        preset_objs = presets.visible_presets()
         local_profile = None
         if is_trusted_local():
             profiles = longmemeval_profiles()
@@ -1019,11 +1039,12 @@ def _sidebar(st: Any) -> dict[str, Any]:
                 local_profile = by_label.get(chosen, profiles[0][1])
             elif profiles:
                 local_profile = profiles[0][1]
-        default_preset = (
-            local_profile['ui']['default_preset']
-            if local_profile
-            else presets.PSILOQA_TOKEN_LINEAR_PRESET
-        )
+        if local_profile:
+            default_preset = local_profile['ui']['default_preset']
+        elif is_hosted():
+            default_preset = presets.JUDGE_SPAN_PRESET
+        else:
+            default_preset = presets.PSILOQA_TOKEN_LINEAR_PRESET
         names = [p.name for p in preset_objs]
         if default_preset in names:
             names.remove(default_preset)
@@ -1082,15 +1103,18 @@ def _sidebar(st: Any) -> dict[str, Any]:
 
         st.divider()
         st.html('<p class="sirin-side-heading">Generator</p>')
-        backends = [
-            'HF',
-            OPENAI_PROVIDER,
-            OPENROUTER_PROVIDER,
-            ANTHROPIC_PROVIDER,
-            'vLLM',
-        ]
-        if is_trusted_local():
-            backends.append(CUSTOM_PROVIDER)
+        if is_hosted():
+            backends = [OPENROUTER_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER]
+        else:
+            backends = [
+                'HF',
+                OPENAI_PROVIDER,
+                OPENROUTER_PROVIDER,
+                ANTHROPIC_PROVIDER,
+                'vLLM',
+            ]
+            if is_trusted_local():
+                backends.append(CUSTOM_PROVIDER)
         backend = st.selectbox('Backend', backends)
         custom_base_url = ''
         gen_api_key = ''
@@ -1166,7 +1190,8 @@ def _sidebar(st: Any) -> dict[str, Any]:
     return {
         'backend': backend,
         'model_path': _clean_field(model_path),
-        'device': _clean_field(device),
+        # Hosted runs on a public CPU box; no widget path may ever hand it a GPU device.
+        'device': 'cpu' if is_hosted() else _clean_field(device),
         'custom_base_url': _clean_field(custom_base_url),
         'max_tokens': int(max_tokens),
         'temperature': float(temperature),
@@ -1260,7 +1285,7 @@ def _compare_available_presets(active_preset: str, task: str) -> list[str]:
 
     return [
         preset.name
-        for preset in presets.list_presets()
+        for preset in presets.visible_presets()
         if preset.name != active_preset
         and _preset_task(preset.name) == task
         and preset.family != 'uncertainty'

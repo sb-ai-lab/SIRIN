@@ -19,6 +19,7 @@ from sirin.ui.demo_cases import (
     load_psiloqa_span_seed,
     load_psiloqa_span_seed_qwen35,
 )
+from sirin.ui.path_policy import is_hosted
 
 from .contracts import (
     Provenance,
@@ -279,7 +280,8 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
 
     The hero probe seed is added last so it stays the selected card; the judge seed and the second
     (Qwen3.5-4B) probe seed sit beside it when their assets are present. Absent assets are silent —
-    the unchanged landing is the hero probe seed alone.
+    the unchanged landing is the hero probe seed alone. Hosted profile: the census (Qwen3-4B) seed
+    is dropped and the Qwen3.5-4B probe seed, added last, becomes the selected hero.
     """
     runs: list[RunRecord] = []
     judge = build_judge_seed_run(setup_revision)
@@ -288,13 +290,16 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
     second_probe = build_second_probe_seed_run(setup_revision)
     if second_probe is not None:
         runs.append(second_probe)
-    runs.append(build_seed_run(setup_revision))
+    if not is_hosted():
+        runs.append(build_seed_run(setup_revision))
     return runs
 
 
 def seed_draft() -> dict[str, Any]:
-    """Client draft that prefills the census example (context + question) on landing."""
-    case = load_psiloqa_span_seed()
+    """Client draft that prefills the landing example (hosted: the Qwen3.5-4B seed; else census)."""
+    case = load_psiloqa_span_seed_qwen35() if is_hosted() else None
+    if case is None:
+        case = load_psiloqa_span_seed()
     return {
         'analyze': {
             'task': 'faithfulness',

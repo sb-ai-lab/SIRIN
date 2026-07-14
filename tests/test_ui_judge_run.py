@@ -137,17 +137,23 @@ def test_judge_annotation_error_maps_to_actionable_partial():
     assert 'verbatim' in run.error.message
 
 
-def _run_sequence_judge(monkeypatch, generation, logprob_result):
+def _run_sequence_judge(
+    monkeypatch, generation, logprob_result, *, verdict_max_tokens=None, captured=None
+):
     from sirin.ui.presets import _build_openai_judge
 
     judge = _build_openai_judge(
         judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
     )
-    monkeypatch.setattr(
-        judge.model_adapter,
-        'sample',
-        lambda inputs, **kwargs: ([generation], [logprob_result]),
-    )
+    if verdict_max_tokens is not None:
+        judge.config.verdict_max_tokens = verdict_max_tokens
+
+    def fake_sample(inputs, **kwargs):
+        if captured is not None:
+            captured.update(kwargs)
+        return [generation], [logprob_result]
+
+    monkeypatch.setattr(judge.model_adapter, 'sample', fake_sample)
     return judge, judge.detect([build_sample('the prompt', ANSWER)])
 
 
@@ -182,3 +188,55 @@ def test_pasted_key_wins_over_env_and_absence_is_actionable(monkeypatch):
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
     with pytest.raises(ValueError, match='OPENAI_API_KEY'):
         resolve_api_provider('OpenAI')
+
+
+def test_sequence_judge_extracts_digit_from_reasoning_answer(monkeypatch):
+    # OpenRouter reasoning models put prose in content; the verdict digit is scanned out.
+    _judge, (probs, preds, _) = _run_sequence_judge(monkeypatch, 'The answer is 1', None)
+
+    assert preds[0] == 1
+    assert probs[0] != probs[0]  # nan: no logprobs -> no score, verdict holds
+
+
+def test_sequence_judge_multi_token_answer_never_borrows_first_token_logprob(monkeypatch):
+    # The adapter's logprobs carry no token text: for a multi-token answer the first
+    # logprob belongs to a thinking token, not the digit -> honest nan, not a fake score.
+    _judge, (probs, preds, _) = _run_sequence_judge(
+        monkeypatch, 'The answer is 1', [[-0.1, -2.0]]
+    )
+
+    assert preds[0] == 1
+    assert probs[0] != probs[0]
+
+
+def test_sequence_judge_single_digit_answer_keeps_logprob_score(monkeypatch):
+    _judge, (probs, preds, _) = _run_sequence_judge(monkeypatch, '1', [[-0.1, -2.0]])
+
+    assert preds[0] == 1
+    assert probs[0] == pytest.approx(0.1)
+
+
+def test_sequence_judge_one_token_protocol_is_unchanged(monkeypatch):
+    captured = {}
+    _judge, (probs, preds, _) = _run_sequence_judge(
+        monkeypatch, '0', None, verdict_max_tokens=1, captured=captured
+    )
+
+    assert preds[0] == 0
+    assert captured['max_tokens'] == 1
+
+
+def test_sequence_judge_raises_when_no_digit_anywhere(monkeypatch):
+    from sirin.detection.judging.judges.base import JudgeAnnotationError
+
+    with pytest.raises(JudgeAnnotationError, match='class digit'):
+        _run_sequence_judge(monkeypatch, 'I refuse to answer.', None)
+
+
+def test_ui_builder_gives_reasoning_judges_room_to_think():
+    from sirin.ui.presets import _build_openai_judge
+
+    judge = _build_openai_judge(
+        judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
+    )
+    assert judge.config.verdict_max_tokens == 512

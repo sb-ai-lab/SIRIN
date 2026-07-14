@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sirin.definitions import DetectionTaskType
+from sirin.ui.path_policy import is_hosted
 from sirin.ui.providers import (
     CUSTOM_PROVIDER,
     OPENROUTER_PROVIDER,
@@ -65,8 +66,11 @@ PSILOQA_TOKEN_LINEAR_PRESETS: dict[str, tuple[str, str, str]] = {
 # External (unbundled) sibling checkpoint. Derived from the repo location instead of a hardcoded
 # home path; honored only as a last-resort fallback after the env override. Not bundled/verified,
 # so it is deliberately NOT exposed as a preset ``builtin_checkpoint`` (no false availability).
+_PRESETS_PARENTS = Path(__file__).resolve().parents
 ANSWERABILITY_CHECKPOINT_DIR = str(
-    Path(__file__).resolve().parents[4]
+    # parents[4] when the tree is deep enough; shallow installs (e.g. /app on a hosted
+    # Space) fall back to the outermost parent, yielding a path that simply never exists.
+    _PRESETS_PARENTS[min(4, len(_PRESETS_PARENTS) - 1)]
     / 'trust_assistant/checkpoints/probing/answerability_tabpfn/Hiddens_L_TabPFN'
 )
 _SEQUENCE_TABPFN_LAYERS = [20, 35, 36, 37, 38, 39]
@@ -84,6 +88,19 @@ _JUDGE_PROMPT = (
     "Answer with a SINGLE character that is the digit 1 or the digit 0. Do not output JSON, "
     "quotes, spaces, reasoning, or any other character. Your entire reply must be exactly one "
     "digit: "
+)
+# Same shape as _JUDGE_PROMPT (single-digit forcing, {sample} slot) but for answerability: the
+# dialogue is a context + question with NO answer. Polarity: 1 when the context is NOT sufficient
+# to answer the question (unanswerable), 0 when it IS sufficient. The trailing single-digit clause
+# forces token 0 to a bare '0'/'1' just as the faithfulness prompt does.
+_ANSWERABILITY_JUDGE_PROMPT = (
+    "You are given a context passage and a question, with no answer. Decide whether the "
+    "context contains enough information to answer the question.\n"
+    'Dialogue: "{sample}"\n'
+    "Reply with 1 if the context is NOT sufficient to answer the question, or 0 if it IS "
+    "sufficient. Answer with a SINGLE character that is the digit 1 or the digit 0. Do not "
+    "output JSON, quotes, spaces, reasoning, or any other character. Your entire reply must "
+    "be exactly one digit: "
 )
 
 
@@ -159,16 +176,23 @@ def _resolve_judge(
 
 
 def _judge_extra_body(api_provider: str) -> dict[str, Any] | None:
-    """Per-request extension for a Custom judge endpoint; None for external providers.
+    """Per-provider request extension for a judge endpoint; None when nothing is needed.
 
-    A trusted-local vLLM Qwen judge otherwise lands every generation in its reasoning channel, so
-    every verbatim echo is invalid (JudgeAnnotationError); disabling thinking makes the verdict/
-    annotation stable. External providers get None — they may reject unknown fields. Opt back in with
-    SIRIN_CUSTOM_JUDGE_THINKING=1.
+    Custom (trusted-local vLLM): a Qwen judge otherwise lands every generation in its reasoning
+    channel, so every verbatim echo is invalid (JudgeAnnotationError); disabling thinking makes the
+    verdict/annotation stable. Opt back in with SIRIN_CUSTOM_JUDGE_THINKING=1.
+    OpenRouter: cap chain-of-thought at 1024 tokens ('reasoning' is OpenRouter's official knob) —
+    uncapped reasoning overruns the completion budget, finish_reason='length', and OpenRouter mirrors
+    the truncated reasoning into content, which then fails the verbatim echo check.
+    OpenAI/Anthropic: None — they may reject unknown fields.
     """
-    if api_provider != CUSTOM_PROVIDER or os.getenv('SIRIN_CUSTOM_JUDGE_THINKING') == '1':
-        return None
-    return {'chat_template_kwargs': {'enable_thinking': False}}
+    if api_provider == CUSTOM_PROVIDER:
+        if os.getenv('SIRIN_CUSTOM_JUDGE_THINKING') == '1':
+            return None
+        return {'chat_template_kwargs': {'enable_thinking': False}}
+    if api_provider == OPENROUTER_PROVIDER:
+        return {'reasoning': {'max_tokens': 1024}}
+    return None
 
 
 def _build_uncertainty(
@@ -298,8 +322,11 @@ def _build_uncertainty_token(
     )
 
 
-def _build_openai_judge(
+def _build_openai_sequence_judge(
     *,
+    user_prompt: str,
+    task: str,
+    dialogue_format: str | None = None,
     device: str = 'cuda',
     checkpoint_dir: str | None = None,
     generator_adapter: Any = None,
@@ -324,12 +351,91 @@ def _build_openai_judge(
             extra_body=_judge_extra_body(api_provider),
         )
     )
+    # temperature 0 keeps the verdict deterministic; verdict_max_tokens=512 lets the hosted demo's
+    # reasoning judges think before the digit (UI-only; scripts stay at 1).
+    config_kwargs: dict[str, Any] = dict(
+        user_prompt=user_prompt, temperature=0.0, verdict_max_tokens=512
+    )
+    if dialogue_format is not None:
+        config_kwargs['dialogue_format'] = dialogue_format
     judge = SequenceOpenAIJudge(
-        # temperature 0 keeps the single-token verdict deterministic.
+        config=OpenAIJudgeConfig(**config_kwargs), model_adapter=model
+    )
+    return _tag(
+        judge, 'judge', 'sequence', calibrated=False, display_mode='verdict', task=task
+    )
+
+
+def _build_openai_judge(**kwargs: Any) -> Any:
+    return _build_openai_sequence_judge(
+        user_prompt=_JUDGE_PROMPT,
+        task=DetectionTaskType.HALLUCINATION_DETECTION.value,
+        **kwargs,
+    )
+
+
+def _build_openai_answerability_judge(**kwargs: Any) -> Any:
+    # Same sequence judge, but scores a context+question (no answer) for answerability. The UI's
+    # Task=Answerability flow feeds build_sample(context+question, '') so the judge never sees an
+    # answer that isn't there; polarity is 1 == not answerable (see _ANSWERABILITY_JUDGE_PROMPT).
+    # dialogue_format='{question}' feeds the context+question straight through: the default
+    # 'Question: … Answer: {answer}' wrapper would append an empty 'Answer:' trailer (there is no
+    # answer) and nest a second 'Question:' label, which measurably worsened the offline AUC.
+    return _build_openai_sequence_judge(
+        user_prompt=_ANSWERABILITY_JUDGE_PROMPT,
+        task=DetectionTaskType.QUERY_ANSWERABILITY.value,
+        dialogue_format='{question}',
+        **kwargs,
+    )
+
+
+def _build_openai_claim_judge(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    judge_model: str | None = None,
+    judge_api_key: str | None = None,
+    api_provider: str = OPENROUTER_PROVIDER,
+    **kwargs: Any,
+) -> Any:
+    from sirin.definitions import AggregationMethod, SplitStrategy
+    from sirin.detection.judging import ClaimOpenAIJudge
+    from sirin.inference.adapters import OpenAIModelAdapter
+    from sirin.models.detection import OpenAIJudgeConfig, SplitConfig
+    from sirin.models.inference import OpenAIConfig
+
+    model_path, api_key, base_url = _resolve_judge(
+        judge_model, judge_api_key, api_provider
+    )
+    model = OpenAIModelAdapter(
+        OpenAIConfig(
+            model_path=model_path,
+            api_key=api_key,
+            base_url=base_url,
+            extra_body=_judge_extra_body(api_provider),
+        )
+    )
+    judge = ClaimOpenAIJudge(
+        # Faithfulness prompt: each atomic claim is judged (0/1) against the context as its own
+        # one-line "answer". temperature 0 keeps every per-claim verdict deterministic.
         config=OpenAIJudgeConfig(user_prompt=_JUDGE_PROMPT, temperature=0.0),
         model_adapter=model,
+        # ATOMIC splitter decomposes the answer into self-contained claims via the SAME API adapter
+        # (split_model defaults to model_adapter) — no local model, no extra plumbing. VOTE (majority
+        # of per-claim verdicts) is the response summary: MAX/MEAN treat the judge's per-claim NLL as a
+        # probability, but small NLL means CONFIDENT, so they invert and pick the least-sure claim.
+        response_splitter_config=SplitConfig(
+            strategy=SplitStrategy.ATOMIC,
+            aggregation_method=AggregationMethod.VOTE,
+            split_response=True,
+            temperature=0.0,
+        ),
     )
-    return _tag(judge, 'judge', 'sequence', calibrated=False, display_mode='verdict')
+    judge = _tag(judge, 'judge', 'claim', calibrated=False, display_mode='claim-cards')
+    judge._ui_judge_provider = api_provider
+    judge._ui_judge_model = model_path
+    return judge
 
 
 def _build_openai_token_judge(
@@ -372,6 +478,10 @@ def _build_openai_token_judge(
             system_prompt=SPAN_TAG_SYSTEM_PROMPT,
             user_prompt=SPAN_TAG_USER_PROMPT,
             temperature=0.7,
+            # 3 samples matches the campaign protocol (temp 0.7, 3 samples) and halves per-click
+            # cost/latency vs the default 5 on providers that ignore n>1 (each vote is one request
+            # on OpenRouter free routes).
+            num_beams=3,
         ),
         model_adapter=model,
     )
@@ -776,6 +886,31 @@ PRESETS: dict[str, Preset] = {
         is_judge=True,
         census_caption='single-digit hallucination verdict · one judge pass, not calibrated',
     ),
+    "Judge — API Answerability (zero-shot)": Preset(
+        name="Judge — API Answerability (zero-shot)",
+        family='judge',
+        level='sequence',
+        calibrated=False,
+        requires_checkpoint=False,
+        description="LLM-as-judge answerability verdict (context + question, no answer) via the OpenAI/OpenRouter API. No training.",
+        build=_build_openai_answerability_judge,
+        task=DetectionTaskType.QUERY_ANSWERABILITY.value,
+        display_mode='verdict',
+        is_judge=True,
+        census_caption='single-digit answerability verdict · one judge pass, not calibrated',
+    ),
+    "Judge — API Claim (zero-shot)": Preset(
+        name="Judge — API Claim (zero-shot)",
+        family='judge',
+        level='claim',
+        calibrated=False,
+        requires_checkpoint=False,
+        description="LLM-as-judge claim-level faithfulness via the OpenAI/OpenRouter API: the answer is split into atomic claims and each is judged against the context. No training.",
+        build=_build_openai_claim_judge,
+        display_mode='claim-cards',
+        is_judge=True,
+        census_caption='per-claim faithfulness verdicts · atomic-fact split, not calibrated',
+    ),
     "Judge — API Span (zero-shot)": Preset(
         name="Judge — API Span (zero-shot)",
         family='judge',
@@ -805,6 +940,13 @@ PRESETS: dict[str, Preset] = {
 
 def list_presets() -> list[Preset]:
     return list(PRESETS.values())
+
+
+def visible_presets() -> list[Preset]:
+    """Presets offered by the UI. The hosted (CPU, public) profile only offers API judges."""
+    if is_hosted():
+        return [p for p in list_presets() if p.family == 'judge']
+    return list_presets()
 
 
 def _preset_layer_threshold(

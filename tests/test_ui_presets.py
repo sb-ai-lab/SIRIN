@@ -212,6 +212,9 @@ def test_openai_token_judge_uses_span_tag_prompts(monkeypatch):
     assert '{sample}' in prompts.SPAN_TAG_USER_PROMPT
     # temperature > 0 so the sampled generations differ (consensus needs diversity).
     assert detector.config.temperature == 0.7
+    # 3 samples (campaign protocol), not the config default 5: halves per-click cost on providers
+    # that ignore n>1 (each vote is one request on OpenRouter free routes).
+    assert detector.config.num_beams == 3
 
 
 def test_sequence_judge_prompt_embeds_dialogue_via_sample_placeholder(monkeypatch):
@@ -263,7 +266,7 @@ def test_every_uncertainty_and_judge_preset_has_a_one_line_census_caption():
         assert len(caption) <= 80, preset.name
 
 
-def _build_openai_sequence_judge_with_fakes(monkeypatch):
+def _build_openai_sequence_judge_with_fakes(monkeypatch, builder=None):
     monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
 
@@ -304,7 +307,68 @@ def _build_openai_sequence_judge_with_fakes(monkeypatch):
         types.SimpleNamespace(OpenAIConfig=FakeConfig),
     )
 
-    return presets._build_openai_judge(api_provider='OpenRouter')
+    return (builder or presets._build_openai_judge)(api_provider='OpenRouter')
+
+
+def test_answerability_judge_preset_is_verdict_answerability(monkeypatch):
+    from sirin.ui.workspace.contracts import ScoreSemantics, derive_score_semantics
+
+    detector = _build_openai_sequence_judge_with_fakes(
+        monkeypatch, builder=presets._build_openai_answerability_judge
+    )
+    info = presets.describe_detector(detector)
+    assert info['task'] == 'answerability'
+    assert info['display_mode'] == 'verdict'
+    # a sequence judge is a verdict, never a calibrated probability
+    assert (
+        derive_score_semantics(calibrated=False, family='judge', level='sequence')
+        is ScoreSemantics.VERDICT
+    )
+    # reasoning models get room to think before the digit
+    assert detector.config.verdict_max_tokens == 512
+    # the context+question is fed straight through: no fake 'Answer:' trailer, no nested 'Question:'
+    assert detector.config.dialogue_format == '{question}'
+
+
+def test_answerability_judge_prompt_has_sample_slot_and_not_sufficient_polarity():
+    prompt = presets._ANSWERABILITY_JUDGE_PROMPT
+    # must carry {sample} or build_prompt_messages drops the dialogue and scores nothing
+    assert '{sample}' in prompt
+    # polarity: 1 == context NOT sufficient (unanswerable); single-digit clause guards token 0
+    assert 'NOT sufficient' in prompt
+    assert 'SINGLE character' in prompt
+
+
+def test_answerability_judge_preset_registered_after_sequence_and_enables_task():
+    from sirin.ui.streamlit_app import _preset_task
+
+    name = 'Judge — API Answerability (zero-shot)'
+    assert name in presets.PRESETS
+    preset = presets.PRESETS[name]
+    assert preset.task == 'answerability'
+    assert preset.family == 'judge' and preset.requires_checkpoint is False
+    # the UI derives the Task=Answerability capability from the preset name
+    assert _preset_task(name) == 'answerability'
+    # placed right after the sequence judge (registry order is load-bearing elsewhere)
+    order = list(presets.PRESETS)
+    assert order[order.index('Judge — API Sequence (zero-shot)') + 1] == name
+
+
+def test_claim_judge_preset_registered_after_answerability_as_claim_cards():
+    from sirin.ui.workspace.contracts import ScoreSemantics, derive_score_semantics
+
+    name = 'Judge — API Claim (zero-shot)'
+    assert name in presets.PRESETS
+    preset = presets.PRESETS[name]
+    assert preset.family == 'judge' and preset.level == 'claim'
+    assert preset.display_mode == 'claim-cards'
+    assert preset.requires_checkpoint is False
+    assert (
+        derive_score_semantics(calibrated=False, family='judge', level='claim')
+        is ScoreSemantics.VERDICT
+    )
+    order = list(presets.PRESETS)
+    assert order[order.index('Judge — API Answerability (zero-shot)') + 1] == name
 
 
 def _build_uncertainty_sequence_msp_with_fakes(monkeypatch):
@@ -373,13 +437,20 @@ def test_custom_judge_forwards_base_url_and_disables_thinking(monkeypatch):
     assert cfg.extra_body == {'chat_template_kwargs': {'enable_thinking': False}}
 
 
-def test_external_judges_never_send_extra_body(monkeypatch):
-    # extra_body carries the vLLM enable_thinking toggle; external providers may reject unknown
-    # fields, so only the Custom provider gets it.
-    token = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenRouter')
+def test_openai_judge_never_sends_extra_body(monkeypatch):
+    # OpenAI may reject unknown fields, so it gets no extra_body at all.
+    token = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenAI')
     assert token.model_adapter.config.extra_body is None
-    sequence = _build_openai_sequence_judge_with_fakes(monkeypatch)
-    assert sequence.model_adapter.config.extra_body is None
+
+
+def test_openrouter_judges_cap_reasoning_tokens(monkeypatch):
+    # Uncapped reasoning overruns the completion budget (finish_reason='length') and OpenRouter
+    # mirrors the truncated CoT into content, failing the verbatim echo check; the 'reasoning'
+    # extra_body is OpenRouter's official cap.
+    token = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenRouter')
+    assert token.model_adapter.config.extra_body == {'reasoning': {'max_tokens': 1024}}
+    sequence = _build_openai_sequence_judge_with_fakes(monkeypatch)  # OpenRouter provider
+    assert sequence.model_adapter.config.extra_body == {'reasoning': {'max_tokens': 1024}}
 
 
 def test_custom_judge_thinking_opt_out_env(monkeypatch):

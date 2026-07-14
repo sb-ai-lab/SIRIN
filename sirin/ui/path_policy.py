@@ -8,6 +8,10 @@ def is_trusted_local() -> bool:
     return os.getenv('SIRIN_UI_TRUSTED_LOCAL') == '1'
 
 
+def is_hosted() -> bool:
+    return os.getenv('SIRIN_UI_HOSTED') == '1'
+
+
 def _roots(env_var: str) -> list[Path]:
     return [
         Path(p).expanduser().resolve(strict=False)
