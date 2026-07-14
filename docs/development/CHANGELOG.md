@@ -2,11 +2,30 @@
 
 This changelog records user-facing and runtime changes to the canonical Streamlit UI. The static Hugging Face replay deployment is maintained separately.
 
+## 2026-07-14 — collaborator merge: class-token judge scoring, verbalized judge, UE fusion
+
+Ported the collaborator's `sirin-final` change-set (their uncommitted work on the
+`llm-internals-pipe` tree; everything else in that tree was already present here or
+superseded by our refactors).
+
+### Added
+
+- **Judge — API Sequence (verbalized confidence)** preset + `SequenceOpenAIVerbalizedJudge`: the judge states "label + confidence 0-100", so endpoints without logprobs (common on OpenRouter free routes) still yield a real threshold-free score instead of "no score".
+- **Teacher-forced uncertainty** (`teacher_forced` + `chat_template_kwargs` on `UncertaintyFeatureProcessorConfig`): scores the stored assistant turn instead of a fresh generation — required whenever the label refers to the recorded response. Whitebox-only.
+- **UE score fusion**: `score_normalization` (`zscore`/`rank`, statistics fit label-free on train) and `aggregation_method="auto"` (train-ROC-AUC subset + aggregation selection) on `UncertaintyDetectorConfig`; `Focus` estimator wired into the sequence method map (needs `method_kwargs['Focus']` — no constructor defaults).
+- Judge config knobs: `OpenAIJudgeConfig.verdict_max_tokens=16` (GPT-5.x rejects budgets <16; base stays 1 for local vLLM protocols), `top_logprobs=5`, `max_concurrent=10`.
+
+### Changed
+
+- **Sequence/claim judge scores are now true probabilities**: the adapter returns `(token, logprob)` alternatives and the judges read P(hallucinated) off the class token, renormalized over the pair. The old class-blind `-logprob` score made a confident "0" and a confident "1" indistinguishable (chance-level AUROC). NaN honesty is kept: no class token in the top-k / logprobs rejected → no score, verdict holds.
+- `SequenceUncertaintyDetector.train()` fits normalizer, fusion rule, and threshold on the train split (extraction runs once); `val_data` is no longer used for calibration.
+- Claim verdict parsing tolerates decoration ("1.", "**0**") instead of collapsing to the negative class.
+
 ## 2026-07-14 — hosted GPU-free paper demo
 
 ### Added
 
-- **Hosted profile** (`SIRIN_UI_HOSTED=1`): judge-only presets, API-only backends (OpenRouter default), forced CPU, Qwen3.5-4B probe hero on the landing (census card dropped); non-hosted behavior unchanged. Space packaging under `deploy/hf-space/` with a verified CPU-only dependency manifest and a staging/self-check script (`scripts/dev/make_space.py`).
+- **Hosted profile** (`SIRIN_UI_HOSTED=1`): judge-only presets, API-only backends (OpenRouter default), forced CPU, Qwen3.5-4B probe hero on the landing (census card dropped); non-hosted behavior unchanged. Space packaging (verified CPU-only dependency manifest + staging/self-check script) lives in the separate `sirin_deploy` repo.
 - **Judge — API Answerability (zero-shot)**: the paper's second task now runs GPU-free through a context+question verdict judge (validated ROC 0.688 against LongMemEval strict labels, perfect unanswerable recall).
 - **Judge — API Claim (zero-shot)**: atomic-claim decomposition with claim-card rendering, splitting routed through the same API adapter (fixed a latent pred/prob swap that flagged every claim).
 - Reasoning-model support across judges: the sequence judge reads the verdict digit from content with an honest no-logprob score, OpenRouter judges cap chain-of-thought at 1024 tokens, and excluded consensus votes are attributed (token-limit / empty / not-verbatim) instead of all blamed on paraphrase.

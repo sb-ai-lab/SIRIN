@@ -67,7 +67,7 @@ The live UI keeps the existing 30,000-character combined detector-input guard an
 
 ## Hosted demo profile
 
-`SIRIN_UI_HOSTED=1` turns the app into the GPU-free paper demo (the Hugging Face Space profile): only the API judge presets are offered (Span default, plus Sequence, Answerability, and Claim), backends are API-only (OpenRouter first), device is forced to `cpu`, and the landing selects the Qwen3.5-4B probe card as the hero. Live detection runs through the visitor's pasted key; recorded cards render with no key at all. `SIRIN_OPENROUTER_MODEL` sets the pre-filled judge model (the Space uses a free OpenRouter route). The Space tree is staged and self-checked by `scripts/dev/make_space.py`; `deploy/hf-space/` holds the Dockerfile, CPU requirements, and Space card.
+`SIRIN_UI_HOSTED=1` turns the app into the GPU-free paper demo (the Hugging Face Space profile): only the API judge presets are offered (Span default, plus Sequence, Answerability, Claim, and Sequence with verbalized confidence — the last one asks the judge to state its own confidence, so routes without logprobs still score), backends are API-only (OpenRouter first), device is forced to `cpu`, and the landing selects the Qwen3.5-4B probe card as the hero. Live detection runs through the visitor's pasted key; recorded cards render with no key at all. `SIRIN_OPENROUTER_MODEL` sets the pre-filled judge model (the Space uses a free OpenRouter route). Space packaging and deploy tooling live in a separate repo (`sirin_deploy`): its `make_space.py` stages and self-checks the tree from this checkout, and its `hf-space/` holds the Dockerfile, CPU requirements, and Space card.
 
 ## Trust and provenance
 
