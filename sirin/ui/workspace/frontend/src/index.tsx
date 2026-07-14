@@ -90,7 +90,7 @@ const revealedRunIds = new Set<string>()
 // Expected, self-explanatory failures the viewer can act on themselves. Their message already tells
 // them what to do, so we do not surface a correlation reference — that noise is reserved for the
 // unexpected server-side failures (detection_failed, operation_failed) that a log lookup can chase.
-const ACTIONABLE_ERROR_CODES = new Set(["consent_required", "busy", "empty_answer", "generation_unavailable", "judge_no_aligned_annotation"])
+const ACTIONABLE_ERROR_CODES = new Set(["consent_required", "busy", "empty_answer", "generation_unavailable", "judge_no_aligned_annotation", "provider_rate_limited", "provider_auth_failed"])
 
 type Memory = {
   sequence: number

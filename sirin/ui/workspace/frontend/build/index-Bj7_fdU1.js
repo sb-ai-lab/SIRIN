@@ -5742,7 +5742,7 @@ const tc = {
     prompt: "",
     sourceRunId: null
   }
-}, If = { theme: "light", motion: "subtle" }, ac = 240, cc = 180, Wf = 400, rc = /* @__PURE__ */ new Set(), Df = /* @__PURE__ */ new Set(["consent_required", "busy", "empty_answer", "generation_unavailable", "judge_no_aligned_annotation"]), Hl = /* @__PURE__ */ new Map();
+}, If = { theme: "light", motion: "subtle" }, ac = 240, cc = 180, Wf = 400, rc = /* @__PURE__ */ new Set(), Df = /* @__PURE__ */ new Set(["consent_required", "busy", "empty_answer", "generation_unavailable", "judge_no_aligned_annotation", "provider_rate_limited", "provider_auth_failed"]), Hl = /* @__PURE__ */ new Map();
 function Vf(u) {
   return u ? { analyze: { ...tc.analyze, ...u.analyze, prompt: u.analyze.prompt ?? "", sourceRunId: u.analyze.sourceRunId ?? null }, quickPrompt: u.quickPrompt ?? "" } : { analyze: { ...tc.analyze }, quickPrompt: "" };
 }

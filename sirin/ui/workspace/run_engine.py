@@ -63,6 +63,31 @@ def _is_judge_annotation_error(exc: BaseException) -> bool:
     return any(cls.__name__ == 'JudgeAnnotationError' for cls in type(exc).__mro__)
 
 
+def _exception_name_matches(exc: BaseException, name: str) -> bool:
+    """Class-name MRO match, same decoupling rationale as ``_is_judge_annotation_error``
+    (here it also avoids importing the openai SDK in this light module)."""
+    return any(cls.__name__ == name for cls in type(exc).__mro__)
+
+
+# Common provider failures a public paste-a-key demo hits constantly. The copy is ours,
+# never raw provider output (which can echo request details).
+_PROVIDER_ERROR_COPY: tuple[tuple[str, str, str], ...] = (
+    (
+        'RateLimitError',
+        'provider_rate_limited',
+        'The judge provider rate-limited this API key (free-tier daily quotas are '
+        'small, and one span run makes several requests). Wait for the daily reset, '
+        'add provider credits, or paste a different key.',
+    ),
+    (
+        'AuthenticationError',
+        'provider_auth_failed',
+        'The judge provider rejected this API key. Check the pasted key and the '
+        'selected provider, then try again.',
+    ),
+)
+
+
 def _origin(request: RunRequest) -> RunOrigin:
     if request.source_run_id:
         return RunOrigin.RERUN_IMPORTED
@@ -183,6 +208,14 @@ class RunEngine:
             except Exception as exc:
                 if not answer:
                     raise
+                provider_copy = next(
+                    (
+                        (error_code, copy)
+                        for name, error_code, copy in _PROVIDER_ERROR_COPY
+                        if _exception_name_matches(exc, name)
+                    ),
+                    None,
+                )
                 if _is_judge_annotation_error(exc):
                     # The judge produced nothing alignable (no verbatim echo / no digit verdict):
                     # preserve the answer and surface the judge's own actionable message. These
@@ -193,6 +226,10 @@ class RunEngine:
                         'Try another judge model, or lower the temperature.'
                     )
                     correlation_id = str(uuid4())
+                elif provider_copy:
+                    code, message = provider_copy
+                    correlation_id = str(uuid4())
+                    lg.warning(f'Provider error {code} [reference {correlation_id}]')
                 else:
                     code, message = 'detection_failed', 'The answer was preserved, but detection failed.'
                     correlation_id = str(uuid4())

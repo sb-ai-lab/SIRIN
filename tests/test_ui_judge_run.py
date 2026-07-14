@@ -181,6 +181,55 @@ def test_presenter_scalar_drops_non_finite_scores():
     assert _scalar(0.5) == 0.5
 
 
+def test_provider_rate_limit_maps_to_actionable_partial():
+    # Named to match the engine's decoupled matcher; free-tier daily quotas make
+    # this the most common failure a public demo visitor hits.
+    class RateLimitError(Exception):
+        pass
+
+    def detect(_answer, _request, _setup):
+        raise RateLimitError('429 free-models-per-day')
+
+    engine = RunEngine(generate=None, detect=detect)
+    setup = SetupSnapshot(
+        detector_preset='Judge — API Span (zero-shot)',
+        detector_family='judge',
+        detector_level='token',
+    )
+    request = RunRequest(
+        mode=RunMode.SCORE_SUPPLIED_ANSWER, question='q', supplied_answer=ANSWER
+    )
+    run = engine.execute(engine.reserve(request, setup, 0), request)
+
+    assert run.status is RunStatus.PARTIAL
+    assert run.answer == ANSWER
+    assert run.error.code == 'provider_rate_limited'
+    assert 'rate-limited' in run.error.message
+    assert '429' not in run.error.message  # our copy, never raw provider output
+
+
+def test_provider_auth_failure_maps_to_actionable_partial():
+    class AuthenticationError(Exception):
+        pass
+
+    def detect(_answer, _request, _setup):
+        raise AuthenticationError('401 bad key sk-secret')
+
+    engine = RunEngine(generate=None, detect=detect)
+    setup = SetupSnapshot(
+        detector_preset='Judge — API Span (zero-shot)',
+        detector_family='judge',
+        detector_level='token',
+    )
+    request = RunRequest(
+        mode=RunMode.SCORE_SUPPLIED_ANSWER, question='q', supplied_answer=ANSWER
+    )
+    run = engine.execute(engine.reserve(request, setup, 0), request)
+
+    assert run.error.code == 'provider_auth_failed'
+    assert 'sk-secret' not in run.error.message
+
+
 def test_pasted_key_wins_over_env_and_absence_is_actionable(monkeypatch):
     monkeypatch.setenv('OPENAI_API_KEY', 'env-key')
     assert resolve_api_provider('OpenAI', api_key='pasted-key').api_key == 'pasted-key'
