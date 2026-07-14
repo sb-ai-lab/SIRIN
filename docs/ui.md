@@ -65,6 +65,10 @@ Token evidence is accepted only when feature scores, predictions, tokenizer offs
 
 The live UI keeps the existing 30,000-character combined detector-input guard and current generation-token controls. Exact verified demo prompts retain their existing exception. Setup changes do not mutate historical result labels.
 
+## Hosted demo profile
+
+`SIRIN_UI_HOSTED=1` turns the app into the GPU-free paper demo (the Hugging Face Space profile): only the API judge presets are offered (Span default, plus Sequence, Answerability, and Claim), backends are API-only (OpenRouter first), device is forced to `cpu`, and the landing selects the Qwen3.5-4B probe card as the hero. Live detection runs through the visitor's pasted key; recorded cards render with no key at all. `SIRIN_OPENROUTER_MODEL` sets the pre-filled judge model (the Space uses a free OpenRouter route). The Space tree is staged and self-checked by `scripts/dev/make_space.py`; `deploy/hf-space/` holds the Dockerfile, CPU requirements, and Space card.
+
 ## Trust and provenance
 
 Shared-safe mode is a private single-user redaction and resource-hardening profile, not authentication or hostile multi-tenant isolation. Put deployments behind authenticated TLS and keep the raw Streamlit port private.

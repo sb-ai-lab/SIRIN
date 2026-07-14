@@ -2,6 +2,21 @@
 
 This changelog records user-facing and runtime changes to the canonical Streamlit UI. The static Hugging Face replay deployment is maintained separately.
 
+## 2026-07-14 — hosted GPU-free paper demo
+
+### Added
+
+- **Hosted profile** (`SIRIN_UI_HOSTED=1`): judge-only presets, API-only backends (OpenRouter default), forced CPU, Qwen3.5-4B probe hero on the landing (census card dropped); non-hosted behavior unchanged. Space packaging under `deploy/hf-space/` with a verified CPU-only dependency manifest and a staging/self-check script (`scripts/dev/make_space.py`).
+- **Judge — API Answerability (zero-shot)**: the paper's second task now runs GPU-free through a context+question verdict judge (validated ROC 0.688 against LongMemEval strict labels, perfect unanswerable recall).
+- **Judge — API Claim (zero-shot)**: atomic-claim decomposition with claim-card rendering, splitting routed through the same API adapter (fixed a latent pred/prob swap that flagged every claim).
+- Reasoning-model support across judges: the sequence judge reads the verdict digit from content with an honest no-logprob score, OpenRouter judges cap chain-of-thought at 1024 tokens, and excluded consensus votes are attributed (token-limit / empty / not-verbatim) instead of all blamed on paraphrase.
+
+### Changed
+
+- Galleries re-curated for the demo: PsiloQA 6 chips (campaign top5 + the localized two-invented-dates exemplar; disclosures now name the real Qwen3.5-4B extractor), RAGTruth 5 chips screened with both judges (fabricated-quote, swapped-thresholds, invented-rationale, true-but-ungrounded, plus the faithful baseline), LongMemEval 3 chips from the recorded SimpleMem run with verifiable contradictions and honest `evaluation_scope`.
+- Span judge consensus defaults to 3 samples (campaign protocol; halves per-click cost on routes that ignore n>1).
+- Recorded result cards name the detector that actually produced their score instead of hardcoded probe copy.
+
 ## 2026-07-14 — paper features and the Qwen3.5-4B campaign
 
 ### Added
