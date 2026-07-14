@@ -222,8 +222,10 @@ def run_token_sample(judge: Any, capture: _GenerationCapture, sample: list[dict]
 
 
 def run_sequence_sample(judge: Any, sample: list[dict]) -> dict:
-    """One sequence-judge verdict. ``prob`` is the judge's NLL of the emitted token;
-    ``p_hallucination`` = P(verdict == 1), derived from that NLL and the predicted digit."""
+    """One sequence-judge verdict. The judge returns P(hallucinated) read off the class
+    token's logprob (renormalized over the class pair when both appear in the top-k), so
+    ``prob`` and ``p_hallucination`` are the same number; both keys are kept for the
+    stability of the recorded jsonl schema."""
     from sirin.detection.judging.judges.base import JudgeAnnotationError
 
     try:
@@ -249,8 +251,7 @@ def run_sequence_sample(judge: Any, sample: list[dict]) -> dict:
     prob = float(probs[0])
     pred = int(preds[0])
     if math.isfinite(prob):
-        p_top = math.exp(-prob)  # exp(logprob of the emitted top-1 token) = P(pred)
-        p_hallucination = p_top if pred == 1 else 1.0 - p_top
+        p_hallucination = prob  # already P(hallucinated), no NLL conversion needed
         status = "ok"
     else:
         p_hallucination = float("nan")

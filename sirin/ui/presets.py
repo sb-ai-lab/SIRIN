@@ -376,6 +376,52 @@ def _build_openai_judge(**kwargs: Any) -> Any:
     )
 
 
+def _build_openai_verbalized_judge(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    judge_model: str | None = None,
+    judge_api_key: str | None = None,
+    api_provider: str = OPENROUTER_PROVIDER,
+    **kwargs: Any,
+) -> Any:
+    # For endpoints that expose no logprobs (common on OpenRouter free routes): the judge
+    # states its own confidence next to the label, so a score exists where the logprob
+    # protocol would honestly show none. Coarser than a logprob — prefer the plain
+    # sequence judge when the provider returns logprobs.
+    from sirin.detection.judging import SequenceOpenAIVerbalizedJudge
+    from sirin.inference.adapters import OpenAIModelAdapter
+    from sirin.models.detection import OpenAIJudgeConfig
+    from sirin.models.inference import OpenAIConfig
+
+    model_path, api_key, base_url = _resolve_judge(
+        judge_model, judge_api_key, api_provider
+    )
+    model = OpenAIModelAdapter(
+        OpenAIConfig(
+            model_path=model_path,
+            api_key=api_key,
+            base_url=base_url,
+            extra_body=_judge_extra_body(api_provider),
+        )
+    )
+    judge = SequenceOpenAIVerbalizedJudge(
+        # temperature 0 keeps the verdict deterministic; 512 tokens let reasoning judges
+        # think before the "<label> <confidence>" pair (UI-only; scripts stay at 16).
+        config=OpenAIJudgeConfig(temperature=0.0, verdict_max_tokens=512),
+        model_adapter=model,
+    )
+    return _tag(
+        judge,
+        'judge',
+        'sequence',
+        calibrated=False,
+        display_mode='verdict',
+        task=DetectionTaskType.HALLUCINATION_DETECTION.value,
+    )
+
+
 def _build_openai_answerability_judge(**kwargs: Any) -> Any:
     # Same sequence judge, but scores a context+question (no answer) for answerability. The UI's
     # Task=Answerability flow feeds build_sample(context+question, '') so the judge never sees an
@@ -425,8 +471,8 @@ def _build_openai_claim_judge(
         model_adapter=model,
         # ATOMIC splitter decomposes the answer into self-contained claims via the SAME API adapter
         # (split_model defaults to model_adapter) — no local model, no extra plumbing. VOTE (majority
-        # of per-claim verdicts) is the response summary: MAX/MEAN treat the judge's per-claim NLL as a
-        # probability, but small NLL means CONFIDENT, so they invert and pick the least-sure claim.
+        # of per-claim verdicts) is the response summary: it stays meaningful even when a provider
+        # returns no logprobs and the per-claim score is nan (the verdict digits still vote).
         response_splitter_config=SplitConfig(
             strategy=SplitStrategy.ATOMIC,
             aggregation_method=AggregationMethod.VOTE,
@@ -924,6 +970,18 @@ PRESETS: dict[str, Preset] = {
         display_mode='heatmap',
         is_judge=True,
         census_caption='verbatim span-tag annotation · k/n consensus, not calibrated',
+    ),
+    "Judge — API Sequence (verbalized confidence)": Preset(
+        name="Judge — API Sequence (verbalized confidence)",
+        family='judge',
+        level='sequence',
+        calibrated=False,
+        requires_checkpoint=False,
+        description="LLM-as-judge verdict with self-stated confidence 0-100 — works on endpoints without logprobs. No training.",
+        build=_build_openai_verbalized_judge,
+        display_mode='verdict',
+        is_judge=True,
+        census_caption='verdict + self-stated confidence · one judge pass, not calibrated',
     ),
     "Probing — Answerability TabPFN (checkpoint)": Preset(
         name="Probing — Answerability TabPFN (checkpoint)",

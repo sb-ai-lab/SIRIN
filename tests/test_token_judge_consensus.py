@@ -45,7 +45,7 @@ class _FakeAdapter:
         self.per_sample_gens = per_sample_gens
         self.calls = []
 
-    def sample(self, inputs, max_tokens=None, temperature=None, top_p=None, n=1):
+    def sample(self, inputs, max_tokens=None, temperature=None, top_p=None, n=1, **_kw):
         self.calls.append({'inputs': inputs, 'max_tokens': max_tokens, 'n': n})
         if n == 1:
             return [gens[0] for gens in self.per_sample_gens]

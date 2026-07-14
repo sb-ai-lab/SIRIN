@@ -254,7 +254,29 @@ class HfJudgeConfig(JudgeBaseConfig):
 class OpenAIJudgeConfig(JudgeBaseConfig):
     """Base configuration for Open AI judges."""
 
-    pass
+    # Reasoning-era endpoints reject tiny completion budgets outright (GPT-5.x:
+    # "Expected a value >= 16"), so API judges default higher than the base's strict
+    # one-token protocol.
+    verdict_max_tokens: int = 16
+    # Read >2 alternatives so both class tokens usually appear even when the model is very
+    # confident; when only one does, `probability_of_positive_class` degrades gracefully.
+    top_logprobs: int = 5
+    # Concurrency for the adapter's async batch path.
+    max_concurrent: int = 10
+    # Verbalized-confidence protocol (SequenceOpenAIVerbalizedJudge): models that expose
+    # no logprobs still need a threshold-free score.
+    confidence_system_prompt: str = (
+        'You are a precise hallucination detector for AI-generated dialogue. Analyze the '
+        'given user-assistant exchange and output exactly two space-separated values: a '
+        'binary digit (1 if the assistant\'s response contains any factual inaccuracy, '
+        'unsupported claim, or hallucinated content; 0 if it is fully grounded) followed '
+        'by your confidence as an integer 0-100. Example: "1 87". Output nothing else.'
+    )
+    confidence_user_prompt: str = (
+        'I give you a dialogue that consists of a user prompt and an assistant answer.\n'
+        'Dialogue: "{sample}".\n'
+        'Respond with the label (1 = hallucinated, 0 = grounded) and your confidence 0-100: '
+    )
 
 
 @dataclass
@@ -414,12 +436,20 @@ class UncertaintyFeatureProcessorConfig(FeatureProcessorBaseConfig):
     """Configuration for uncertainty feature processor"""
 
     uncertainty_methods: Optional[List[str]] = None
+    # Constructor arguments per estimator, e.g. {"Focus": {"gamma": 0.9, ...}}. Focus has
+    # no defaults (IDF corpus, spaCy model), so listing it without kwargs raises TypeError.
+    method_kwargs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     max_new_tokens: int = 256
     openai_api_key: Optional[str] = None
     supports_logprobs: bool = True
     top_logprobs: int = 5
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
     output_attentions: bool = False  # Auto-enabled when RAUQ/Focus/AttentionScore in methods
+    # Score the assistant turn already present in the sample instead of letting the
+    # model regenerate one. Required when the label refers to the stored response.
+    teacher_forced: bool = False
+    # Extra kwargs for tokenizer.apply_chat_template, e.g. {"enable_thinking": False}.
+    chat_template_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -428,8 +458,17 @@ class UncertaintyDetectorConfig(DetectorBaseConfig):
 
     threshold_percentile: float = 0.8
     fixed_threshold: float = 0.5
-    aggregation_method: Literal['mean', 'max', 'min', 'weighted'] = 'mean'
+    # "auto" selects the estimator subset + aggregation on the train split by ROC-AUC
+    # instead of fixing them a priori; see SequenceUncertaintyDetector.fit_score_selection.
+    aggregation_method: Literal['mean', 'max', 'min', 'weighted', 'auto'] = 'mean'
     method_weights: Optional[Dict[str, float]] = None
+    # Estimators live on incompatible scales (MeanTokenEntropy ~1e-2, RAUQ ~3,
+    # Focus ~10), so aggregating raw scores lets the largest-scale one dominate.
+    # Normalize each estimator first, with statistics fit on train (no labels used).
+    #   zscore  standardize by train mean/std
+    #   rank    map onto the train-empirical CDF -> [0, 1] (scale-free, outlier-robust)
+    # Ignored for a single estimator, where aggregation is the identity.
+    score_normalization: Literal['none', 'zscore', 'rank'] = 'none'
 
 
 @dataclass

@@ -1,4 +1,5 @@
 import json
+import math
 
 import pytest
 
@@ -1588,19 +1589,24 @@ def test_claim_openai_view_is_uncalibrated():
 
 
 def test_claim_openai_judge_facts_carry_verdict_not_nll_score():
-    """Regression: ClaimOpenAIJudge must put the 0/1 verdict in ``pred`` and the NLL score in
-    ``prob`` (they were zipped in swapped order, so every claim rendered flagged). Runs the real
-    detect() with a fake adapter + regex SENTENCE split (no network, no local model)."""
+    """Regression: ClaimOpenAIJudge must put the 0/1 verdict in ``pred`` and the class
+    probability in ``prob`` (they were zipped in swapped order, so every claim rendered
+    flagged). Runs the real detect() with a fake adapter + regex SENTENCE split (no
+    network, no local model)."""
     from sirin.definitions import SplitStrategy
     from sirin.detection.judging import ClaimOpenAIJudge
     from sirin.detection.splitters import SplitManager
     from sirin.models.detection import OpenAIJudgeConfig, SplitConfig
 
     class FakeAdapter:
-        # per-claim verdict: claim 1 -> '1' (hallucinated), claim 2 -> '0' (grounded).
+        # per-claim verdict: claim 1 -> '1' (hallucinated), claim 2 -> '0' (grounded);
+        # each with the verdict token at ~90% and the other class at ~12% (pre-renorm).
         def sample(self, inputs, return_logprobs=False, **kwargs):
             digits = ['1', '0'][: len(inputs)]
-            logprobs = [[[-0.1, -2.0]] for _ in inputs]  # first-token top-2
+            logprobs = [
+                [[(digit, -0.1), ('0' if digit == '1' else '1', -2.0)]]
+                for digit in digits
+            ]
             return (digits, logprobs) if return_logprobs else digits
 
     judge = object.__new__(ClaimOpenAIJudge)  # bypass model-loading __init__
@@ -1617,9 +1623,11 @@ def test_claim_openai_judge_facts_carry_verdict_not_nll_score():
     result = judge.detect([sample])
     facts = judge.claim_results[0]['facts']
 
-    # pred is the 0/1 verdict, prob is the NLL score — never swapped.
+    # pred is the 0/1 verdict, prob is P(hallucinated) — never swapped.
     assert [f['pred'] for f in facts] == [1, 0]
-    assert facts[0]['prob'] == pytest.approx(0.1)
+    p_verdict = math.exp(-0.1) / (math.exp(-0.1) + math.exp(-2.0))
+    assert facts[0]['prob'] == pytest.approx(p_verdict)  # claim judged hallucinated
+    assert facts[1]['prob'] == pytest.approx(1 - p_verdict)  # claim judged grounded
 
     view = ui.detection_view_model(result, 'Alpha is false. Beta is true.', judge)
     assert view['level'] == 'claim'

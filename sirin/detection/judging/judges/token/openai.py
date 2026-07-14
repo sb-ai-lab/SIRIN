@@ -78,6 +78,7 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
             temperature=self.config.temperature,
             top_p=self.config.top_p,
             n=n,
+            max_concurrent=self.config.max_concurrent,
         )
         # Adapter contract: n==1 -> list[str] (one per sample); n>1 -> list[list[str]] (n per sample).
         per_sample_gens = [[g] for g in generated] if n == 1 else generated

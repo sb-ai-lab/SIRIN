@@ -1,11 +1,18 @@
-import numpy as np
-from typing import Dict, List, Tuple, Union, Optional
+import re
+from typing import Dict, List, Optional, Tuple, Union
 
-from sirin.models.detection import OpenAIJudgeConfig
+import numpy as np
+
+from sirin.definitions import DataCollatorType, DetectionLevel
 from sirin.detection.judging.judges.base import JudgeAnnotationError, OpenAIJudgeBase
-from sirin.detection.judging.judges.utils import build_prompt_messages
-from sirin.definitions import DetectionLevel, DataCollatorType
+from sirin.detection.judging.judges.utils import (
+    build_prompt_messages,
+    format_dialogue_samples,
+    parse_binary_prediction,
+    probability_of_positive_class,
+)
 from sirin.inference.adapters import ModelAdapterBase
+from sirin.models.detection import OpenAIJudgeConfig
 
 
 class SequenceOpenAIJudge(OpenAIJudgeBase):
@@ -41,7 +48,8 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
                 temperature=self.config.temperature,
                 top_p=self.config.top_p,
                 return_logprobs=return_logprobs,
-                top_logprobs=2,
+                top_logprobs=self.config.top_logprobs,
+                max_concurrent=self.config.max_concurrent,
                 **kwargs
             )
 
@@ -68,6 +76,7 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
         preds = []
 
         num_classes = max(self.config.num_classification_heads, 2)
+        binary = num_classes <= 2
         for idx, logprob_result in enumerate(logprobs_results):
             text = str(results[idx]).strip()
             # Reasoning models return prose in content; take the first valid class digit.
@@ -84,13 +93,90 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
                     'can finish thinking before the digit.'
                 )
             preds.append(digit)
-            # The adapter's logprobs carry floats only (no token text), so the first-token
-            # logprob is provably the digit's only when the whole answer IS the digit.
-            # Some models also omit logprobs entirely. Either way: nan, verdict still holds.
-            if logprob_result and logprob_result[0] and text == str(digit):
-                probs.append(-1 * logprob_result[0][0])
-            else:
-                probs.append(float('nan'))
+            # `probs` must be P(hallucinated), read off the class token's own logprob and
+            # renormalized over the pair. Scoring by the top token's surprisal instead makes
+            # a confident "0" and a confident "1" indistinguishable, which pins AUROC at
+            # chance. When no class token appears in the top-k (or logprobs were rejected /
+            # the task is multiclass): nan — no fabricated score, the verdict still holds.
+            prob = probability_of_positive_class(logprob_result) if binary else None
+            probs.append(float('nan') if prob is None else prob)
+
+        preds, probs = self._aggregate_context_predictions(
+            group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)
+        )
+
+        return probs, preds, labels
+
+
+# "1 87" / "0, 40" / "**1** (95%)" -- a digit, then the first integer after it.
+_LABEL_CONFIDENCE = re.compile(r'([01])\D{0,8}?(\d{1,3})')
+
+
+def parse_label_and_confidence(text: Optional[str]) -> Tuple[int, float]:
+    """Read a verbalized ``"<label> <confidence 0-100>"`` answer into (pred, P(halluc.)).
+
+    Confidence is stated *in the model's own label*, so it has to be flipped for the
+    negative class: "0 90" means 90% sure it is grounded, i.e. P(hallucinated) = 0.10.
+    An unparseable confidence degrades to the hard prediction (0.0 or 1.0) rather than a
+    fabricated score.
+    """
+    if not text:
+        return 0, 0.0
+
+    match = _LABEL_CONFIDENCE.search(text.strip())
+    if match is None:
+        pred = parse_binary_prediction(text)
+        return pred, float(pred)
+
+    pred = int(match.group(1))
+    confidence = min(100, max(0, int(match.group(2)))) / 100.0
+    return pred, confidence if pred == 1 else 1.0 - confidence
+
+
+class SequenceOpenAIVerbalizedJudge(OpenAIJudgeBase):
+    """Sequence-level API judge for endpoints that expose no logprobs.
+
+    Asks the model to state its own confidence alongside the label, so a threshold-free
+    score (AUROC / AP) is still available. The score is coarser than a logprob -- models
+    cluster their verbalized confidence on round numbers like 90 and 95 -- so prefer
+    `SequenceOpenAIJudge` whenever the provider returns logprobs.
+    """
+
+    detection_level = DetectionLevel.SEQUENCE
+
+    def __init__(self, config: OpenAIJudgeConfig, model_adapter: ModelAdapterBase):
+        super().__init__(config=config, model_adapter=model_adapter)
+        self.last_generations: list[str] | None = None
+
+    def detect(
+        self,
+        samples: Union[List[str], List[List[Dict]]],
+        labels: Optional[np.ndarray] = None,
+        **kwargs,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        samples, group_ids = self._split_context_samples(samples)
+        formatted_samples = format_dialogue_samples(self.config, samples)
+        formatted_input = [
+            [
+                {'role': 'system', 'content': self.config.confidence_system_prompt},
+                {'role': 'user', 'content': self.config.confidence_user_prompt.format(sample=sample)},
+            ]
+            for sample in formatted_samples
+        ]
+
+        results = self.model_adapter.sample(
+            inputs=formatted_input,
+            max_tokens=self.config.verdict_max_tokens,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            max_concurrent=self.config.max_concurrent,
+            **kwargs,
+        )
+        self.last_generations = list(results)
+
+        parsed = [parse_label_and_confidence(text) for text in results]
+        preds = [pred for pred, _ in parsed]
+        probs = [prob for _, prob in parsed]
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)

@@ -27,6 +27,7 @@ from .judges import (
     SequenceEncoderJudge,
     SequenceDecoderJudge,
     SequenceOpenAIJudge,
+    SequenceOpenAIVerbalizedJudge,
     TokenDecoderJudge,
     TokenEncoderJudge,
     TokenOpenAIJudge,

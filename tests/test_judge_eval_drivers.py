@@ -37,11 +37,16 @@ def _make_patch(monkeypatch, answers: dict):
             )
             return SimpleNamespace(choices=[choice for _ in range(n)])
         logprob = entry["logprob"]
+        verdict = entry["verdict"]
+        # Only the verdict class appears in the top-k (the runner-up is prose), so the
+        # judge's marginal-probability branch reproduces the scripted P exactly:
+        # verdict "1" -> exp(logprob); verdict "0" -> 1 - exp(logprob).
         token = SimpleNamespace(
+            token=verdict,
             logprob=logprob,
             top_logprobs=[
-                SimpleNamespace(logprob=logprob),
-                SimpleNamespace(logprob=logprob - 3.0),
+                SimpleNamespace(token=verdict, logprob=logprob),
+                SimpleNamespace(token="the", logprob=logprob - 3.0),
             ],
         )
         choice = SimpleNamespace(

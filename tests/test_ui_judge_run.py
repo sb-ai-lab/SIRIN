@@ -7,6 +7,7 @@ so no request leaves the process.
 """
 
 import json
+import math
 
 import pytest
 
@@ -36,7 +37,7 @@ def _run_judge(monkeypatch, gens, *, key=SENTINEL):
     monkeypatch.setattr(
         judge.model_adapter,
         'sample',
-        lambda inputs, max_tokens=None, temperature=None, top_p=None, n=1: [gens],
+        lambda inputs, max_tokens=None, temperature=None, top_p=None, n=1, **_kw: [gens],
     )
     result = judge.detect([build_sample('the prompt', ANSWER)])
     view = detection_view_model(result, ANSWER, judge)
@@ -247,11 +248,25 @@ def test_sequence_judge_extracts_digit_from_reasoning_answer(monkeypatch):
     assert probs[0] != probs[0]  # nan: no logprobs -> no score, verdict holds
 
 
-def test_sequence_judge_multi_token_answer_never_borrows_first_token_logprob(monkeypatch):
-    # The adapter's logprobs carry no token text: for a multi-token answer the first
-    # logprob belongs to a thinking token, not the digit -> honest nan, not a fake score.
+def test_sequence_judge_multi_token_answer_scores_off_the_class_token(monkeypatch):
+    # (token, logprob) alternatives make the class position identifiable even after a
+    # reasoning preamble: the scan skips prose positions and reads P(1) where "1"/"0"
+    # appear, renormalized over the pair.
     _judge, (probs, preds, _) = _run_sequence_judge(
-        monkeypatch, 'The answer is 1', [[-0.1, -2.0]]
+        monkeypatch,
+        'The answer is 1',
+        [[('The', -0.1)], [('answer', -0.2)], [('1', math.log(0.8)), ('0', math.log(0.2))]],
+    )
+
+    assert preds[0] == 1
+    assert probs[0] == pytest.approx(0.8)
+
+
+def test_sequence_judge_no_class_token_in_top_k_stays_scoreless(monkeypatch):
+    # A verdict digit in the TEXT but no class token in any top-k: honest nan, not a
+    # score borrowed from whatever token happened to rank first.
+    _judge, (probs, preds, _) = _run_sequence_judge(
+        monkeypatch, 'The answer is 1', [[('The', -0.1)], [('answer', -2.0)]]
     )
 
     assert preds[0] == 1
@@ -259,10 +274,25 @@ def test_sequence_judge_multi_token_answer_never_borrows_first_token_logprob(mon
 
 
 def test_sequence_judge_single_digit_answer_keeps_logprob_score(monkeypatch):
-    _judge, (probs, preds, _) = _run_sequence_judge(monkeypatch, '1', [[-0.1, -2.0]])
+    _judge, (probs, preds, _) = _run_sequence_judge(
+        monkeypatch, '1', [[('1', -0.1), ('0', -2.0)]]
+    )
 
     assert preds[0] == 1
-    assert probs[0] == pytest.approx(0.1)
+    # renormalized P("1") over the class pair, not the old -logprob surprisal
+    expected = math.exp(-0.1) / (math.exp(-0.1) + math.exp(-2.0))
+    assert probs[0] == pytest.approx(expected)
+
+
+def test_sequence_judge_confident_zero_and_one_score_on_opposite_sides(monkeypatch):
+    # The class-blind -logprob score gave a confident "0" and a confident "1" the SAME
+    # value; the class-token probability must separate them.
+    payload_one = [[('1', math.log(0.99)), ('0', math.log(0.01))]]
+    payload_zero = [[('0', math.log(0.99)), ('1', math.log(0.01))]]
+    _judge, (probs_one, _, _) = _run_sequence_judge(monkeypatch, '1', payload_one)
+    _judge, (probs_zero, _, _) = _run_sequence_judge(monkeypatch, '0', payload_zero)
+
+    assert probs_one[0] > 0.5 > probs_zero[0]
 
 
 def test_sequence_judge_one_token_protocol_is_unchanged(monkeypatch):
@@ -289,3 +319,30 @@ def test_ui_builder_gives_reasoning_judges_room_to_think():
         judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
     )
     assert judge.config.verdict_max_tokens == 512
+
+
+def test_verbalized_judge_scores_without_logprobs(monkeypatch):
+    # OpenRouter free routes often return no logprobs; the verbalized judge still yields
+    # a real (self-stated) score instead of nan, without ever requesting logprobs.
+    from sirin.ui.presets import _build_openai_verbalized_judge
+
+    judge = _build_openai_verbalized_judge(
+        judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
+    )
+    captured = {}
+
+    def fake_sample(inputs, **kwargs):
+        captured.update(kwargs)
+        captured['inputs'] = inputs
+        return ['1 87']
+
+    monkeypatch.setattr(judge.model_adapter, 'sample', fake_sample)
+    probs, preds, _ = judge.detect([build_sample('the prompt', ANSWER)])
+
+    assert preds[0] == 1
+    assert probs[0] == pytest.approx(0.87)
+    assert 'return_logprobs' not in captured or not captured['return_logprobs']
+    assert captured['max_tokens'] == 512
+    # The confidence protocol prompt reaches the API, not the plain verdict prompt.
+    assert 'confidence' in captured['inputs'][0][0]['content']
+    assert judge.last_generations == ['1 87']

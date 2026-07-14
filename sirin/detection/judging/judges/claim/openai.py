@@ -7,7 +7,10 @@ from loguru import logger as lg
 
 from sirin.definitions import DetectionLevel
 from sirin.detection.judging.judges.base import OpenAIJudgeBase
-from sirin.detection.judging.judges.utils import build_prompt_messages
+from sirin.detection.judging.judges.utils import (
+    build_prompt_messages,
+    probability_of_positive_class,
+)
 from sirin.detection.splitters import SplitManager
 from sirin.inference.adapters import ModelAdapterBase
 from sirin.models.detection import OpenAIJudgeConfig, SplitConfig
@@ -64,26 +67,34 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
 
         results, logprobs_results = self.model_adapter.sample(
             inputs=formatted_input,
-            max_tokens=1,
+            max_tokens=self.config.verdict_max_tokens,
             temperature=self.config.temperature,
             top_p=self.config.top_p,
             return_logprobs=True,
-            top_logprobs=2,
+            top_logprobs=self.config.top_logprobs,
+            max_concurrent=self.config.max_concurrent,
             **kwargs,
         )
 
         probs = []
         preds = []
 
+        num_classes = max(self.config.num_classification_heads, 2)
+        binary = num_classes <= 2
         for idx, logprob_result in enumerate(logprobs_results):
-            # models that omit logprobs get a nan score (not a crash); the verdict still holds.
-            if logprob_result and logprob_result[0]:
-                probs.append(-1 * logprob_result[0][0])
-            else:
-                probs.append(float('nan'))
+            # See `SequenceOpenAIJudge.detect`: the score has to be P(hallucinated) read
+            # off the class token, not the top token's surprisal. No class token in the
+            # top-k / logprobs omitted / multiclass -> nan; the verdict still holds.
+            prob = probability_of_positive_class(logprob_result) if binary else None
+            probs.append(float('nan') if prob is None else prob)
 
             text = str(results[idx]).strip()
-            preds.append(int(text) if text.isdigit() else 0)
+            # First valid class digit anywhere in the answer; decorated answers ("1.",
+            # "**0**") no longer collapse to the negative class. Claims default to 0
+            # rather than raising: one unreadable claim should not sink the response.
+            preds.append(
+                next((int(c) for c in text if c.isdigit() and int(c) < num_classes), 0)
+            )
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)

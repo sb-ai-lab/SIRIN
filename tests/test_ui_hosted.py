@@ -33,6 +33,14 @@ def test_visible_presets_equal_list_presets_when_not_hosted(not_hosted):
     assert presets.visible_presets() == presets.list_presets()
 
 
+def test_hosted_shows_the_verbalized_judge_preset(hosted):
+    names = [p.name for p in presets.visible_presets()]
+
+    assert 'Judge — API Sequence (verbalized confidence)' in names
+    # The hosted default stays the span judge.
+    assert names[0] != 'Judge — API Sequence (verbalized confidence)'
+
+
 def test_hosted_sidebar_defaults_to_judge_span_and_api_backends(hosted):
     harness = _SidebarHarness()
 
