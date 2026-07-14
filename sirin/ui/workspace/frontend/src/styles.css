@@ -197,6 +197,14 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .span-legend-num { font-family: var(--font-mono); font-size: 11px; }
 .span-legend-bar { width: 96px; height: 8px; flex: none; border-radius: 999px; background: linear-gradient(90deg, var(--span-line-low), var(--span-line-high)); }
 
+/* Decision-band τ readout inside the sequence score orb (thresholded raw score): score + τ together so it
+   reads as a decision band, not a calibrated probability. */
+.score-orb .decision-band { margin-top: 4px; font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 600; text-transform: none; letter-spacing: 0; opacity: .82; }
+
+/* Per-run latency strip (RunRecord.timings), mono numerals; recorded seeds carry no timings so it is absent. */
+.latency-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: var(--faint); font-size: 0.6875rem; }
+.latency-strip b { font-family: var(--font-mono); font-weight: 600; color: var(--muted); }
+
 /* One-shot result reveal (build/lib/sirin/ui/demo_renderer.py::_CSS_TEMPLATE). The component adds
    .is-reveal only on a run's first appearance in Subtle/Lively; each graded span washes in left→right over
    360ms at its inline --d (240 + i·180ms), its underline draws 240ms at --d+200, the score badge fades
@@ -298,6 +306,33 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .empty-list .empty-link:hover { color: var(--brand-bright); }
 .run-detail .result-card { margin-top: 0; }
 
+/* Compare mode (PR-8/9): two columns scoring one answer, with the honest verdict bar between them.
+   The agreement bar reuses the tokens.json span ramp (both-flag = high risk, A-only = low risk) and the
+   safe token so the 4-way split reads as one system with the graded-span evidence. */
+.compare-workspace { width: min(1240px, 100%); }
+.compare-picker { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed color-mix(in srgb, var(--brand) 28%, var(--line)); }
+.compare-picker .field-error { grid-column: 1 / -1; }
+.compare-head { margin-bottom: 4px; }
+.compare-head .quiet { padding-left: 0; }
+.compare-verdict { margin-top: 8px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-solid); box-shadow: var(--shadow); display: grid; gap: 14px; }
+.agreement { display: grid; gap: 9px; }
+.agreement-bar { display: flex; width: 100%; height: 14px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--canvas) 70%, transparent); }
+.agreement-bar span { display: block; height: 100%; min-width: 2px; }
+.agreement-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 0.6875rem; }
+.agreement-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.agreement-legend i { width: 10px; height: 10px; flex: none; border-radius: 3px; }
+.agreement-legend b { font-family: var(--font-mono); font-weight: 600; color: var(--ink); }
+.agreement-legend em { font-style: normal; font-family: var(--font-mono); }
+.compare-delta { display: flex; align-items: baseline; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.compare-delta-value { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--ink); letter-spacing: -.04em; }
+.compare-note p:not(.eyebrow), .compare-note-line { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
+.compare-grid { width: 100%; margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+.compare-column { min-width: 0; display: grid; gap: 4px; }
+.compare-col-head { display: grid; gap: 3px; padding: 4px 2px; }
+.compare-col-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.compare-col-head small { color: var(--muted); font-size: 0.6875rem; }
+.compare-column .result-card { margin-top: 6px; }
+
 /* Shared-safe privacy banner: soft pink/plum glass in the brand palette, not the mint safe tone.
    The glass background and border carry the brand tone; text stays on ink for readable contrast. */
 .privacy-banner { display: flex; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line)); border-radius: 13px; background: color-mix(in srgb, var(--brand-wash) 66%, var(--surface)); color: var(--ink); }
@@ -363,6 +398,8 @@ footer span:first-child { color: var(--brand); font-weight: 650; letter-spacing:
   .runs-grid { grid-template-columns: 1fr; }
   .run-list { max-height: 440px; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .compare-workspace { width: 100%; }
+  .compare-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 800px) {

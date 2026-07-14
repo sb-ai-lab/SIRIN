@@ -95,6 +95,19 @@ def test_reveal_collapses_to_end_state_under_static_and_reduced_motion():
     assert 'is-peak:before{display:none!important' in css
 
 
+def test_compare_agreement_and_column_classes_present():
+    css = _built_css()
+    for token in (
+        '.compare-grid',
+        '.compare-column',
+        '.agreement-bar',
+        '.agreement-legend',
+        '.compare-delta',
+        '.compare-verdict',
+    ):
+        assert token in css, f'missing {token} in built compare CSS'
+
+
 def test_busy_orbit_spinner_replaced_by_skeleton_status():
     css = _built_css()
     # The orbit spinner and its keyframe are gone; the busy card is now a status + shimmer skeleton.

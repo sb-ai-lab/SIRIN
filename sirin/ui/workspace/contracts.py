@@ -126,6 +126,13 @@ def derive_score_semantics(
         return ScoreSemantics.RELATIVE_WITHIN_ANSWER
     if threshold is not None:
         return ScoreSemantics.THRESHOLDED_RAW_SCORE
+    # No numeric threshold yet (setup time, before the checkpoint loads), but the family still fixes an
+    # honest meaning: a probe is a thresholded classifier (its τ resolves at load), and a raw uncertainty
+    # score is only comparable within one answer. Neither is a calibrated probability.
+    if family == 'probing':
+        return ScoreSemantics.THRESHOLDED_RAW_SCORE
+    if family == 'uncertainty':
+        return ScoreSemantics.RELATIVE_WITHIN_ANSWER
     return ScoreSemantics.UNAVAILABLE
 
 
@@ -449,6 +456,36 @@ class DownloadTransfer(DTO):
     content: str
 
 
+class CompareAgreement(DTO):
+    """Per-character localization agreement between two runs over the SAME answer text."""
+
+    both: int = Field(ge=0)
+    a_only: int = Field(ge=0)
+    b_only: int = Field(ge=0)
+    neither: int = Field(ge=0)
+
+
+class ComparePayload(DTO):
+    """Side-by-side comparison of two runs. The runs live in the normal runs list; this carries
+    their full records so the compare columns can render, plus the honest agreement/Δscore verdicts."""
+
+    run_a: RunRecord | None = None
+    run_b: RunRecord | None = None
+    preset_a: str | None = Field(default=None, max_length=256)
+    preset_b: str | None = Field(default=None, max_length=256)
+    agreement: CompareAgreement | None = None
+    agreement_note: str | None = Field(default=None, max_length=240)
+    delta_score: float | None = None
+    delta_note: str = Field(default='', max_length=240)
+
+    @field_validator('delta_score')
+    @classmethod
+    def finite_delta(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError('delta score must be finite')
+        return value
+
+
 def default_view_state() -> dict[str, Any]:
     return {
         'workspace': 'analyze',
@@ -473,6 +510,8 @@ class WorkspacePayload(DTO):
     action_receipt: ActionReceipt | None = None
     download: DownloadTransfer | None = None
     draft: dict[str, Any] | None = None
+    compare: ComparePayload | None = None
+    available_presets: list[str] = Field(default_factory=list)
 
 
 class ActionEnvelope(DTO):
@@ -484,7 +523,7 @@ class ActionEnvelope(DTO):
         'submit', 'retryDetection', 'selectRun', 'deleteRun', 'clearRuns',
         'import', 'exportRun', 'exportBundle', 'prepareRerun', 'clearDownload',
         'refreshDiagnostics', 'unloadModels', 'openCachedAttention',
-        'openLiveAttention'
+        'openLiveAttention', 'runCompare'
     ]
     expected_setup_revision: int = Field(ge=0)
     expected_runs_revision: int = Field(ge=0)

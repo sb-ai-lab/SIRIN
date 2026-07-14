@@ -29,7 +29,7 @@ export const ORIGIN_LABELS: Record<RunOriginName, string> = {
   answerabilityLiveDetection: "Answerability · live detection",
 }
 
-export type WorkspaceName = "analyze" | "runs" | "diagnostics"
+export type WorkspaceName = "analyze" | "runs" | "diagnostics" | "compare"
 export type ThemeName = "light" | "dark"
 export type MotionName = "static" | "subtle" | "lively"
 export type TaskName = "faithfulness" | "answerability"
@@ -173,6 +173,14 @@ export interface AnalysisResult {
   note?: string | null
 }
 
+// RunRecord.timings (contracts.SafeTimings). Only total_seconds is guaranteed; generation/detection are
+// present per stage that actually ran, and exclude_none drops absent fields (recorded seeds ship none).
+export interface RunTimings {
+  totalSeconds: number
+  generationSeconds?: number | null
+  detectionSeconds?: number | null
+}
+
 export interface RunRecord {
   id: string
   sourceRunId?: string | null
@@ -197,7 +205,7 @@ export interface RunRecord {
   analysis?: AnalysisResult
   result?: AnalysisResult
   provenance?: Record<string, unknown>
-  timings?: Record<string, number>
+  timings?: RunTimings
   warnings?: string[]
   error?: { code?: string; message?: string; correlationId?: string } | string | null
   staleSetup?: boolean
@@ -262,6 +270,24 @@ export interface DownloadTransfer {
   content: string
 }
 
+export interface CompareAgreement {
+  both: number
+  aOnly: number
+  bOnly: number
+  neither: number
+}
+
+export interface ComparePayload {
+  runA?: RunRecord | null
+  runB?: RunRecord | null
+  presetA?: string | null
+  presetB?: string | null
+  agreement?: CompareAgreement | null
+  agreementNote?: string | null
+  deltaScore?: number | null
+  deltaNote?: string
+}
+
 export interface WorkspacePayload {
   protocolVersion: string | number
   serverInstanceId?: string
@@ -278,5 +304,7 @@ export interface WorkspacePayload {
   actionReceipt?: ActionReceipt | null
   download?: DownloadTransfer | null
   draft?: ClientDraft | null
+  compare?: ComparePayload | null
+  availablePresets?: string[]
   ui?: { title?: string; subtitle?: string }
 }

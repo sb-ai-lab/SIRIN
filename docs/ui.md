@@ -55,6 +55,10 @@ Exports include inputs, visible answers/results, safe setup, timestamps, hashes,
 
 Presets are built from `sirin/ui/presets.py`. Sequence, token/span, claim, multiclass, judge, and uncertainty results retain their native semantics. Uncalibrated confidence, logits, probe scores, and uncertainty values are never presented as probabilities. A sequence score is not copied across tokens to imply localization. Token and span evidence is accompanied by equivalent readable details rather than relying on color alone.
 
+Every result card states exactly one honest score meaning drawn from `contracts.derive_score_semantics`, and each maps to a distinct display treatment: `calibratedProbability` reads as a percentage labelled "calibrated probability"; `thresholdedRawScore` reads as a decision band showing the score together with its threshold τ (the sequence score orb adds a `vs τ` readout, the span footer a `risk τ … 1.00` legend); `relativeWithinAnswer` is labelled "relative within this answer — not comparable across runs"; and `spanAgreement` is labelled "judge agreement". Every preset yields a non-`unavailable` meaning from its own family/level (`tests/test_ui_presets.py`).
+
+A compact latency strip on the result card shows only the run stages the payload carries (`generation`/`detection`/`total`, one decimal); recorded-result seeds carry no timings, so the strip renders nothing and the recorded card stays honestly timing-free.
+
 Fresh shared-safe sessions default to **Probing — Token Linear · PsiloQA/Qwen3-4B** with the bundled PsiloQA checkpoint and pinned Qwen3-4B revision. The Sequence TabPFN preset remains available, but requires a trained checkpoint directory. Presets with incomplete setup disable generation and detection until corrected.
 
 Token evidence is accepted only when feature scores, predictions, tokenizer offsets, and displayed answer text align exactly. Answer-token indices and character offsets come from the same full rendered tokenization, including prompt/answer boundary tokens. Alignment failures are detection failures, never silent successful runs with an empty result.

@@ -59,6 +59,38 @@ def test_span_presentation_preserves_unicode_code_points_and_score_semantics():
         TextSegment(text='😀', startCodePoint=0, endCodePoint=2)
 
 
+def test_run_timings_reach_the_payload_and_recorded_seed_stays_timing_free():
+    """A live run's SafeTimings survive camelCase serialization (so the card can render the latency
+    strip); a recorded-result seed carries none, so exclude_none drops the field and the strip is absent."""
+    from sirin.ui.workspace.run_engine import RunEngine
+    from sirin.ui.workspace.contracts import RunStatus
+    from sirin.ui.workspace.seed import build_seed_run
+
+    setup = SetupSnapshot(
+        detector_preset='probe',
+        detector_family='probing',
+        detector_level='sequence',
+        threshold=0.5,
+    )
+    request = RunRequest(
+        question='q',
+        context='c',
+        supplied_answer='a preserved answer',
+        mode=RunMode.SCORE_SUPPLIED_ANSWER,
+    )
+    engine = RunEngine(generate=None, detect=lambda answer, req, s: {'score': 0.7, 'threshold': 0.5})
+    run = engine.execute(engine.reserve(request, setup, setup_revision=0), request)
+
+    assert run.status is RunStatus.SUCCEEDED
+    timings = run.model_dump(mode='json', by_alias=True, exclude_none=True)['timings']
+    assert timings['totalSeconds'] >= 0
+    assert 'detectionSeconds' in timings  # detection ran
+    assert 'generationSeconds' not in timings  # supplied answer -> no generation stage
+
+    seed_payload = build_seed_run().model_dump(mode='json', by_alias=True, exclude_none=True)
+    assert 'timings' not in seed_payload
+
+
 def test_presenter_normalizes_legacy_sequence_token_and_claim_outputs():
     setup = SetupSnapshot(
         detector_preset='legacy',

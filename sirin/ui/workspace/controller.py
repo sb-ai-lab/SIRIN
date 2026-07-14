@@ -8,6 +8,9 @@ from typing import Any
 from loguru import logger as lg
 from pydantic import ValidationError
 
+from uuid import uuid4
+
+from .compare import build_compare_payload
 from .contracts import (
     ActionEnvelope,
     ActionReceipt,
@@ -16,6 +19,8 @@ from .contracts import (
     DiagnosticsSummary,
     DownloadTransfer,
     Notice,
+    Provenance,
+    PublicError,
     ReceiptStatus,
     RunMode,
     RunOrigin,
@@ -26,11 +31,15 @@ from .contracts import (
     TaskType,
     WorkspacePayload,
     default_view_state,
+    utc_now,
 )
 from .examples import ExampleRegistry, cached_example_registry
 from .run_engine import RunEngine
 from .seed import build_seed_runs, seed_draft
 from .session import PortableFormatError, WorkspaceSession, export_bundle, export_run, import_portable_json
+
+
+CompareSetup = Callable[[str, SetupSnapshot], SetupSnapshot]
 
 
 def _reject_message(exc: Exception) -> str:
@@ -56,11 +65,16 @@ class WorkspaceController:
         engine: RunEngine,
         examples: ExampleRegistry | None = None,
         diagnostic_actions: dict[str, Callable[[], None]] | None = None,
+        compare_setup: CompareSetup | None = None,
     ) -> None:
         self.session = session
         self.engine = engine
         self.examples = examples or cached_example_registry()
         self.diagnostic_actions = diagnostic_actions or {}
+        # Resolves a side-B preset name (+ side-A setup for task-compat) into its own SetupSnapshot.
+        # Streamlit owns preset->setup mapping (it builds side A the same way), so the controller
+        # stays detector-agnostic; None (e.g. in bare tests) disables compare.
+        self.compare_setup = compare_setup
 
     def build_payload(
         self,
@@ -70,6 +84,7 @@ class WorkspaceController:
         diagnostics: DiagnosticsSummary | None = None,
         view_state: dict[str, Any] | None = None,
         notices: list[Notice] | None = None,
+        available_presets: list[str] | None = None,
     ) -> WorkspacePayload:
         state = self.session.state
         active = next(
@@ -107,6 +122,20 @@ class WorkspaceController:
             action_receipt=state.receipts[-1] if state.receipts else None,
             download=state.download,
             draft=draft,
+            compare=self._compare_payload(),
+            available_presets=available_presets or [],
+        )
+
+    def _compare_payload(self):
+        compare = self.session.state.compare
+        if not compare:
+            return None
+        run_a = self.session.get(compare.get('run_a_id', ''))
+        run_b = self.session.get(compare.get('run_b_id', ''))
+        if run_a is None and run_b is None:
+            return None
+        return build_compare_payload(
+            run_a, run_b, compare.get('preset_a'), compare.get('preset_b')
         )
 
     def seed_landing(self, setup: SetupSnapshot) -> bool:
@@ -152,6 +181,10 @@ class WorkspaceController:
                 if submission_error:
                     raise ValueError(submission_error)
                 self._submit(action, setup)
+            elif action.type == 'runCompare':
+                if submission_error:
+                    raise ValueError(submission_error)
+                self._run_compare(action, setup)
             elif action.type == 'retryDetection':
                 self._retry(action, setup)
             elif action.type == 'selectRun':
@@ -236,6 +269,71 @@ class WorkspaceController:
         self.session.state.pending_requests[queued.id] = request
         self.session.add_run(queued)
 
+    def _run_compare(self, action: ActionEnvelope, setup: SetupSnapshot) -> None:
+        self._expect_keys(action.payload, {'inputs', 'presetB'})
+        preset_b = action.payload.get('presetB')
+        if not isinstance(preset_b, str) or not preset_b:
+            raise ValueError('Compare requires a second detector preset.')
+        raw_inputs = action.payload.get('inputs')
+        if not isinstance(raw_inputs, dict):
+            raise ValueError('Compare requires run inputs.')
+        if self.compare_setup is None:
+            raise ValueError('Detector comparison is unavailable in this environment.')
+        # May raise ValueError (unknown preset / same as A / task-incompatible) — caught by handle.
+        setup_b = self.compare_setup(preset_b, setup)
+        supplied = bool(raw_inputs.get('suppliedAnswer'))
+        mode_a = RunMode.SCORE_SUPPLIED_ANSWER if supplied else RunMode.GENERATE_AND_SCORE
+        request_a = RunRequest.model_validate({**raw_inputs, 'mode': mode_a.value})
+        if request_a.task != setup.task:
+            raise ValueError('The active detector is not compatible with this task.')
+        prov_a = Provenance(
+            disclosures=[f'Compared with the {setup_b.detector_preset} detector.']
+        )
+        queued_a = self.engine.reserve(
+            request_a, setup, self.session.state.setup_revision, prov_a
+        )
+        # Side B always scores the SAME answer as A — never a second generation. When A supplied the
+        # answer, B scores it directly; when A generates, B's answer is injected in advance() once A
+        # completes (see compare_answer_source below), so B's request starts answer-less here.
+        if supplied:
+            request_b = RunRequest.model_validate(
+                {**raw_inputs, 'mode': RunMode.SCORE_SUPPLIED_ANSWER.value}
+            )
+        else:
+            request_b = RunRequest.model_construct(
+                task=request_a.task,
+                mode=RunMode.SCORE_SUPPLIED_ANSWER,
+                context=request_a.context,
+                question=request_a.question,
+                prompt=request_a.prompt,
+                supplied_answer='',
+                example_id=request_a.example_id,
+                source_run_id=None,
+            )
+        prov_b = Provenance(
+            source_run_id=queued_a.id,
+            disclosures=[
+                f'Scored the same answer as run {queued_a.id} ({setup.detector_preset}).'
+            ],
+        )
+        queued_b = self.engine.reserve(
+            request_b, setup_b, self.session.state.setup_revision, prov_b
+        )
+        # Add B before A so advance() (which scans runs in reverse for the active one) drives A→B, and
+        # B scores exactly the answer A produced/received.
+        self.session.state.pending_requests[queued_b.id] = request_b
+        self.session.state.pending_requests[queued_a.id] = request_a
+        self.session.add_run(queued_b)
+        self.session.add_run(queued_a)
+        if not supplied:
+            self.session.state.compare_answer_source[queued_b.id] = queued_a.id
+        self.session.state.compare = {
+            'run_a_id': queued_a.id,
+            'run_b_id': queued_b.id,
+            'preset_a': setup.detector_preset,
+            'preset_b': setup_b.detector_preset,
+        }
+
     def _retry(self, action: ActionEnvelope, setup: SetupSnapshot) -> None:
         source = self.session.get(self._run_id(action.payload))
         if source is None or not source.answer:
@@ -274,6 +372,23 @@ class WorkspaceController:
             self.session.replace_run(active.model_copy(update={'status': RunStatus.RUNNING}))
             return True
         self.session.state.pending_requests.pop(active.id, None)
+        source_id = self.session.state.compare_answer_source.pop(active.id, None)
+        if source_id is not None:
+            # This is the compare B side of a generate run: score exactly the answer A produced.
+            source = self.session.get(source_id)
+            answer = source.answer if source else ''
+            if not answer:
+                self.session.replace_run(active.model_copy(update={
+                    'status': RunStatus.FAILED,
+                    'completed_at': utc_now(),
+                    'error': PublicError(
+                        code='compare_no_answer',
+                        message='The compared answer was not produced, so this side could not score it.',
+                        correlation_id=str(uuid4()),
+                    ),
+                }))
+                return True
+            request = request.model_copy(update={'supplied_answer': answer})
         self.session.replace_run(self.engine.execute(active, request))
         return True
 

@@ -47,6 +47,10 @@ class _State:
     pending_requests: dict[str, RunRequest] = field(default_factory=dict)
     seeded: bool = False
     setup_signatures: dict[int, str] = field(default_factory=dict)
+    # Compare mode: the id/preset pair the compare view hydrates from, and (generate case only) the
+    # map of a B run awaiting side A's answer -> the A run that produces it.
+    compare: dict[str, str] | None = None
+    compare_answer_source: dict[str, str] = field(default_factory=dict)
 
 
 def _canonical(value: Any) -> bytes:
@@ -292,6 +296,8 @@ class WorkspaceSession:
         self.state.runs.clear()
         self.state.selected_run_id = None
         self.state.pending_requests.clear()
+        self.state.compare = None
+        self.state.compare_answer_source.clear()
         self.state.runs_revision += 1
 
     def recover_interrupted(self) -> None:

@@ -22,6 +22,21 @@ def test_presets_registry():
     assert 'Judge — API Token (zero-shot)' in presets.PRESETS
 
 
+def test_every_preset_declares_an_honest_score_meaning():
+    """Guard: a preset whose declared family/level/calibration yields no honest score meaning
+    (UNAVAILABLE) is a card that cannot state what its score means. Every current preset must map to
+    a real semantics, so a future preset with a meaningless score fails here instead of shipping."""
+    from sirin.ui.workspace.contracts import ScoreSemantics, derive_score_semantics
+
+    for preset in presets.list_presets():
+        semantics = derive_score_semantics(
+            calibrated=preset.calibrated,
+            family=preset.family,
+            level=preset.level,
+        )
+        assert semantics is not ScoreSemantics.UNAVAILABLE, preset.name
+
+
 def test_hf_adapter_reuses_hidden_state_capability_across_hot_reload():
     class ReloadedAdapter:
         def generate_hiddens(self):

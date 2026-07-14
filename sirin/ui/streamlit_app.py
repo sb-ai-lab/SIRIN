@@ -679,17 +679,38 @@ API_BACKENDS = (
 )
 
 
-@_cache_resource
-def load_generator(
-    backend: str,
-    model_path: str,
-    device: str,
-    custom_base_url: str = '',
-    api_key: str = '',
+# ModelManager owns model load/unload/LRU + exclusive_run. This module-level, config-keyed memo only
+# avoids rebuilding the lightweight adapter WRAPPER for a repeated config (it survives Streamlit reruns
+# like st.cache_resource did, but is plain Python so it works — and is testable — without a Streamlit
+# runtime). Local (VRAM-holding) adapters are handed to ModelManager so switching models evicts the
+# previous one; API adapters are cheap/stateless and hold no local VRAM, so they skip the manager and
+# never evict a loaded local model.
+# ponytail: unbounded memo of tiny wrappers (VRAM stays bounded by ModelManager); add an LRU cap only if
+# a single session ever cycles through enough distinct configs to matter.
+_MAX_ACTIVE_MODELS_ENV = 'SIRIN_UI_MAX_ACTIVE_MODELS'
+_LOCAL_MODEL_BACKENDS = {'HF', 'vLLM'}
+_adapter_memo: dict[tuple[str, str, str, str, str], Any] = {}
+
+
+def _ui_max_active_models() -> int:
+    try:
+        return max(1, int(os.getenv(_MAX_ACTIVE_MODELS_ENV, '1')))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _manage_local_model(adapter: Any) -> Any:
+    """Hand a VRAM-holding adapter to ModelManager: register it, evict the least-recently-used model
+    past SIRIN_UI_MAX_ACTIVE_MODELS (default 1), then load it. Idempotent for an already-active adapter."""
+    from sirin.inference.model_manager import ModelManager
+
+    ModelManager.config.max_active_models = _ui_max_active_models()
+    return ModelManager.load_model(adapter)
+
+
+def _new_generator_adapter(
+    backend: str, model_path: str, device: str, custom_base_url: str, api_key: str
 ) -> Any:
-    model_path = _clean_field(model_path)
-    device = _clean_field(device)
-    custom_base_url = _clean_field(custom_base_url)
     if backend == 'HF':
         from sirin.inference.adapters.hf_adapter import HfModelAdapter
 
@@ -716,17 +737,39 @@ def load_generator(
     raise ValueError(f"Unknown backend: {backend}")
 
 
+def load_generator(
+    backend: str,
+    model_path: str,
+    device: str,
+    custom_base_url: str = '',
+    api_key: str = '',
+) -> Any:
+    model_path = _clean_field(model_path)
+    device = _clean_field(device)
+    custom_base_url = _clean_field(custom_base_url)
+    key = (backend, model_path, device, custom_base_url, api_key)
+    adapter = _adapter_memo.get(key)
+    if adapter is None:
+        adapter = _new_generator_adapter(
+            backend, model_path, device, custom_base_url, api_key
+        )
+        _adapter_memo[key] = adapter
+    if backend in _LOCAL_MODEL_BACKENDS:
+        _manage_local_model(adapter)
+    return adapter
+
+
 def _unload_cached_models() -> None:
+    _adapter_memo.clear()
     try:
         from sirin.inference.model_manager import ModelManager
 
         ModelManager.unload_all_models()
     except Exception:
         pass
-    for func in (load_generator, load_detector):
-        clear = getattr(func, 'clear', None)
-        if clear:
-            clear()
+    clear = getattr(load_detector, 'clear', None)
+    if clear:
+        clear()
     try:
         import torch
 
@@ -1090,6 +1133,56 @@ def _build_detector(cfg: dict[str, Any]) -> Any:
     )
 
 
+def _compare_cfg(cfg: dict[str, Any], st: Any, preset_name: str) -> dict[str, Any]:
+    """A detector config for compare side B, honoring preset B's own defaults.
+
+    Side A is the sidebar ``cfg``. For B we swap the preset, drop any typed checkpoint path (B uses its
+    own built-in checkpoint if it has one), and for a judge preset resolve its default provider/model —
+    reusing a key already pasted for that same provider. The generator settings stay A's, since B never
+    generates (it scores the answer A produced/received).
+    """
+    from sirin.ui import presets
+
+    preset_b = presets.PRESETS.get(preset_name)
+    if preset_b is None or preset_name == cfg['preset_name']:
+        return dict(cfg)
+    cfg_b = dict(cfg)
+    cfg_b['preset_name'] = preset_name
+    cfg_b['checkpoint_dir'] = ''
+    if getattr(preset_b, 'is_judge', False) or preset_b.family == 'judge':
+        provider = cfg.get('judge_provider') or OPENROUTER_PROVIDER
+        cfg_b['judge_provider'] = provider
+        cfg_b['judge_model'] = provider_models(provider)[0]
+        cfg_b['judge_api_key'] = str(st.session_state.get(f'api_key:{provider}', '') or '')
+    return cfg_b
+
+
+def _compare_side_b_error(cfg: dict[str, Any], st: Any, preset_name: str) -> str | None:
+    """Actionable reason side B cannot run (missing checkpoint / backend / API key), or None.
+
+    Computed BEFORE any run is queued so a comparison that would fail on a missing resource is rejected
+    up front. An unknown preset returns None here and is rejected by the controller with its own message.
+    """
+    from sirin.ui import presets
+
+    preset_b = presets.PRESETS.get(preset_name)
+    if preset_b is None:
+        return None
+    cfg_b = _compare_cfg(cfg, st, preset_name)
+    error = _detector_setup_error(cfg_b)
+    if error:
+        return error
+    if getattr(preset_b, 'is_judge', False) or preset_b.family == 'judge':
+        provider = cfg_b.get('judge_provider') or OPENROUTER_PROVIDER
+        env_var = API_PROVIDER_KEY_ENVS.get(provider, '')
+        if not (cfg_b.get('judge_api_key') or (env_var and os.getenv(env_var))):
+            return (
+                f'The comparison detector "{preset_name}" needs an API key for {provider}. '
+                f'Paste it in the sidebar or set {env_var}.'
+            )
+    return None
+
+
 def _detector_setup_error(cfg: dict[str, Any]) -> str | None:
     if (
         cfg.get('preset_name') == 'Probing — Sequence TabPFN (checkpoint)'
@@ -1245,7 +1338,7 @@ def _pending_workspace(st: Any) -> str | None:
     component_state = st.session_state.get(_V2_COMPONENT_KEY)
     view_state = component_state.get('viewState') if hasattr(component_state, 'get') else None
     workspace = view_state.get('workspace') if isinstance(view_state, dict) else None
-    return workspace if workspace in {'analyze', 'runs', 'diagnostics'} else None
+    return workspace if workspace in {'analyze', 'runs', 'diagnostics', 'compare'} else None
 
 
 def _v2_modules() -> tuple[Any, ...] | None:
@@ -1382,6 +1475,49 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
         'layer': preset_layer,
     }
     setup = _dto(SetupSnapshot, setup_values)
+
+    def _preset_task(name: str) -> str:
+        return 'answerability' if 'Answerability' in name else 'faithfulness'
+
+    # Compare side B: resolve a preset name into its OWN SetupSnapshot (built the same way as side A).
+    # Raises ValueError (caught by the controller as a reject) when B is unknown, is A itself, or does
+    # not support the active task.
+    def compare_setup(preset_b_name: str, setup_a: SetupSnapshot) -> SetupSnapshot:
+        preset_b = presets.PRESETS.get(preset_b_name)
+        if preset_b is None:
+            raise ValueError('The selected comparison detector is not available.')
+        if preset_b_name == cfg['preset_name']:
+            raise ValueError('Choose a different detector for side B.')
+        if _preset_task(preset_b_name) != str(setup_a.task):
+            raise ValueError('The comparison detector does not support this task.')
+        if preset_b.family == 'uncertainty':
+            # B always scores the answer A produced/received; an uncertainty detector needs to generate
+            # to measure token uncertainty and cannot score a supplied answer (mirrors _submit's guard).
+            raise ValueError('An uncertainty detector cannot score a supplied answer, so it cannot be side B.')
+        return _dto(SetupSnapshot, {
+            'task': _preset_task(preset_b_name),
+            'detector_preset': preset_b.name,
+            'detector_family': preset_b.family,
+            'detector_level': preset_b.level,
+            'calibrated': bool(getattr(preset_b, 'calibrated', False)),
+            'score_semantics': derive_score_semantics(
+                calibrated=bool(getattr(preset_b, 'calibrated', False)),
+                family=preset_b.family,
+                level=preset_b.level,
+            ),
+            'model_id': model_id or None,
+            'provider_label': cfg['backend'],
+        })
+
+    # Presets valid for the active task, excluding side A — the choices offered in the compare picker.
+    available_presets = [
+        preset_obj.name
+        for preset_obj in presets.list_presets()
+        if preset_obj.name != cfg['preset_name']
+        and _preset_task(preset_obj.name) == setup_values['task']
+        # Uncertainty detectors must generate to score; they cannot score side A's answer (see below).
+        and preset_obj.family != 'uncertainty'
+    ]
     model_loaded = bool(getattr(ModelManager, '_active_models', {}))
     trusted_local = is_trusted_local()
     capabilities = _dto(
@@ -1443,20 +1579,25 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
         answer, _reason = _split_thinking(raw)
         return answer
 
-    def detect(answer: str, request: Any, _setup: Any) -> dict[str, Any]:
-        if requires_external_confirmation(cfg) and not external_confirmed:
+    def detect(answer: str, request: Any, run_setup: Any) -> dict[str, Any]:
+        # Compare side B runs the SAME detect path with preset B's own config; the run's setup snapshot
+        # names the preset, so a compare-B run builds its own detector while side A keeps the sidebar cfg.
+        detect_cfg = _compare_cfg(
+            cfg, st, getattr(run_setup, 'detector_preset', None) or cfg['preset_name']
+        )
+        if requires_external_confirmation(detect_cfg) and not external_confirmed:
             raise ConsentRequiredError(
                 'External API calls need your consent. Turn on “Allow external '
                 'API calls” in the sidebar, then run again.'
             )
         prompt = _v2_prompt(request)
-        setup_error = _detector_setup_error(cfg)
+        setup_error = _detector_setup_error(detect_cfg)
         if setup_error:
             raise ValueError(f'Detection setup failed: {setup_error}')
         size_error = _detector_input_size_error(prompt, answer)
         if size_error:
             raise ValueError(size_error)
-        detector = _build_detector(cfg)
+        detector = _build_detector(detect_cfg)
         result = detector.detect([build_sample(prompt, answer.strip())])
         view = detection_view_model(result, answer.strip(), detector)
         return view
@@ -1507,6 +1648,7 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
         session,
         RunEngine(generate=generate, detect=detect),
         diagnostic_actions=diagnostic_actions,
+        compare_setup=compare_setup,
     )
     controller.seed_landing(setup)
     stored_view = st.session_state.get(_V2_VIEW_STATE_KEY)
@@ -1516,7 +1658,7 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
     # reverting flash) and needs no extra st.rerun(). Server-initiated view changes still win: they
     # update the stored canonical, which this same read consults when no navigation event is pending.
     workspace = _pending_workspace(st) or stored_view.get('workspace', 'analyze')
-    if workspace not in {'analyze', 'runs', 'diagnostics'}:
+    if workspace not in {'analyze', 'runs', 'diagnostics', 'compare'}:
         workspace = 'analyze'
     view_state = {
         'workspace': workspace,
@@ -1535,13 +1677,28 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
         capabilities=capabilities,
         diagnostics=diagnostics,
         view_state=view_state,
+        available_presets=available_presets,
     )
     payload = payload_model.model_dump(mode='json', by_alias=True, exclude_none=True)
     event = render_workspace(payload, key=_V2_COMPONENT_KEY) or {}
     action_data = event.get('action')
     if action_data:
         action = ActionEnvelope.model_validate(action_data)
-        controller.handle(action, setup=setup, submission_error=setup_error)
+        action_error = setup_error
+        if action.type == 'runCompare':
+            preset_b_name = action.payload.get('presetB')
+            if isinstance(preset_b_name, str) and preset_b_name:
+                b_error = _compare_side_b_error(cfg, st, preset_b_name)
+                if b_error is None and requires_external_confirmation(
+                    _compare_cfg(cfg, st, preset_b_name)
+                ) and not external_confirmed:
+                    b_error = (
+                        f'Comparing with "{preset_b_name}" would call an external API. Make an API '
+                        'detector or generator side A and turn on “Allow external API calls”, then '
+                        'run the comparison again.'
+                    )
+                action_error = setup_error or b_error
+        controller.handle(action, setup=setup, submission_error=action_error)
         st.rerun()
     if controller.advance():
         st.rerun()
