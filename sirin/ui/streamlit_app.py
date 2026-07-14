@@ -1292,6 +1292,8 @@ def _compare_available_presets(active_preset: str, task: str) -> list[str]:
         and _preset_task(preset.name) == task
         and preset.family != 'uncertainty'
         and not _needs_checkpoint_side_b_cannot_take(preset)
+        # Replay-only hosted presets cannot score live, so they cannot be a compare side.
+        and not presets.hosted_replay_only(preset.family)
     ]
 
 

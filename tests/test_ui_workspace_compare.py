@@ -232,7 +232,9 @@ def test_run_compare_rejects_unknown_preset_without_queuing_runs():
     assert session.state.compare is None
 
 
-def test_run_compare_rejects_a_stale_runs_revision():
+def test_run_compare_accepts_a_lagging_runs_revision():
+    # The runs revision is informational: compare appends new runs, so a payload that
+    # trails the server (slow hosts) must not block it.
     session, controller = _controller()
     action = _envelope(session, 'runCompare', {
         'inputs': {'question': 'q?', 'context': 'ctx'},
@@ -242,8 +244,8 @@ def test_run_compare_rejects_a_stale_runs_revision():
 
     receipt = controller.handle(action, setup=_setup())
 
-    assert receipt.status is ReceiptStatus.REJECTED
-    assert session.state.runs == []
+    assert receipt.status is ReceiptStatus.ACCEPTED
+    assert len(session.state.runs) == 2  # side A + side B queued
 
 
 def test_run_compare_rejects_a_side_b_setup_error_before_running():

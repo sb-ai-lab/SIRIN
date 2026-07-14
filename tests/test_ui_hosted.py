@@ -22,11 +22,13 @@ def not_hosted(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
 
 
-def test_hosted_visible_presets_are_api_judges_only(hosted):
+def test_hosted_visible_presets_are_judges_plus_the_replay_only_probe(hosted):
     visible = presets.visible_presets()
 
     assert visible
-    assert all(p.family == 'judge' for p in visible)
+    # Live scoring = judges; the one non-judge entry is the replay-only Qwen3.5-4B probe.
+    assert all(p.family == 'judge' for p in visible[:-1])
+    assert visible[-1].name == QWEN35_PRESET
 
 
 def test_visible_presets_equal_list_presets_when_not_hosted(not_hosted):
@@ -39,6 +41,93 @@ def test_hosted_shows_the_verbalized_judge_preset(hosted):
     assert 'Judge — API Sequence (verbalized confidence)' in names
     # The hosted default stays the span judge.
     assert names[0] != 'Judge — API Sequence (verbalized confidence)'
+
+
+def test_hosted_offers_the_probe_preset_as_replay_only(hosted):
+    visible = presets.visible_presets()
+
+    # The Qwen3.5-4B probe is selectable (its landing seed replays the recorded result)…
+    assert visible[-1].name == QWEN35_PRESET
+    # …and it is the ONLY non-judge preset; everything else stays judge-family.
+    assert [p.name for p in visible if p.family != 'judge'] == [QWEN35_PRESET]
+    assert presets.hosted_replay_only('probing') is True
+    assert presets.hosted_replay_only('judge') is False
+
+
+def test_replay_only_gate_is_hosted_only(not_hosted):
+    assert presets.hosted_replay_only('probing') is False
+
+
+def _hosted_submit_envelope(payload):
+    from uuid import uuid4
+
+    from sirin.ui.workspace.contracts import ActionEnvelope
+
+    return ActionEnvelope(
+        client_instance_id=str(uuid4()),
+        sequence=1,
+        action_id=str(uuid4()),
+        type='submit',
+        expected_setup_revision=0,
+        expected_runs_revision=0,
+        payload=payload,
+    )
+
+
+def test_hosted_probe_replay_serves_the_recorded_seed(hosted):
+    from sirin.ui.workspace.contracts import RunOrigin
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.seed import build_second_probe_seed_run
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    seed = build_second_probe_seed_run()
+    assert seed is not None
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+
+    receipt = controller.handle(
+        _hosted_submit_envelope(
+            {'mode': 'recordedReplay', 'exampleId': seed.inputs.example_id}
+        ),
+        setup=seed.setup_snapshot,
+    )
+
+    assert receipt.status.value == 'accepted'
+    run = session.state.runs[-1]
+    assert run.origin is RunOrigin.RECORDED_RESULT
+    assert run.setup_snapshot.detector_preset == QWEN35_PRESET
+    assert run.analysis == seed.analysis  # byte-identical recorded derivation
+    assert run.id != seed.id  # a fresh run, not the landing card itself
+
+
+def test_hosted_probe_live_scoring_is_rejected_with_actionable_copy(hosted):
+    from sirin.ui.workspace.contracts import SetupSnapshot
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = SetupSnapshot(
+        detector_preset=QWEN35_PRESET,
+        detector_family='probing',
+        detector_level='token',
+    )
+
+    receipt = controller.handle(
+        _hosted_submit_envelope(
+            {
+                'task': 'faithfulness',
+                'mode': 'scoreSuppliedAnswer',
+                'question': 'q',
+                'suppliedAnswer': 'a',
+            }
+        ),
+        setup=setup,
+    )
+
+    assert receipt.status.value == 'rejected'
+    assert 'Judge — API' in receipt.message
+    assert session.state.runs == []
 
 
 def test_hosted_sidebar_defaults_to_judge_span_and_api_backends(hosted):

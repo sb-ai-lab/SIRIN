@@ -295,6 +295,25 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
     return runs
 
 
+def build_recorded_replay(example_id: str, setup_revision: int = 0) -> RunRecord | None:
+    """Fresh RECORDED_RESULT run for the seed whose example matches, or None.
+
+    Serves "replay" for presets that cannot score live on the hosted CPU demo: the run is
+    rebuilt from the verified bundled asset through the same derivation path as the landing
+    seed (fresh id and timestamps, recorded provenance intact) — never from mutable session
+    history, so a cleared run list cannot poison it.
+    """
+    for build in (build_judge_seed_run, build_second_probe_seed_run,
+                  lambda revision: build_seed_run(revision)):
+        try:
+            record = build(setup_revision)
+        except FileNotFoundError:
+            continue
+        if record is not None and record.inputs.example_id == example_id:
+            return record
+    return None
+
+
 def seed_draft() -> dict[str, Any]:
     """Client draft that prefills the landing example (hosted: the Qwen3.5-4B seed; else census)."""
     case = load_psiloqa_span_seed_qwen35() if is_hosted() else None

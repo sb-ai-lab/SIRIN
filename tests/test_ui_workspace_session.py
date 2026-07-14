@@ -119,12 +119,12 @@ def test_actions_are_deduplicated_and_stale_revisions_are_rejected():
         'stale_setup',
     )
 
+    # A lagging runs revision must NOT reject: on slow hosts the browser payload trails
+    # the server for seconds, and no action semantically depends on the runs revision
+    # (appends don't care; id-targeted actions validate their run id).
     session.state.runs_revision = 1
-    stale_runs = session.begin_action(_action(3, setup_revision=1))
-    assert (stale_runs.status, stale_runs.code) == (
-        ReceiptStatus.REJECTED,
-        'stale_runs',
-    )
+    lagging_runs = session.begin_action(_action(3, setup_revision=1))
+    assert lagging_runs.status is ReceiptStatus.ACCEPTED
 
 
 def test_stale_setup_with_a_benign_delta_auto_accepts_with_current_setup():

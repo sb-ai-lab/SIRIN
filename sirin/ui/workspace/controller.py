@@ -36,7 +36,7 @@ from .contracts import (
 from .examples import ExampleRegistry, cached_example_registry
 from .recipes import detector_recipes
 from .run_engine import RunEngine
-from .seed import build_seed_runs, seed_draft
+from .seed import build_recorded_replay, build_seed_runs, seed_draft
 from .session import PortableFormatError, WorkspaceSession, export_bundle, export_run, import_portable_json
 
 
@@ -248,13 +248,39 @@ class WorkspaceController:
         return receipt
 
     def _submit(self, action: ActionEnvelope, setup: SetupSnapshot) -> None:
+        from sirin.ui.presets import hosted_replay_only
+
         provenance = None
+        replay_only = hosted_replay_only(setup.detector_family)
         if action.payload.get('mode') == RunMode.RECORDED_REPLAY:
             example_id = action.payload.get('exampleId')
             if not isinstance(example_id, str) or not example_id:
                 raise ValueError('Recorded replay requires a bundled example.')
+            if replay_only:
+                # The hosted Space ships no probe checkpoints and no GPU: replays under a
+                # non-judge preset serve the verified recorded seed result, rebuilt from
+                # the bundled asset (never live scoring, never mutable history).
+                record = build_recorded_replay(
+                    example_id, self.session.state.setup_revision
+                )
+                if (
+                    record is None
+                    or record.setup_snapshot.detector_preset != setup.detector_preset
+                ):
+                    raise ValueError(
+                        'On the hosted demo this preset serves its recorded result only, '
+                        'and this example has no recorded result for it. Pick a '
+                        'Judge — API preset for live scoring.'
+                    )
+                self.session.add_run(record)
+                return
             request, provenance = self.examples.resolve(example_id)
         else:
+            if replay_only:
+                raise ValueError(
+                    'On the hosted demo this preset replays its recorded result only — '
+                    'pick a Judge — API preset for live scoring.'
+                )
             request = RunRequest.model_validate(action.payload)
         if request.source_run_id:
             source = self.session.get(request.source_run_id)

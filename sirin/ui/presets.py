@@ -1003,10 +1003,25 @@ def list_presets() -> list[Preset]:
 
 
 def visible_presets() -> list[Preset]:
-    """Presets offered by the UI. The hosted (CPU, public) profile only offers API judges."""
+    """Presets offered by the UI.
+
+    Hosted (CPU, public) profile: the API judges run live, plus the Qwen3.5-4B probe as a
+    REPLAY-ONLY preset — its landing seed replays the verified recorded result (the Space
+    bundles neither its checkpoint nor a GPU), appended last so a judge stays the default.
+    """
     if is_hosted():
-        return [p for p in list_presets() if p.family == 'judge']
+        judges = [p for p in list_presets() if p.family == 'judge']
+        return [*judges, PRESETS[PSILOQA_TOKEN_LINEAR_PRESET_QWEN35]]
     return list_presets()
+
+
+def hosted_replay_only(preset_family: str) -> bool:
+    """True when the active preset cannot score live on the hosted profile.
+
+    Non-judge presets need local model weights (and probes their checkpoints), neither of
+    which ships with the CPU Space — they serve their recorded seed results instead.
+    """
+    return is_hosted() and preset_family != 'judge'
 
 
 def _preset_layer_threshold(

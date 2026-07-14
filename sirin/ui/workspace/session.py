@@ -213,8 +213,11 @@ class WorkspaceSession:
             # the queued inputs may no longer be valid, so make the person resubmit. A benign
             # delta (same preset/model) falls through and runs with the current setup snapshot.
             return self._record(action, digest, 'stale_setup', 'Setup changed; review and submit again.')
-        if action.expected_runs_revision != self.state.runs_revision:
-            return self._record(action, digest, 'stale_runs', 'Run history changed; submit again.')
+        # expected_runs_revision is deliberately NOT enforced. Every action either appends
+        # runs (submit/import) or targets one by id (validated with "Run was not found"), so
+        # a lagging runs revision never invalidates it semantically — while on slow hosts
+        # (HF Space CPU) the browser's payload trails the server by a revision for seconds
+        # and the gate produced spurious "Run history changed" rejections on honest clicks.
         self.state.high_water[action.client_instance_id] = action.sequence
         receipt = ActionReceipt(
             action_id=action.action_id, sequence=action.sequence,
