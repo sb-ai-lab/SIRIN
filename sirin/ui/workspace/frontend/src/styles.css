@@ -80,12 +80,14 @@ button { color: inherit; }
 /* Compact demo-style page header: eyebrow + title + subtitle directly on the scrim, no card box.
    Type roles resolve from tokens.json (--text-eyebrow-*, --text-pageTitle-*, --text-subtitle-*). The
    scrim supplies contrast; a whisper text-shadow keeps AA over the brightest silk highlights. */
-.page-head { position: relative; width: min(960px, 100%); margin: 6px auto 18px; }
+.page-head { position: relative; width: 100%; margin: 6px auto 18px; }
 .eyebrow { margin: 0 0 6px; color: var(--brand); text-transform: uppercase; letter-spacing: var(--text-eyebrow-tracking); font-size: var(--text-eyebrow-size); font-weight: var(--text-eyebrow-weight); line-height: var(--text-eyebrow-line); }
 .page-head h1 { max-width: 760px; margin: 0; font-size: var(--text-pageTitle-size); line-height: var(--text-pageTitle-line); letter-spacing: var(--text-pageTitle-tracking); font-weight: var(--text-pageTitle-weight); text-shadow: 0 1px 2px rgba(255, 255, 255, .5); }
 .page-head > p:not(.eyebrow) { max-width: 620px; margin: 5px 0 0; color: var(--muted); font-size: var(--text-subtitle-size); font-weight: var(--text-subtitle-weight); line-height: var(--text-subtitle-line); text-shadow: 0 1px 2px rgba(255, 255, 255, .48); }
 
-.workspace-content, .notice-stack, .receipt { position: relative; width: min(960px, 100%); margin-left: auto; margin-right: auto; }
+/* Workspace content fills the shell's padded width (1440px cap) — never 100vw, which ignores the
+   open sidebar and overflowed the component horizontally. */
+.workspace-content, .notice-stack, .receipt { position: relative; width: 100%; margin-left: auto; margin-right: auto; }
 .workspace-content { animation: workspace-in 140ms ease-out; }
 .examples { margin: 0 0 12px; }
 .examples > span { display: block; margin-bottom: 9px; color: var(--ink); font-size: 12px; font-weight: 650; text-shadow: 0 1px 2px rgba(255, 255, 255, .42); }
@@ -291,9 +293,6 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .quick-run h2, .section-heading h2 { margin: 0; font-size: 21px; letter-spacing: -.02em; }
 .quick-run > div > p:not(.eyebrow) { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .quick-run .form-actions { grid-column: 1 / -1; }
-/* Runs breaks out to a wider two-column layout by widening its own container relative to the shell —
-   never with 100vw, which ignores the open sidebar and overflowed the component horizontally. */
-.runs-workspace { width: min(1240px, 100%); }
 .runs-grid { width: 100%; margin-top: 20px; display: grid; grid-template-columns: minmax(340px, .82fr) minmax(460px, 1.18fr); gap: 18px; align-items: start; }
 .run-browser { padding: 22px; box-shadow: none; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
@@ -316,7 +315,6 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 /* Compare mode (PR-8/9): two columns scoring one answer, with the honest verdict bar between them.
    The agreement bar reuses the tokens.json span ramp (both-flag = high risk, A-only = low risk) and the
    safe token so the 4-way split reads as one system with the graded-span evidence. */
-.compare-workspace { width: min(1240px, 100%); }
 .compare-picker { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed color-mix(in srgb, var(--brand) 28%, var(--line)); }
 .compare-picker .field-error { grid-column: 1 / -1; }
 .compare-head { margin-bottom: 4px; }
@@ -377,7 +375,7 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .recipe-reference code, .recipe-code code { font-family: var(--font-mono); }
 .recipe-code { margin: 12px 0 0; padding: 14px; overflow-x: auto; border-radius: 10px; background: color-mix(in srgb, var(--canvas) 70%, transparent); border: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; white-space: pre; }
 
-footer { width: min(960px, 100%); margin: 42px auto 0; padding: 10px 12px; display: flex; justify-content: space-between; gap: 20px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-solid) 88%, transparent); color: var(--muted); font-size: 0.6875rem; }
+footer { width: 100%; margin: 42px auto 0; padding: 10px 12px; display: flex; justify-content: space-between; gap: 20px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-solid) 88%, transparent); color: var(--muted); font-size: 0.6875rem; }
 footer span:first-child { color: var(--brand); font-weight: 650; letter-spacing: .16em; }
 
 [data-motion="subtle"] button, [data-motion="subtle"] input, [data-motion="subtle"] textarea, [data-motion="subtle"] select, [data-motion="subtle"] .evidence,

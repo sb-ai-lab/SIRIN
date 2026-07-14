@@ -62,7 +62,10 @@ def test_original_palette_and_motion_defaults_are_preserved():
     light = tokens['palette']['light']
 
     assert 'color-scheme: light' in captured
-    assert 'animation: sirin-breathe-subtle 60s ease-in-out infinite alternate' in captured
+    assert (
+        'animation: sirin-breathe-subtle 45s ease-in-out -22.5s infinite alternate'
+        in captured
+    )
     assert 'fonts.googleapis.com' not in captured
     assert f"--sirin-font: {tokens['fonts']['sans']}" in captured
     assert f"--sirin-mono: {tokens['fonts']['mono']}" in captured
@@ -89,7 +92,8 @@ def test_styles_cover_current_streamlit_controls_and_mobile_results():
     assert '[data-testid="stSelectbox"] button[aria-label="Open"]' in captured
     assert '[data-testid="stNumberInputContainer"]' in captured
     assert '[role="listbox"][aria-label="Background motion"]' in captured
-    assert 'translate: 0 -32px' in captured
+    assert 'translate: 0 calc(-100% - 46px)' in captured
+    assert '[role="listbox"][aria-label="Theme"]' in captured
     assert '[data-testid="stPills"] button *' in captured
     assert '[data-testid="stButtonGroup"] button[data-variant="pills"] *' in captured
     assert (
@@ -125,7 +129,7 @@ def test_silk_motion_is_compositor_only_with_static_scrim():
     assert '[data-testid="stApp"]::before' in captured
     assert 'inset: -16%' in captured
     assert 'will-change: transform' in captured
-    assert 'translate3d' in captured and 'scale(1.06)' in captured
+    assert 'translate3d' in captured and 'scale(1.09)' in captured
     assert 'background-position' not in captured  # never animated (or even set longhand) again
 
     # Readability scrim: present, above the silk, and never animated.

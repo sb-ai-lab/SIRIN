@@ -189,10 +189,12 @@ _MONO = _tokens()['fonts']['mono']
 # Motion presets — a compositor-only pan+zoom "breathe" on the dedicated silk layer. Animate ONLY
 # transform (animating background-position on a cover-sized layer moved ~0px visually but forced a
 # full-viewport raster repaint every frame; transform/filter on stApp itself bleed onto content).
+# The negative delay starts each cycle at its midpoint: ease-in-out velocity is ~0 at the endpoints,
+# so without it the silk sat visually still for the first seconds after every load.
 _MOTION = {
     'static': 'none',
-    'subtle': 'sirin-breathe-subtle 60s ease-in-out infinite alternate',
-    'lively': 'sirin-breathe-lively 30s ease-in-out infinite alternate',
+    'subtle': 'sirin-breathe-subtle 45s ease-in-out -22.5s infinite alternate',
+    'lively': 'sirin-breathe-lively 16s ease-in-out -8s infinite alternate',
 }
 
 _CSS_TEMPLATE = """<style>
@@ -278,24 +280,25 @@ html, body, [data-testid="stApp"] {
     pointer-events: none;
 }
 
-/* Slow pan+zoom "breathe": translate3d + scale only, so the silk stays on the compositor. */
+/* Slow pan+zoom "breathe": translate3d + scale only, so the silk stays on the compositor.
+   Amplitudes stay well inside the -16% inset margin (4% of the oversized layer ≈ 5.3% viewport). */
 @keyframes sirin-breathe-subtle {
-    from { transform: translate3d(-1.1%, -0.7%, 0) scale(1); }
-    to   { transform: translate3d(1.1%, 0.7%, 0) scale(1.03); }
+    from { transform: translate3d(-1.6%, -1%, 0) scale(1); }
+    to   { transform: translate3d(1.6%, 1%, 0) scale(1.04); }
 }
 @keyframes sirin-breathe-lively {
-    from { transform: translate3d(-2.2%, -1.5%, 0) scale(1); }
-    to   { transform: translate3d(2.2%, 1.5%, 0) scale(1.06); }
+    from { transform: translate3d(-4%, -2.6%, 0) scale(1); }
+    to   { transform: translate3d(4%, 2.6%, 0) scale(1.09); }
 }
 
 /* Same-document motion override: the workspace component sets html[data-sirin-motion] the instant the
    user changes motion (it renders in a shadow root of THIS document), so the silk reacts immediately;
    the server-rendered value above stays canonical and reconciles on the next rerun. */
 html[data-sirin-motion="subtle"] [data-testid="stApp"]::before {
-    animation: sirin-breathe-subtle 60s ease-in-out infinite alternate;
+    animation: @@anim_subtle@@;
 }
 html[data-sirin-motion="lively"] [data-testid="stApp"]::before {
-    animation: sirin-breathe-lively 30s ease-in-out infinite alternate;
+    animation: @@anim_lively@@;
 }
 html[data-sirin-motion="static"] [data-testid="stApp"]::before {
     animation: none;
@@ -469,12 +472,13 @@ input::placeholder, textarea::placeholder { color: var(--sirin-faint) !important
     border-color: var(--sirin-hot) !important;
 }
 
-/* React Aria places the final sidebar menu just below the short viewport. Keep all three
-   appearance choices inside Streamlit's clipped app container. */
-@media (max-height: 720px) {
-    div:has(> [role="listbox"][aria-label="Background motion"]) {
-        translate: 0 -32px !important;
-    }
+/* The appearance selects are the LAST sidebar controls, and Streamlit's portaled dropdown always
+   opens downward — it caps the menu height to the viewport but never flips — so near the bottom of
+   the screen the last options render off-screen and unreachable at ANY viewport height. Flip these
+   two menus above their trigger: -100% of the menu's own height minus the ~46px trigger + gap. */
+div:has(> [role="listbox"][aria-label="Background motion"]),
+div:has(> [role="listbox"][aria-label="Theme"]) {
+    translate: 0 calc(-100% - 46px) !important;
 }
 
 /* Chat send-button icon follows the theme (native icon is base-theme light => invisible on light) */
@@ -633,7 +637,7 @@ input::placeholder, textarea::placeholder { color: var(--sirin-faint) !important
 # --- theme contract (fail fast on a mis-defined theme) ------------------------------------------
 _THEME_PLACEHOLDER_RE = re.compile(r"@@([A-Za-z0-9_]+)@@")
 _RUNTIME_KEYS = frozenset(
-    {'font', 'mono', 'anim', 'silk'}
+    {'font', 'mono', 'anim', 'anim_subtle', 'anim_lively', 'silk'}
 )  # injected per-call, not theme tokens
 
 
@@ -672,6 +676,8 @@ def _compiled_css(theme: str, motion: str) -> str:
         'font': _FONT,
         'mono': _MONO,
         'anim': _MOTION.get(motion, _MOTION['subtle']),
+        'anim_subtle': _MOTION['subtle'],
+        'anim_lively': _MOTION['lively'],
         'silk': _SILK_ASSET.get(theme, _SILK_ASSET['light']),
     }
     css = _CSS_TEMPLATE
