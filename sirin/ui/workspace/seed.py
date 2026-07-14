@@ -14,7 +14,11 @@ import hashlib
 from typing import Any
 from uuid import uuid4
 
-from sirin.ui.demo_cases import load_judge_span_seed, load_psiloqa_span_seed
+from sirin.ui.demo_cases import (
+    load_judge_span_seed,
+    load_psiloqa_span_seed,
+    load_psiloqa_span_seed_qwen35,
+)
 
 from .contracts import (
     Provenance,
@@ -131,9 +135,12 @@ def _seed_spans(case: dict[str, Any]) -> list[dict[str, Any]]:
     return spans
 
 
-def build_seed_run(setup_revision: int = 0) -> RunRecord:
-    """Build the terminal recorded-result run for the census/Llanbadoc case."""
-    case = load_psiloqa_span_seed()
+def build_seed_run(
+    setup_revision: int = 0, case: dict[str, Any] | None = None
+) -> RunRecord:
+    """Build the terminal recorded-result run for a probe span seed (census hero by default)."""
+    if case is None:
+        case = load_psiloqa_span_seed()
     setup = _seed_setup(case)
     analysis = present_analysis(case['answer'], setup, {'spans': _seed_spans(case)})
     now = utc_now()
@@ -254,16 +261,33 @@ def build_judge_seed_run(
     )
 
 
-def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
-    """All landing seeds: the census probe seed plus, when its asset is present, the judge seed.
+def build_second_probe_seed_run(setup_revision: int = 0) -> RunRecord | None:
+    """Recorded-result run for the Qwen3.5-4B probe seed, or None when its asset is absent.
 
-    The probe seed is added last so it is the selected hero card; the judge seed (if any) sits
-    beside it. An absent judge asset yields the probe seed alone — the unchanged landing.
+    Renders through the same product path as the hero probe seed; an absent asset is silent by
+    design (the landing keeps the Qwen3-4B hero alone).
+    """
+    case = load_psiloqa_span_seed_qwen35()
+    if case is None:
+        return None
+    return build_seed_run(setup_revision, case=case)
+
+
+def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
+    """All landing seeds: the census hero probe seed plus, when present, the judge and Qwen3.5-4B
+    probe seeds.
+
+    The hero probe seed is added last so it stays the selected card; the judge seed and the second
+    (Qwen3.5-4B) probe seed sit beside it when their assets are present. Absent assets are silent —
+    the unchanged landing is the hero probe seed alone.
     """
     runs: list[RunRecord] = []
     judge = build_judge_seed_run(setup_revision)
     if judge is not None:
         runs.append(judge)
+    second_probe = build_second_probe_seed_run(setup_revision)
+    if second_probe is not None:
+        runs.append(second_probe)
     runs.append(build_seed_run(setup_revision))
     return runs
 

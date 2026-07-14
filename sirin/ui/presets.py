@@ -35,6 +35,29 @@ PSILOQA_CHECKPOINT_DIR = str(
     Path(__file__).resolve().parents[2]
     / 'demo/checkpoints/qwen3_4b_psiloqa_span_linear'
 )
+# Second live PsiloQA probe on the Qwen3.5-4B campaign checkpoint. Distinct constants so the landing
+# seed (pinned to the Qwen3-4B probe above) is never mutated; this preset is selectable, not default.
+PSILOQA_TOKEN_LINEAR_PRESET_QWEN35 = 'Probing — Token Linear · PsiloQA/Qwen3.5-4B'
+PSILOQA_QWEN35_MODEL_ID = 'Qwen/Qwen3.5-4B'
+PSILOQA_QWEN35_MODEL_REVISION = '851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a'
+PSILOQA_QWEN35_CHECKPOINT_DIR = str(
+    Path(__file__).resolve().parents[2]
+    / 'demo/checkpoints/qwen35_4b_psiloqa_span_linear'
+)
+# preset name -> (locked model id, revision, bundled checkpoint). Both entries build their own HF
+# adapter pinned to their model, so the dispatch must NOT hand them a generator adapter.
+PSILOQA_TOKEN_LINEAR_PRESETS: dict[str, tuple[str, str, str]] = {
+    PSILOQA_TOKEN_LINEAR_PRESET: (
+        PSILOQA_MODEL_ID,
+        PSILOQA_MODEL_REVISION,
+        PSILOQA_CHECKPOINT_DIR,
+    ),
+    PSILOQA_TOKEN_LINEAR_PRESET_QWEN35: (
+        PSILOQA_QWEN35_MODEL_ID,
+        PSILOQA_QWEN35_MODEL_REVISION,
+        PSILOQA_QWEN35_CHECKPOINT_DIR,
+    ),
+}
 # External (unbundled) sibling checkpoint. Derived from the repo location instead of a hardcoded
 # home path; honored only as a last-resort fallback after the env override. Not bundled/verified,
 # so it is deliberately NOT exposed as a preset ``builtin_checkpoint`` (no false availability).
@@ -362,7 +385,12 @@ def _build_probing_sequence_tabpfn(
     return _tag(detector, 'probing', 'sequence', calibrated=False, display_mode='gauge')
 
 
-def load_psiloqa_probe_manifest(checkpoint_dir: str | None = None) -> dict[str, Any]:
+def load_psiloqa_probe_manifest(
+    checkpoint_dir: str | None = None,
+    *,
+    model_id: str = PSILOQA_MODEL_ID,
+    model_revision: str = PSILOQA_MODEL_REVISION,
+) -> dict[str, Any]:
     checkpoint = Path(checkpoint_dir or PSILOQA_CHECKPOINT_DIR)
     manifest_path = checkpoint / 'manifest.json'
     if not manifest_path.is_file():
@@ -370,8 +398,8 @@ def load_psiloqa_probe_manifest(checkpoint_dir: str | None = None) -> dict[str, 
     manifest = json.loads(manifest_path.read_text())
     expected = {
         'detector': 'token_linear_probe',
-        'model_id': PSILOQA_MODEL_ID,
-        'model_revision': PSILOQA_MODEL_REVISION,
+        'model_id': model_id,
+        'model_revision': model_revision,
         'use_chat_template': False,
         'checkpoint_format': 'sirin_token_linear_v1',
     }
@@ -386,14 +414,17 @@ def load_psiloqa_probe_manifest(checkpoint_dir: str | None = None) -> dict[str, 
     return manifest
 
 
-def _build_probing_token_linear_psiloqa(
+def _build_token_linear_probe(
+    model_id: str,
+    model_revision: str,
+    default_checkpoint: str,
     *,
     device: str = 'cuda',
     checkpoint_dir: str | None = None,
     generator_adapter: Any = None,
     **kwargs: Any,
 ) -> Any:
-    """Build the locked live PsiloQA probe; layer and threshold come from its manifest."""
+    """Build a locked live PsiloQA token-linear probe; layer and threshold come from its manifest."""
     from sirin.definitions import SideType
     from sirin.detection.probing import TokenLinearProbingDetector
     from sirin.detection.processors import HiddensProcessor
@@ -401,20 +432,22 @@ def _build_probing_token_linear_psiloqa(
     from sirin.models.detection import HiddensProcessorConfig, ProbingDetectorConfig
     from sirin.models.inference import HFConfig, TokenLocatorConfig
 
-    checkpoint = checkpoint_dir or PSILOQA_CHECKPOINT_DIR
-    manifest = load_psiloqa_probe_manifest(checkpoint)
+    checkpoint = checkpoint_dir or default_checkpoint
+    manifest = load_psiloqa_probe_manifest(
+        checkpoint, model_id=model_id, model_revision=model_revision
+    )
     adapter_config = getattr(generator_adapter, 'config', None)
     if (
-        getattr(adapter_config, 'model_path', None) == PSILOQA_MODEL_ID
-        and getattr(adapter_config, 'revision', None) == PSILOQA_MODEL_REVISION
+        getattr(adapter_config, 'model_path', None) == model_id
+        and getattr(adapter_config, 'revision', None) == model_revision
         and getattr(adapter_config, 'use_chat_template', None) is False
     ):
         extractor = generator_adapter
     else:
         extractor = HfModelAdapter(
             HFConfig(
-                model_path=PSILOQA_MODEL_ID,
-                revision=PSILOQA_MODEL_REVISION,
+                model_path=model_id,
+                revision=model_revision,
                 device=device,
                 model_dtype='bf16',
                 attn_implementation='sdpa',
@@ -453,6 +486,42 @@ def _build_probing_token_linear_psiloqa(
         'token',
         calibrated=False,
         display_mode='threshold-spans',
+    )
+
+
+def _build_probing_token_linear_psiloqa(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    **kwargs: Any,
+) -> Any:
+    return _build_token_linear_probe(
+        PSILOQA_MODEL_ID,
+        PSILOQA_MODEL_REVISION,
+        PSILOQA_CHECKPOINT_DIR,
+        device=device,
+        checkpoint_dir=checkpoint_dir,
+        generator_adapter=generator_adapter,
+        **kwargs,
+    )
+
+
+def _build_probing_token_linear_psiloqa_qwen35(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    **kwargs: Any,
+) -> Any:
+    return _build_token_linear_probe(
+        PSILOQA_QWEN35_MODEL_ID,
+        PSILOQA_QWEN35_MODEL_REVISION,
+        PSILOQA_QWEN35_CHECKPOINT_DIR,
+        device=device,
+        checkpoint_dir=checkpoint_dir,
+        generator_adapter=generator_adapter,
+        **kwargs,
     )
 
 
@@ -605,6 +674,21 @@ PRESETS: dict[str, Preset] = {
         is_judge=False,
         builtin_checkpoint=PSILOQA_CHECKPOINT_DIR,
     ),
+    PSILOQA_TOKEN_LINEAR_PRESET_QWEN35: Preset(
+        name=PSILOQA_TOKEN_LINEAR_PRESET_QWEN35,
+        family='probing',
+        level='token',
+        calibrated=False,
+        requires_checkpoint=True,
+        description=(
+            'Live token linear probe on fresh Qwen3.5-4B hidden states for the curated '
+            'PsiloQA span demo. Raw sigmoid score; not a calibrated probability.'
+        ),
+        build=_build_probing_token_linear_psiloqa_qwen35,
+        display_mode='threshold-spans',
+        is_judge=False,
+        builtin_checkpoint=PSILOQA_QWEN35_CHECKPOINT_DIR,
+    ),
     "Uncertainty — Sequence (zero-shot)": Preset(
         name="Uncertainty — Sequence (zero-shot)",
         family='uncertainty',
@@ -693,14 +777,18 @@ def _preset_layer_threshold(
 ) -> tuple[int | None, float | None]:
     """Layer and decision threshold a preset statically exposes, without loading the model.
 
-    Only the PsiloQA token-linear probe publishes a single hidden-state layer and threshold (via its
+    Only the PsiloQA token-linear probes publish a single hidden-state layer and threshold (via their
     manifest); every other preset resolves them at build time, so returns ``(None, None)`` here.
     """
-    if preset.name != PSILOQA_TOKEN_LINEAR_PRESET:
+    spec = PSILOQA_TOKEN_LINEAR_PRESETS.get(preset.name)
+    if spec is None:
         return None, None
-    source = checkpoint_dir or preset.builtin_checkpoint or PSILOQA_CHECKPOINT_DIR
+    model_id, model_revision, default_checkpoint = spec
+    source = checkpoint_dir or preset.builtin_checkpoint or default_checkpoint
     try:
-        manifest = load_psiloqa_probe_manifest(source)
+        manifest = load_psiloqa_probe_manifest(
+            source, model_id=model_id, model_revision=model_revision
+        )
         return int(manifest['hidden_state_index']), float(manifest['threshold'])
     except Exception:
         return None, None

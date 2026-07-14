@@ -96,10 +96,19 @@ def _write(tmp_path, payload):
     return str(path)
 
 
-def test_absent_asset_is_silent_and_landing_is_probe_only():
-    assert load_judge_span_seed() is None
-    # Without the asset the landing keeps exactly one seed (the census probe).
-    assert len(build_seed_runs()) == 1
+def test_absent_asset_is_silent():
+    # A missing judge asset returns None (never raises), so the landing can fall back to the probe seed.
+    assert load_judge_span_seed('/nonexistent/judge_span_seed.json') is None
+
+
+def test_shipped_judge_asset_seeds_a_recorded_judge_card():
+    # The campaign ships assets/judge_span_seed.json, so the landing now carries the judge card too,
+    # beside the probe hero seed. (Count is not pinned — a second probe seed may also be shipped.)
+    runs = build_seed_runs()
+    judge_runs = [run for run in runs if run.setup_snapshot.detector_family == 'judge']
+    assert len(judge_runs) == 1
+    assert judge_runs[0].origin is RunOrigin.RECORDED_RESULT
+    assert any(run.setup_snapshot.detector_family == 'probing' for run in runs)
 
 
 def test_valid_fixture_loads_and_seeds_a_recorded_judge_run(tmp_path):

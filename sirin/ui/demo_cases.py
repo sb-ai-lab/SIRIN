@@ -17,6 +17,9 @@ _PSILOQA_DEMO_CASES_ASSET_PATH = (
 _PSILOQA_SPAN_SEED_ASSET_PATH = (
     Path(__file__).with_name('assets') / 'psiloqa_span_seed.json'
 )
+_PSILOQA_SPAN_SEED_QWEN35_ASSET_PATH = (
+    Path(__file__).with_name('assets') / 'psiloqa_span_seed_qwen35_4b.json'
+)
 _PSILOQA_SPAN_SEED_FIELDS = {
     'sample_id',
     'example_id',
@@ -468,6 +471,22 @@ def load_psiloqa_span_seed(
             raise ValueError('PsiloQA span seed recorded-run attribution is invalid')
 
     return case
+
+
+def load_psiloqa_span_seed_qwen35(
+    path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Load the Qwen3.5-4B probe landing seed, or None when its asset is absent (silent by design).
+
+    Reuses ``load_psiloqa_span_seed`` (same SHA-256 and character-alignment discipline); an absent
+    asset returns None so the landing falls back to the Qwen3-4B hero probe seed alone.
+    """
+    asset_path = (
+        Path(path) if path is not None else _PSILOQA_SPAN_SEED_QWEN35_ASSET_PATH
+    )
+    if not asset_path.is_file():
+        return None
+    return load_psiloqa_span_seed(asset_path)
 
 
 def build_psiloqa_prompt(passage: str, question: str) -> str:

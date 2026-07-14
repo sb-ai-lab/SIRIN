@@ -138,14 +138,17 @@ def test_new_recorded_result_enums_round_trip_through_portable_json():
 
 
 def test_fresh_faithfulness_session_seeds_exactly_once():
+    from sirin.ui.workspace.seed import build_seed_runs
+
     controller = _controller()
+    expected = len(build_seed_runs(0))  # hero probe seed + any present judge/second-probe seeds
 
     assert controller.seed_landing(_faithfulness_setup()) is True
-    assert len(controller.session.state.runs) == 1
+    assert len(controller.session.state.runs) == expected
     assert controller.session.selected().origin is RunOrigin.RECORDED_RESULT
-    # A second call on the same session is a no-op.
+    # A second call on the same session is a no-op (seeds once per session, not once per card).
     assert controller.seed_landing(_faithfulness_setup()) is False
-    assert len(controller.session.state.runs) == 1
+    assert len(controller.session.state.runs) == expected
 
 
 def test_seed_prefills_the_census_draft_only_while_pristine():
@@ -165,9 +168,9 @@ def test_seed_prefills_the_census_draft_only_while_pristine():
 def test_seed_never_returns_after_the_seed_is_deleted():
     controller = _controller()
     controller.seed_landing(_faithfulness_setup())
-    seed_id = controller.session.state.runs[0].id
 
-    controller.session.delete(seed_id)
+    for seed_id in [run.id for run in controller.session.state.runs]:
+        controller.session.delete(seed_id)
 
     assert controller.seed_landing(_faithfulness_setup()) is False
     assert controller.session.state.runs == []
@@ -195,3 +198,36 @@ def test_answerability_landing_is_not_seeded():
 
     assert controller.seed_landing(setup) is False
     assert controller.session.state.runs == []
+
+
+def test_second_probe_seed_is_absent_silent(tmp_path):
+    from sirin.ui.demo_cases import load_psiloqa_span_seed_qwen35
+
+    # A missing Qwen3.5-4B seed asset returns None (never raises); the landing keeps the hero alone.
+    assert load_psiloqa_span_seed_qwen35(str(tmp_path / 'nope.json')) is None
+
+
+def test_shipped_second_probe_seed_lands_beside_the_hero():
+    from sirin.ui.workspace.seed import build_second_probe_seed_run, build_seed_runs
+
+    run = build_second_probe_seed_run()
+    assert run is not None
+    assert run.origin is RunOrigin.RECORDED_RESULT
+    assert run.setup_snapshot.detector_family == 'probing'
+    assert (
+        run.setup_snapshot.detector_preset
+        == 'Probing — Token Linear · PsiloQA/Qwen3.5-4B'
+    )
+    assert run.setup_snapshot.model_id == 'Qwen/Qwen3.5-4B'
+    assert run.analysis.kind is AnalysisKind.SPAN
+    # The second probe card sits beside the Qwen3-4B hero, which stays the last (selected) card.
+    runs = build_seed_runs()
+    assert (
+        runs[-1].setup_snapshot.detector_preset
+        == 'Probing — Token Linear · PsiloQA/Qwen3-4B'
+    )
+    assert any(
+        r.setup_snapshot.detector_preset
+        == 'Probing — Token Linear · PsiloQA/Qwen3.5-4B'
+        for r in runs
+    )

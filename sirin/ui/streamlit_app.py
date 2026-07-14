@@ -51,6 +51,26 @@ def load_longmemeval_profile(
 
 
 LONGMEMEVAL_PROFILE = load_longmemeval_profile()
+LONGMEMEVAL_ASSETS_DIR = Path(__file__).parent / 'assets'
+LONGMEMEVAL_DEFAULT_PROFILE = LONGMEMEVAL_PROFILE_PATH.name
+
+
+def longmemeval_profiles() -> list[tuple[str, dict[str, Any]]]:
+    """Every discovered LongMemEval UI profile as ``(label, profile)``; the 35B default leads.
+
+    Scans ``assets/longmemeval_*.json``. Each is schema_version 1; optional top-level ``variant`` /
+    ``label`` fields are additive (display only). The default 35B profile stays first (the trusted-
+    local default); the rest sort by label so the sidebar profile select is stable.
+    """
+    discovered: list[tuple[bool, str, dict[str, Any]]] = []
+    for path in sorted(LONGMEMEVAL_ASSETS_DIR.glob('longmemeval_*.json')):
+        profile = load_longmemeval_profile(path)
+        label = str(profile.get('label') or profile.get('name') or path.stem)
+        discovered.append((path.name != LONGMEMEVAL_DEFAULT_PROFILE, label, profile))
+    discovered.sort(key=lambda item: (item[0], item[1]))
+    return [(label, profile) for _, label, profile in discovered]
+
+
 LIVE_CAPTURE_DIR = REPO_ROOT / 'output' / 'sirin_a_star_demo' / 'provenance' / 'live'
 
 
@@ -897,7 +917,7 @@ def build_preset_detector(
         and hallucination_threshold.get('runtime_compatible', False)
     )
     generator_adapter = None
-    locked_psiloqa_probe = preset_name == presets.PSILOQA_TOKEN_LINEAR_PRESET
+    locked_psiloqa_probe = preset_name in presets.PSILOQA_TOKEN_LINEAR_PRESETS
     if preset.family == 'uncertainty' or (
         gen_backend == 'HF'
         and preset.family == 'probing'
@@ -976,7 +996,17 @@ def _sidebar(st: Any) -> dict[str, Any]:
     with st.sidebar:
         st.html('<p class="sirin-side-heading">Detector</p>')
         preset_objs = presets.list_presets()
-        local_profile = LONGMEMEVAL_PROFILE if is_trusted_local() else None
+        local_profile = None
+        if is_trusted_local():
+            profiles = longmemeval_profiles()
+            if len(profiles) > 1:
+                by_label = {label: profile for label, profile in profiles}
+                chosen = st.selectbox(
+                    'LongMemEval profile', [label for label, _ in profiles]
+                )
+                local_profile = by_label.get(chosen, profiles[0][1])
+            elif profiles:
+                local_profile = profiles[0][1]
         default_preset = (
             local_profile['ui']['default_preset']
             if local_profile

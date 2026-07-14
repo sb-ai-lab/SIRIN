@@ -21,11 +21,10 @@ def test_curated_cases_load_in_demo_order():
 
     assert [(case['dataset_index'], case['label']) for case in cases] == [
         (133, 'D. H. Lawrence'),
-        (870, 'Llanbadoc'),
-        (499, 'Videna electra'),
+        (460, 'Douglas Wright'),
+        (822, 'LECT2 disorder'),
+        (984, 'Picard influences'),
         (473, 'Apollo roles'),
-        (869, 'Census number'),
-        (763, 'Harvard roles'),
     ]
 
 

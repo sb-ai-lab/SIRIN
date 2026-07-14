@@ -9,13 +9,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = (
     REPO_ROOT
-    / 'output/sirin_a_star_demo/psiloqa_span/experiment/top5_demo_cases.json'
+    / 'output/psiloqa_span_qwen35_4b/experiment/top5_demo_cases.json'
 )
 FIXTURE_PATH = REPO_ROOT / 'sirin/ui/assets/psiloqa_span_demo.json'
 ASSET_PATH = REPO_ROOT / 'sirin/ui/assets/psiloqa_demo_cases.json'
-CHECKPOINT = 'demo/checkpoints/qwen3_4b_psiloqa_span_linear'
+CHECKPOINT = 'demo/checkpoints/qwen35_4b_psiloqa_span_linear'
 PROMPT_PREFIX = 'Answer the question based on the passage.\nPassage: '
 
+# Curated from the Qwen3.5-4B campaign top-5 (output/psiloqa_span_qwen35_4b). The D. H. Lawrence
+# hero (idx 133, IoU 0.953) and the Apollo-roles case (idx 473) carry over from the Qwen3-4B set —
+# their example-chip labels are kept stable for continuity.
 SELECTED_CASES = (
     (
         133,
@@ -24,15 +27,25 @@ SELECTED_CASES = (
         'credits the 1927 Etruscan tombs visit.',
     ),
     (
-        870,
-        'Llanbadoc',
-        'Whole answer fabricated: claims Oliver Cromwell was born in the '
-        'Welsh village of Llanbadoc.',
+        460,
+        'Douglas Wright',
+        'Whole answer fabricated: claims Douglas James Wright became founding '
+        'editor of "Best Australian Poems" (Black Inc.); nearly the entire '
+        'answer is one hallucinated span (IoU 0.998).',
     ),
     (
-        499,
-        'Videna electra',
-        'A Palau land snail described as a beetle genus from Indonesia.',
+        822,
+        'LECT2 disorder',
+        'Fabricated medical answer: attributes the LECT2 protein to congenital '
+        'disorders of glycosylation (Pseudo-TORCH / CDG-1b); the long invented '
+        'diagnosis is one contiguous hallucinated span.',
+    ),
+    (
+        984,
+        'Picard influences',
+        'Invented political influences and fictional factions (Cold War / AI, '
+        '"Kalthoid Syndicate", "K\'t\'inga") for Star Trek: Picard season 1; a '
+        'single long hallucinated span.',
     ),
     (
         473,
@@ -40,28 +53,13 @@ SELECTED_CASES = (
         'Invented Apollo mission-scientist and backup-pilot roles for '
         'Joseph Shea.',
     ),
-    (
-        869,
-        'Census number',
-        'Single fabricated figure: the answer reports a 2011 census '
-        'population of 345 for Llanbadoc; the passage says 806. One small '
-        'confident span, the rest of the answer stays clean.',
-    ),
-    (
-        763,
-        'Harvard roles',
-        'Localized spans: invented "professor of law / Dean of Harvard Law '
-        'School" roles; the passage says E. Kinney Zalesne is a writer and '
-        'Senior Advisor to a Harvard initiative. Most of the answer stays '
-        'clean.',
-    ),
 )
 
 DATASET_PATH = '/home/jovyan/ybelikova/sirin-final/data/datasets/psiloqa_en_span'
 
 # Cut a stored answer right after this marker (inclusive); the case is then
 # flagged answer_truncated and the UI discloses the excerpt.
-TRUNCATE_AFTER = {869: '345 people.'}
+TRUNCATE_AFTER: dict[int, str] = {}
 
 DISCLOSURE_FIELDS = (
     'representation_model',

@@ -82,7 +82,67 @@ def test_psiloqa_token_probe_uses_locked_model_and_manifest_layer_threshold(
     assert presets.describe_detector(detector)['display_mode'] == 'threshold-spans'
 
 
-def _build_psiloqa_token_probe_with_fakes(monkeypatch, checkpoint_dir):
+def test_psiloqa_qwen35_token_probe_uses_its_own_model_and_manifest(
+    monkeypatch, tmp_path
+):
+    revision = presets.PSILOQA_QWEN35_MODEL_REVISION
+    (tmp_path / 'manifest.json').write_text(
+        json.dumps(
+            {
+                'schema_version': 1,
+                'detector': 'token_linear_probe',
+                'model_id': 'Qwen/Qwen3.5-4B',
+                'model_revision': revision,
+                'hidden_state_index': 16,
+                'use_chat_template': False,
+                'threshold': 0.3850546181201934,
+                'threshold_method': 'validation_f1_optimal',
+                'score_semantics': 'sigmoid_score_not_calibrated_probability',
+                'checkpoint_format': 'sirin_token_linear_v1',
+                'files': {},
+            }
+        )
+    )
+
+    detector = _build_psiloqa_token_probe_with_fakes(
+        monkeypatch, tmp_path, builder=presets._build_probing_token_linear_psiloqa_qwen35
+    )
+
+    adapter_cfg = detector.feature_processor.extractor.config
+    assert adapter_cfg.model_path == 'Qwen/Qwen3.5-4B'
+    assert adapter_cfg.revision == revision
+    assert adapter_cfg.use_chat_template is False
+    assert detector.feature_processor.config.layers == [16]
+    assert detector.threshold == pytest.approx(0.3850546181201934)
+
+
+def test_psiloqa_qwen35_preset_is_selectable_not_default_and_pins_qwen3():
+    # Present and selectable, but the TabPFN default still leads the registry order.
+    assert presets.PSILOQA_TOKEN_LINEAR_PRESET_QWEN35 in presets.PRESETS
+    assert next(iter(presets.PRESETS)) == 'Probing — Sequence TabPFN (checkpoint)'
+    # The Qwen3-4B landing-seed constants are untouched by the second preset.
+    assert presets.PSILOQA_MODEL_ID == 'Qwen/Qwen3-4B'
+    assert presets.PSILOQA_MODEL_REVISION == '1cfa9a7208912126459214e8b04321603b3df60c'
+
+
+def test_psiloqa_qwen35_census_caption_reports_layer_threshold_and_sha():
+    preset = presets.PRESETS[presets.PSILOQA_TOKEN_LINEAR_PRESET_QWEN35]
+    caption = presets.detector_census_caption(preset)
+    # Real bundled checkpoint: layer 16, τ = 0.39 (0.385…), SHA-256 provenance.
+    assert 'layer 16' in caption
+    assert 'τ = 0.39' in caption
+    assert 'SHA-256-verified checkpoint' in caption
+
+
+def test_psiloqa_qwen35_manifest_rejects_a_wrong_model_checkpoint():
+    # Strict as the Qwen3-4B loader: the bundled Qwen3.5-4B checkpoint fails the default expectations.
+    with pytest.raises(ValueError, match='model_id'):
+        presets.load_psiloqa_probe_manifest(presets.PSILOQA_QWEN35_CHECKPOINT_DIR)
+
+
+def _build_psiloqa_token_probe_with_fakes(
+    monkeypatch, checkpoint_dir, builder=None
+):
     class Config:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
@@ -127,9 +187,8 @@ def _build_psiloqa_token_probe_with_fakes(monkeypatch, checkpoint_dir):
         'sirin.models.inference',
         types.SimpleNamespace(HFConfig=Config, TokenLocatorConfig=Config),
     )
-    return presets._build_probing_token_linear_psiloqa(
-        device='cuda:3', checkpoint_dir=str(checkpoint_dir)
-    )
+    builder = builder or presets._build_probing_token_linear_psiloqa
+    return builder(device='cuda:3', checkpoint_dir=str(checkpoint_dir))
 
 
 def test_openai_token_judge_preset_describes_as_token_heatmap(monkeypatch):

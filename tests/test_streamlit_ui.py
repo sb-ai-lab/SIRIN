@@ -439,6 +439,52 @@ def test_longmemeval_profile_records_every_qwen35_checkpoint():
         assert all(
             checkpoint['path'] for checkpoint in profile['checkpoints'][task].values()
         )
+    # The multi-profile scan still surfaces this 35B profile as the default (first) option.
+    assert ui.longmemeval_profiles()[0][0] == 'LongMemEval / Qwen3.5-35B-A3B'
+
+
+def test_longmemeval_scan_loads_every_qwen35_4b_variant(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    profiles = dict(ui.longmemeval_profiles())
+
+    # The 35B default plus the three 4B memory-variant profiles, all loaded without raising.
+    assert set(profiles) == {
+        'LongMemEval / Qwen3.5-35B-A3B',
+        'Qwen3.5-4B · SimpleMem',
+        'Qwen3.5-4B · LightMem',
+        'Qwen3.5-4B · Mem0',
+    }
+    for label in ('Qwen3.5-4B · SimpleMem', 'Qwen3.5-4B · LightMem', 'Qwen3.5-4B · Mem0'):
+        profile = profiles[label]
+        assert profile['model']['path'] == 'Qwen/Qwen3.5-4B'
+        assert profile['model']['revision'] == '851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a'
+        probing = profile['probing']['hallucination_strict']
+        assert probing['layers'] == [16, 27, 28, 29, 30, 31]
+        assert probing['checkpoint_feature_shape'] == [6, 1, 2560]
+        for task in ('hallucination_strict', 'answerability_strict'):
+            assert set(profile['checkpoints'][task]) == {
+                'linear',
+                'catboost',
+                'tabpfn',
+                'best',
+            }
+            assert all(ck['path'] for ck in profile['checkpoints'][task].values())
+            assert profile['checkpoints'][task]['best']['target'] == 'tabpfn'
+
+
+def test_trusted_sidebar_profile_select_defaults_to_35b(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    st = _SidebarHarness()
+
+    ui._sidebar(st)
+
+    # With >1 profile the sidebar shows a profile select whose first (default) option is the 35B.
+    select = next(
+        (opts for label, opts in st.selectbox_calls if label == 'LongMemEval profile'),
+        None,
+    )
+    assert select is not None
+    assert select[0] == 'LongMemEval / Qwen3.5-35B-A3B'
 
 
 def test_score_heatmap_escapes_text_and_handles_short_scores():
