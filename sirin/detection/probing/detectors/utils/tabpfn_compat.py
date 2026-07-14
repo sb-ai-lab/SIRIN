@@ -33,8 +33,14 @@ for module_name in (
     'add_fingerprint_features_step',
     'shuffle_features_step',
 ):
+    target = f"tabpfn.preprocessing.steps.{module_name}"
+    try:
+        importlib.import_module(target)
+        continue  # newer tabpfn (>= 6) ships this path natively — nothing to alias.
+    except ModuleNotFoundError:
+        pass
     sys.modules.setdefault(
-        f"tabpfn.preprocessing.steps.{module_name}",
+        target,
         importlib.import_module(f"tabpfn.preprocessors.{module_name}"),
     )
 

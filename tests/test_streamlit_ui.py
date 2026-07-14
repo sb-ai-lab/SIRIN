@@ -561,7 +561,9 @@ def test_detector_setup_error_checks_checkpoint_roots(monkeypatch):
     assert 'SIRIN_UI_CHECKPOINT_ROOTS' in error
 
 
-def test_detector_setup_error_requires_sequence_probe_checkpoint():
+def test_detector_setup_error_requires_sequence_probe_checkpoint(monkeypatch):
+    # Live-scoring requirement — hosted (replay-only) deliberately skips it.
+    monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
     error = ui._detector_setup_error(
         {
             'use_hydra': False,
@@ -631,7 +633,9 @@ def test_compare_side_b_accepts_bundled_checkpoint_preset():
     assert error is None
 
 
-def test_detector_setup_error_rejects_api_backend_for_sequence_probe():
+def test_detector_setup_error_rejects_api_backend_for_sequence_probe(monkeypatch):
+    # Live-scoring requirement — hosted (replay-only) deliberately skips it.
+    monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
     error = ui._detector_setup_error(
         {
             'use_hydra': False,
@@ -650,6 +654,7 @@ def test_detector_setup_error_rejects_api_backend_for_sequence_probe():
 def test_detector_setup_error_preflights_sequence_tabpfn_shape(monkeypatch, tmp_path):
     import joblib
 
+    monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
     monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
     joblib.dump(
         {'feature_shapes': [(4, 1, 1, 2048)]},

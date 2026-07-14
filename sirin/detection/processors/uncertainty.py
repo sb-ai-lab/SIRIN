@@ -65,6 +65,11 @@ def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:
         model_wrapper = WhiteboxModel(
             extractor.model,
             extractor.tokenizer,
+            # Fresh-generation runs must honor the template kwargs too (e.g. thinking off):
+            # a Qwen3 otherwise spends the whole token budget inside <think> and the
+            # truncated reasoning becomes the scored "answer" (teacher forcing already
+            # applies these in use_teacher_forcing).
+            chat_template_kwargs=getattr(config, 'chat_template_kwargs', None),
             **getattr(config, 'model_kwargs', {}),
         )
         return model_wrapper, 'Whitebox'

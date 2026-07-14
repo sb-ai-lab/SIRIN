@@ -37,18 +37,18 @@
     ],
     "gold_visibility": "hidden",
     "source_answer_model": "togethercomputer/Pythia-Chat-Base-7B-v0.16",
-    "why_notable": "Two fabricated dates: the answer gives \"March 1, 1883\" and \"March 1, 1963\", but the passage states 13 February 1893 - 4 June 1962. The token API judge tagged both invented dates (2/3 samples agreed on each), and its two spans coincide exactly with the hidden gold annotation (character IoU 1.00).",
+    "why_notable": "Two fabricated dates: the answer gives \"March 1, 1883\" and \"March 1, 1963\", but the passage states 13 February 1893 - 4 June 1962. The token API judge (3/3 valid samples) tagged spans [[14, 67]]; character IoU 0.49 against the hidden gold annotation.",
     "license": "CC-BY-4.0",
     "detector": {
       "preset": "Judge — API Span (zero-shot)",
       "family": "judge",
       "level": "token",
       "score_semantics": "spanAgreement",
-      "judge_model": "Qwen/Qwen3.5-4B",
-      "provider_label": "Custom OpenAI-compatible (local vLLM)",
+      "judge_model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "provider_label": "OpenRouter",
       "temperature": 0.7,
       "requested": 3,
-      "valid": 2
+      "valid": 3
     },
     "judge": {
       "char_scores": [
@@ -66,19 +66,19 @@
         0.0,
         0.0,
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
         1.0,
         1.0,
         1.0,
@@ -92,19 +92,19 @@
         1.0,
         1.0,
         1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
+        0.6666666865348816,
         1.0,
         1.0,
         1.0,
@@ -118,24 +118,20 @@
         1.0,
         1.0,
         1.0,
-        0.0
+        0.6666666865348816
       ],
       "predicted_spans": [
         [
-          27,
-          40
-        ],
-        [
-          53,
-          66
+          14,
+          67
         ]
       ],
-      "generations_sha256": "3a5a6e020e3c94d83929ab67b9853609881d4a42f8f14e74035e5a585b3e9251"
+      "generations_sha256": "8dc671e8890791702d078777c3a407b5659d23b563983a537dbaa72fd6eb279f"
     },
-    "experiment_source": "output/psiloqa_span_qwen35_4b/judge/token_judge_test.jsonl"
+    "experiment_source": "live OpenRouter token-judge run (scripts/dev/make_judge_span_seed.py, 2026-07-15)"
   },
   "integrity": {
     "algorithm": "sha256",
-    "sha256": "d84383ecfa2a286cfeaa8127698237d56838d78bf4e906ac6d13bcda107d11d0"
+    "sha256": "f2e6d8a48364c915ad6084fc521fb84357835643d19041d9d194eea94c495159"
   }
 }

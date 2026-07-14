@@ -54,6 +54,24 @@ def test_single_request_with_logprobs_requested_but_absent_returns_empty_list():
     assert logprobs == []
 
 
+def test_empty_choices_response_is_retried_then_succeeds():
+    """OpenRouter free routes can return HTTP 200 with no choices (observed live);
+    that must count as a failed attempt and retry, not crash the caller."""
+    responses = [types.SimpleNamespace(choices=None), _response('recovered')]
+
+    class _FlakyClient:
+        def __init__(self):
+            create = lambda **kw: responses.pop(0)  # noqa: E731
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=create)
+            )
+
+    adapter = OpenAIModelAdapter(OpenAIConfig(model_path='m', max_retries=2))
+    adapter.load(model=_FlakyClient())
+    out = adapter._make_single_request_sync([], return_logprobs=False)
+    assert out == 'recovered'
+
+
 def test_sequential_batch_without_logprobs_yields_strings():
     adapter = _adapter(_FakeClient(text='x'))
     results = adapter._make_request([[], []], return_logprobs=False, use_async=False)

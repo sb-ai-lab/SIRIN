@@ -22,13 +22,16 @@ def not_hosted(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
 
 
-def test_hosted_visible_presets_are_judges_plus_the_replay_only_probe(hosted):
+def test_hosted_visible_presets_are_judges_plus_every_recorded_replay_preset(hosted):
     visible = presets.visible_presets()
 
     assert visible
-    # Live scoring = judges; the one non-judge entry is the replay-only Qwen3.5-4B probe.
-    assert all(p.family == 'judge' for p in visible[:-1])
-    assert visible[-1].name == QWEN35_PRESET
+    # Live scoring = judges; every other entry is a replay-only preset with a bundled
+    # recorded result (probes, uncertainty, the LongMemEval sequence TabPFN).
+    non_judge = [p.name for p in visible if p.family != 'judge']
+    assert non_judge == list(presets.HOSTED_REPLAY_PRESETS)
+    assert QWEN35_PRESET in non_judge
+    assert sum(1 for p in visible if p.family == 'judge') == 5
 
 
 def test_visible_presets_equal_list_presets_when_not_hosted(not_hosted):
@@ -43,14 +46,9 @@ def test_hosted_shows_the_verbalized_judge_preset(hosted):
     assert names[0] != 'Judge — API Sequence (verbalized confidence)'
 
 
-def test_hosted_offers_the_probe_preset_as_replay_only(hosted):
-    visible = presets.visible_presets()
-
-    # The Qwen3.5-4B probe is selectable (its landing seed replays the recorded result)…
-    assert visible[-1].name == QWEN35_PRESET
-    # …and it is the ONLY non-judge preset; everything else stays judge-family.
-    assert [p.name for p in visible if p.family != 'judge'] == [QWEN35_PRESET]
+def test_hosted_offers_non_judge_presets_as_replay_only(hosted):
     assert presets.hosted_replay_only('probing') is True
+    assert presets.hosted_replay_only('uncertainty') is True
     assert presets.hosted_replay_only('judge') is False
 
 
@@ -100,6 +98,48 @@ def test_hosted_probe_replay_serves_the_recorded_seed(hosted):
     assert run.id != seed.id  # a fresh run, not the landing card itself
 
 
+def test_hosted_replay_serves_each_presets_own_recording_of_the_same_example(hosted):
+    # Several presets record the SAME landing example; the active preset must get its
+    # own result, never another detector's.
+    from sirin.ui.demo_cases import load_psiloqa_span_seed_qwen35
+    from sirin.ui.workspace.seed import build_recorded_replay
+
+    example_id = load_psiloqa_span_seed_qwen35()['example_id']
+    token = build_recorded_replay(example_id, preset='Uncertainty — Token (zero-shot)')
+    sequence = build_recorded_replay(example_id, preset='Uncertainty — Sequence (zero-shot)')
+
+    assert token is not None and sequence is not None
+    assert token.setup_snapshot.detector_preset == 'Uncertainty — Token (zero-shot)'
+    assert sequence.setup_snapshot.detector_preset == 'Uncertainty — Sequence (zero-shot)'
+    assert build_recorded_replay(example_id, preset='No Such Preset') is None
+
+
+def test_hosted_uncertainty_replay_appends_the_recorded_run(hosted):
+    from sirin.ui.workspace.contracts import RunOrigin, SetupSnapshot
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+    from sirin.ui.demo_cases import load_psiloqa_span_seed_qwen35
+
+    example_id = load_psiloqa_span_seed_qwen35()['example_id']
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = SetupSnapshot(
+        detector_preset='Uncertainty — Token (zero-shot)',
+        detector_family='uncertainty',
+        detector_level='token',
+    )
+
+    receipt = controller.handle(
+        _hosted_submit_envelope({'mode': 'recordedReplay', 'exampleId': example_id}),
+        setup=setup,
+    )
+
+    assert receipt.status.value == 'accepted'
+    run = session.state.runs[-1]
+    assert run.origin is RunOrigin.RECORDED_RESULT
+    assert run.setup_snapshot.detector_preset == 'Uncertainty — Token (zero-shot)'
+
+
 def test_hosted_probe_live_scoring_is_rejected_with_actionable_copy(hosted):
     from sirin.ui.workspace.contracts import SetupSnapshot
     from sirin.ui.workspace.controller import WorkspaceController
@@ -145,14 +185,21 @@ def test_hosted_sidebar_defaults_to_judge_span_and_api_backends(hosted):
     assert cfg['device'] == 'cpu'
 
 
-def test_hosted_seed_runs_hero_is_qwen35_probe_without_census(hosted):
+def test_hosted_seed_runs_carry_one_recorded_card_per_replay_preset(hosted):
+    from sirin.ui.workspace.contracts import RunOrigin
     from sirin.ui.workspace.seed import build_seed_runs
 
     runs = build_seed_runs()
 
-    assert runs[-1].setup_snapshot.detector_preset == QWEN35_PRESET
-    assert all(r.setup_snapshot.detector_preset != CENSUS_PRESET for r in runs)
+    # Every replay-only preset lands with its own recorded card — this is also the pin
+    # that HOSTED_REPLAY_PRESETS never promises a preset without a bundled recording.
+    card_presets = {r.setup_snapshot.detector_preset for r in runs}
+    assert set(presets.HOSTED_REPLAY_PRESETS) <= card_presets
     assert any(r.setup_snapshot.detector_family == 'judge' for r in runs)
+    # The hero card stays the Qwen3.5-4B probe, and every card is honestly recorded.
+    assert runs[-1].setup_snapshot.detector_preset == QWEN35_PRESET
+    assert all(r.origin is RunOrigin.RECORDED_RESULT for r in runs)
+    assert len({r.id for r in runs}) == len(runs)
 
 
 def test_non_hosted_seed_runs_keep_the_census_hero(not_hosted):
@@ -186,6 +233,27 @@ def test_shared_env_key_serves_only_the_configured_default_model(monkeypatch):
         )
     # A pasted key is the visitor's own: no restriction.
     require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', 'sk-user')
+
+
+def test_generator_adapter_applies_openrouter_reasoning_policy(monkeypatch):
+    # Without this the demo generator lets a reasoning model overrun the budget and
+    # OpenRouter mirrors the truncated chain-of-thought into content — the "answer" the
+    # judge then fails to echo is thinking text (user-reported on the Space).
+    from sirin.ui.providers import openrouter_reasoning_extra_body
+    from sirin.ui.streamlit_app import _new_generator_adapter
+
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'or-key')
+    monkeypatch.setenv(
+        'SIRIN_OPENROUTER_MODEL', 'nvidia/nemotron-3-super-120b-a12b:free'
+    )
+    default = _new_generator_adapter(
+        'OpenRouter', 'nvidia/nemotron-3-super-120b-a12b:free', 'cpu', '', ''
+    )
+    # The verified demo model generates with reasoning off entirely.
+    assert default.config.extra_body == {'reasoning': {'enabled': False}}
+    assert openrouter_reasoning_extra_body('anything/else') == {
+        'reasoning': {'max_tokens': 1024}
+    }
 
 
 def test_shared_key_guard_is_hosted_only(monkeypatch):

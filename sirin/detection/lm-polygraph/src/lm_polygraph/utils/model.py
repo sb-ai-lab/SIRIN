@@ -404,6 +404,7 @@ class WhiteboxModel(Model):
         model_type: str = "CausalLM",
         generation_parameters: GenerationParameters = GenerationParameters(),
         instruct: bool = False,
+        chat_template_kwargs: dict = None,
     ):
         """
         Parameters:
@@ -412,12 +413,15 @@ class WhiteboxModel(Model):
             model_path (Optional[str]): Unique model path in HuggingFace.
             model_type (str): Additional model specifications.
             parameters (GenerationParameters): parameters to use in model generation. Default: default parameters.
+            chat_template_kwargs (Optional[dict]): extra kwargs for tokenizer.apply_chat_template
+                when instruct=True, e.g. {"enable_thinking": False}.
         """
         super().__init__(model_path, model_type)
         self.model = model
         self.tokenizer = tokenizer
         self.generation_parameters = generation_parameters
         self.instruct = instruct
+        self.chat_template_kwargs = chat_template_kwargs or {}
 
     def _validate_args(self, args):
         """
@@ -640,7 +644,10 @@ class WhiteboxModel(Model):
                 if isinstance(chat, str):
                     chat = [{"role": "user", "content": chat}]
                 formatted_chat = self.tokenizer.apply_chat_template(
-                    chat, add_generation_prompt=True, tokenize=False
+                    chat,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                    **self.chat_template_kwargs,
                 )
                 formatted_texts.append(formatted_chat)
             texts = formatted_texts

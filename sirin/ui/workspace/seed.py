@@ -280,13 +280,19 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
 
     The hero probe seed is added last so it stays the selected card; the judge seed and the second
     (Qwen3.5-4B) probe seed sit beside it when their assets are present. Absent assets are silent —
-    the unchanged landing is the hero probe seed alone. Hosted profile: the census (Qwen3-4B) seed
-    is dropped and the Qwen3.5-4B probe seed, added last, becomes the selected hero.
+    the unchanged landing is the hero probe seed alone. Hosted profile: every replay-only preset
+    lands with its own recorded card (judge seed, bundled recorded runs, census probe) and the
+    Qwen3.5-4B probe seed, added last, stays the selected hero.
     """
     runs: list[RunRecord] = []
     judge = build_judge_seed_run(setup_revision)
     if judge is not None:
         runs.append(judge)
+    if is_hosted():
+        from .recorded_runs import load_recorded_runs
+
+        runs.extend(load_recorded_runs(setup_revision))
+        runs.append(build_seed_run(setup_revision))
     second_probe = build_second_probe_seed_run(setup_revision)
     if second_probe is not None:
         runs.append(second_probe)
@@ -295,22 +301,35 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
     return runs
 
 
-def build_recorded_replay(example_id: str, setup_revision: int = 0) -> RunRecord | None:
-    """Fresh RECORDED_RESULT run for the seed whose example matches, or None.
+def build_recorded_replay(
+    example_id: str, setup_revision: int = 0, preset: str | None = None
+) -> RunRecord | None:
+    """Fresh RECORDED_RESULT run matching the example (and, when given, the preset), or None.
 
     Serves "replay" for presets that cannot score live on the hosted CPU demo: the run is
     rebuilt from the verified bundled asset through the same derivation path as the landing
     seed (fresh id and timestamps, recorded provenance intact) — never from mutable session
-    history, so a cleared run list cannot poison it.
+    history, so a cleared run list cannot poison it. Several presets can record the same
+    example, so the active preset selects its own result.
     """
-    for build in (build_judge_seed_run, build_second_probe_seed_run,
-                  lambda revision: build_seed_run(revision)):
-        try:
-            record = build(setup_revision)
-        except FileNotFoundError:
+    from .recorded_runs import load_recorded_runs
+
+    def seed_records():
+        for build in (build_judge_seed_run, build_second_probe_seed_run,
+                      lambda revision: build_seed_run(revision)):
+            try:
+                record = build(setup_revision)
+            except FileNotFoundError:
+                continue
+            if record is not None:
+                yield record
+
+    for record in (*seed_records(), *load_recorded_runs(setup_revision)):
+        if record.inputs.example_id != example_id:
             continue
-        if record is not None and record.inputs.example_id == example_id:
-            return record
+        if preset is not None and record.setup_snapshot.detector_preset != preset:
+            continue
+        return record
     return None
 
 

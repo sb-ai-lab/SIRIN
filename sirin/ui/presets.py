@@ -20,6 +20,7 @@ from sirin.ui.providers import (
     CUSTOM_PROVIDER,
     OPENROUTER_PROVIDER,
     custom_openai_base_url,
+    openrouter_reasoning_extra_body,
     provider_models,
     require_shared_key_model,
     resolve_api_provider,
@@ -177,15 +178,16 @@ def _resolve_judge(
     return model_path, provider.api_key, provider.base_url
 
 
-def _judge_extra_body(api_provider: str) -> dict[str, Any] | None:
+def _judge_extra_body(api_provider: str, model: str = '') -> dict[str, Any] | None:
     """Per-provider request extension for a judge endpoint; None when nothing is needed.
 
     Custom (trusted-local vLLM): a Qwen judge otherwise lands every generation in its reasoning
     channel, so every verbatim echo is invalid (JudgeAnnotationError); disabling thinking makes the
     verdict/annotation stable. Opt back in with SIRIN_CUSTOM_JUDGE_THINKING=1.
-    OpenRouter: cap chain-of-thought at 1024 tokens ('reasoning' is OpenRouter's official knob) —
-    uncapped reasoning overruns the completion budget, finish_reason='length', and OpenRouter mirrors
-    the truncated reasoning into content, which then fails the verbatim echo check.
+    OpenRouter: model-aware ``reasoning`` extension (off for the verified demo model, capped
+    otherwise) — an uncapped chain-of-thought overruns the completion budget,
+    finish_reason='length', and OpenRouter mirrors the truncated reasoning into content, which
+    then fails the verbatim echo check.
     OpenAI/Anthropic: None — they may reject unknown fields.
     """
     if api_provider == CUSTOM_PROVIDER:
@@ -193,7 +195,7 @@ def _judge_extra_body(api_provider: str) -> dict[str, Any] | None:
             return None
         return {'chat_template_kwargs': {'enable_thinking': False}}
     if api_provider == OPENROUTER_PROVIDER:
-        return {'reasoning': {'max_tokens': 1024}}
+        return openrouter_reasoning_extra_body(model)
     return None
 
 
@@ -231,6 +233,10 @@ def _build_uncertainty(
         or (_TOK_UNC_METHODS if level == 'token' else _SEQ_UNC_METHODS),
         model_kwargs={'instruct': True},  # apply the chat template inside lm-polygraph
         max_new_tokens=uncertainty_max_new_tokens or 256,
+        # Demo convention (same as the stream path and the judges): thinking off. A Qwen3
+        # otherwise spends the whole budget inside <think>, and the truncated reasoning
+        # becomes the scored generation — token alignment then fails outright.
+        chat_template_kwargs={'enable_thinking': False},
     )
     detector_config = UncertaintyDetectorConfig(aggregation_method='mean')
     if level == 'token':
@@ -350,7 +356,7 @@ def _build_openai_sequence_judge(
             model_path=model_path,
             api_key=api_key,
             base_url=base_url,
-            extra_body=_judge_extra_body(api_provider),
+            extra_body=_judge_extra_body(api_provider, model_path),
         )
     )
     # temperature 0 keeps the verdict deterministic; verdict_max_tokens=512 lets the hosted demo's
@@ -403,7 +409,7 @@ def _build_openai_verbalized_judge(
             model_path=model_path,
             api_key=api_key,
             base_url=base_url,
-            extra_body=_judge_extra_body(api_provider),
+            extra_body=_judge_extra_body(api_provider, model_path),
         )
     )
     judge = SequenceOpenAIVerbalizedJudge(
@@ -461,7 +467,7 @@ def _build_openai_claim_judge(
             model_path=model_path,
             api_key=api_key,
             base_url=base_url,
-            extra_body=_judge_extra_body(api_provider),
+            extra_body=_judge_extra_body(api_provider, model_path),
         )
     )
     judge = ClaimOpenAIJudge(
@@ -513,7 +519,7 @@ def _build_openai_token_judge(
             model_path=model_path,
             api_key=api_key,
             base_url=base_url,
-            extra_body=_judge_extra_body(api_provider),
+            extra_body=_judge_extra_body(api_provider, model_path),
         )
     )
     judge = TokenOpenAIJudge(
@@ -1002,16 +1008,35 @@ def list_presets() -> list[Preset]:
     return list(PRESETS.values())
 
 
+# Every non-judge preset with a bundled recorded result (landing seed or recorded-run
+# asset) — hosted visitors select these and replay the verified recording; live scoring
+# needs weights/checkpoints the CPU Space does not ship. tests/test_ui_hosted.py pins
+# this list against the actually bundled assets (no false availability). Deliberately
+# absent: 'Probing — Answerability TabPFN (checkpoint)' — its external checkpoint cannot
+# currently be loaded faithfully (its pipeline needs a tabpfn SquashingScaler no
+# installable build reproduces), so it has no honest recording to serve.
+HOSTED_REPLAY_PRESETS: tuple[str, ...] = (
+    'Probing — Sequence TabPFN (checkpoint)',
+    PSILOQA_TOKEN_LINEAR_PRESET,
+    PSILOQA_TOKEN_LINEAR_PRESET_QWEN35,
+    'Uncertainty — Sequence (zero-shot)',
+    'Uncertainty — Sequence · Sequence Probability (zero-shot)',
+    'Uncertainty — Token (zero-shot)',
+)
+
+
 def visible_presets() -> list[Preset]:
     """Presets offered by the UI.
 
-    Hosted (CPU, public) profile: the API judges run live, plus the Qwen3.5-4B probe as a
-    REPLAY-ONLY preset — its landing seed replays the verified recorded result (the Space
-    bundles neither its checkpoint nor a GPU), appended last so a judge stays the default.
+    Hosted (CPU, public) profile: the API judges run live; every preset in
+    ``HOSTED_REPLAY_PRESETS`` is selectable as REPLAY-ONLY — its landing card and Replay
+    serve the verified recorded result (the Space bundles neither weights nor a GPU).
     """
     if is_hosted():
-        judges = [p for p in list_presets() if p.family == 'judge']
-        return [*judges, PRESETS[PSILOQA_TOKEN_LINEAR_PRESET_QWEN35]]
+        return [
+            p for p in list_presets()
+            if p.family == 'judge' or p.name in HOSTED_REPLAY_PRESETS
+        ]
     return list_presets()
 
 

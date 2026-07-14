@@ -2,6 +2,19 @@
 
 This changelog records user-facing and runtime changes to the canonical Streamlit UI. The static Hugging Face replay deployment is maintained separately.
 
+## 2026-07-15 — hosted round 3: clean generation + every detector replayable
+
+### Fixed
+
+- **Hosted "Generate & score" produced reasoning text as the answer** (user-reported): the API generator adapter sent no `reasoning` extension, so nemotron overran the 192-token budget, OpenRouter mirrored the truncated chain-of-thought into `content`, and the span judge then (correctly) dropped every non-echoing generation. Generation and all OpenRouter judges now disable reasoning outright for the configured demo model (verified live: clean answers at temperature 0.7, zero reasoning tokens billed) and keep the 1024-token cap for visitor-picked models (`openrouter_reasoning_extra_body`).
+- **Uncertainty presets crashed on thinking models locally**: lm-polygraph's fresh-generation path ignored `chat_template_kwargs`, so a Qwen3 spent the whole budget inside `<think>` and token alignment failed ("Answer text was not found…"). The vendored `WhiteboxModel` now honors the template kwargs and the uncertainty presets pass `enable_thinking: False` (the demo convention everywhere else).
+- OpenRouter free routes occasionally return HTTP 200 with no `choices`; the adapter now treats that as a failed attempt and retries instead of crashing the run.
+- `tabpfn_compat` no longer breaks on tabpfn ≥ 6 (aliases the legacy module layout only when the native one is absent).
+
+### Added
+
+- **Recorded replay for every non-judge preset on hosted** (`HOSTED_REPLAY_PRESETS`): real runs recorded locally through the product path (`scripts/dev/record_replay_runs.py` → `export_run` portable format, SHA-256-verified on load) for Uncertainty Sequence / Sequence Probability / Token (Qwen3-4B, thinking off) and the LongMemEval Sequence TabPFN (bundled checkpoint on Qwen3.5-35B-A3B hiddens, its own curated case). Hosted landing seeds one recorded card per preset (census probe card returns; Qwen3.5-4B hero stays selected last) and Replay serves the active preset's own recording of the example. Deliberately absent: Answerability TabPFN — its external checkpoint's pipeline needs a tabpfn `SquashingScaler` no installable build reproduces faithfully, so it has no honest recording.
+
 ## 2026-07-14 — collaborator merge: class-token judge scoring, verbalized judge, UE fusion
 
 Ported the collaborator's `sirin-final` change-set (their uncommitted work on the

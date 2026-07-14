@@ -105,6 +105,21 @@ def resolve_api_provider(
     )
 
 
+def openrouter_reasoning_extra_body(model: str) -> dict:
+    """OpenRouter ``reasoning`` request extension for one model (generation and judges).
+
+    The configured default demo model is verified live to support disabling reasoning
+    outright — no chain-of-thought to overrun the completion budget (OpenRouter mirrors
+    a truncated chain-of-thought into ``content``, which reads as a garbage answer and
+    fails the judges' verbatim echo), and no free-tier quota burned on thinking. Other
+    models are not verified to accept ``enabled: false``, so they keep the official cap
+    that stops an unbounded chain-of-thought from overrunning the budget.
+    """
+    if model == provider_models(OPENROUTER_PROVIDER)[0]:
+        return {'reasoning': {'enabled': False}}
+    return {'reasoning': {'max_tokens': 1024}}
+
+
 def require_shared_key_model(provider: str, model: str, pasted_key: str | None) -> None:
     """On the hosted profile, the server's shared env key serves ONLY the configured
     default model (``SIRIN_OPENROUTER_MODEL``).

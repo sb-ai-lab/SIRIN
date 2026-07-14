@@ -258,15 +258,14 @@ class WorkspaceController:
                 raise ValueError('Recorded replay requires a bundled example.')
             if replay_only:
                 # The hosted Space ships no probe checkpoints and no GPU: replays under a
-                # non-judge preset serve the verified recorded seed result, rebuilt from
-                # the bundled asset (never live scoring, never mutable history).
+                # non-judge preset serve the verified recorded result for THIS preset,
+                # rebuilt from the bundled asset (never live scoring, never mutable history).
                 record = build_recorded_replay(
-                    example_id, self.session.state.setup_revision
+                    example_id,
+                    self.session.state.setup_revision,
+                    preset=setup.detector_preset,
                 )
-                if (
-                    record is None
-                    or record.setup_snapshot.detector_preset != setup.detector_preset
-                ):
+                if record is None:
                     raise ValueError(
                         'On the hosted demo this preset serves its recorded result only, '
                         'and this example has no recorded result for it. Pick a '

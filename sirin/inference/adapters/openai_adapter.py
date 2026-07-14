@@ -92,14 +92,24 @@ class OpenAIModelAdapter(ModelAdapterBase):
         self._is_loaded = True
         lg.info(f'Loaded OpenAI client for model: {self.config.model_path}')
 
+    @staticmethod
+    def _require_choices(response):
+        """A response with no choices (observed on OpenRouter free routes under provider
+        hiccups: HTTP 200 with an error body) must count as a failed attempt and retry."""
+        if not getattr(response, 'choices', None):
+            raise ValueError('OpenAI-compatible response returned no choices.')
+        return response
+
     async def _create_with_retry_async(self, messages: List[Dict], **create_kwargs):
         """One async chat completion with exponential-backoff retry."""
         if self.config.extra_body:
             create_kwargs.setdefault('extra_body', self.config.extra_body)
         for attempt in range(self.config.max_retries):
             try:
-                return await self._async_client.chat.completions.create(
-                    model=self.config.model_path, messages=messages, **create_kwargs
+                return self._require_choices(
+                    await self._async_client.chat.completions.create(
+                        model=self.config.model_path, messages=messages, **create_kwargs
+                    )
                 )
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
@@ -113,8 +123,10 @@ class OpenAIModelAdapter(ModelAdapterBase):
             create_kwargs.setdefault('extra_body', self.config.extra_body)
         for attempt in range(self.config.max_retries):
             try:
-                return self._client.chat.completions.create(
-                    model=self.config.model_path, messages=messages, **create_kwargs
+                return self._require_choices(
+                    self._client.chat.completions.create(
+                        model=self.config.model_path, messages=messages, **create_kwargs
+                    )
                 )
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')

@@ -27,6 +27,7 @@ from sirin.ui.providers import (
     API_PROVIDER_KEY_ENVS,
     custom_openai_base_url,
     local_openai_models,
+    openrouter_reasoning_extra_body,
     provider_models,
     require_shared_key_model,
     resolve_api_provider,
@@ -786,12 +787,21 @@ def _new_generator_adapter(
         # An explicit pasted key wins; '' falls back to the provider env var inside resolve.
         provider = resolve_api_provider(backend, custom_base_url, api_key=api_key or None)
         require_shared_key_model(backend, model_path, api_key or None)
+        # Same reasoning policy as the judges: without it a reasoning model overruns the
+        # generation budget and OpenRouter mirrors the truncated chain-of-thought into
+        # content — the "answer" the detectors then score is thinking text, not an answer.
+        extra_body = (
+            openrouter_reasoning_extra_body(model_path)
+            if backend == OPENROUTER_PROVIDER
+            else None
+        )
         return OpenAIModelAdapter(
             OpenAIConfig(
                 model_path=model_path,
                 device='cpu',
                 base_url=provider.base_url,
                 api_key=provider.api_key,
+                extra_body=extra_body,
             )
         )
     if backend == 'vLLM':
@@ -1333,6 +1343,14 @@ def _compare_side_b_error(cfg: dict[str, Any], st: Any, preset_name: str) -> str
 
 
 def _detector_setup_error(cfg: dict[str, Any]) -> str | None:
+    from sirin.ui import presets
+
+    active = presets.PRESETS.get(cfg.get('preset_name') or '')
+    if active is not None and presets.hosted_replay_only(active.family):
+        # Hosted replay-only presets never build a live detector: no checkpoint or
+        # backend requirement applies, and a setup error would wrongly disable the
+        # Replay capability.
+        return None
     if (
         cfg.get('preset_name') == 'Probing — Sequence TabPFN (checkpoint)'
         and cfg.get('backend')

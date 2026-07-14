@@ -266,7 +266,7 @@ def test_every_uncertainty_and_judge_preset_has_a_one_line_census_caption():
         assert len(caption) <= 80, preset.name
 
 
-def _build_openai_sequence_judge_with_fakes(monkeypatch, builder=None):
+def _build_openai_sequence_judge_with_fakes(monkeypatch, builder=None, **builder_kwargs):
     monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
 
@@ -307,7 +307,9 @@ def _build_openai_sequence_judge_with_fakes(monkeypatch, builder=None):
         types.SimpleNamespace(OpenAIConfig=FakeConfig),
     )
 
-    return (builder or presets._build_openai_judge)(api_provider='OpenRouter')
+    return (builder or presets._build_openai_judge)(
+        api_provider='OpenRouter', **builder_kwargs
+    )
 
 
 def test_answerability_judge_preset_is_verdict_answerability(monkeypatch):
@@ -443,14 +445,27 @@ def test_openai_judge_never_sends_extra_body(monkeypatch):
     assert token.model_adapter.config.extra_body is None
 
 
-def test_openrouter_judges_cap_reasoning_tokens(monkeypatch):
-    # Uncapped reasoning overruns the completion budget (finish_reason='length') and OpenRouter
-    # mirrors the truncated CoT into content, failing the verbatim echo check; the 'reasoning'
-    # extra_body is OpenRouter's official cap.
+def test_openrouter_judges_disable_reasoning_for_the_default_model(monkeypatch):
+    # The configured demo model is verified live to accept reasoning {'enabled': False}:
+    # no chain-of-thought to overrun the completion budget (OpenRouter mirrors a truncated
+    # CoT into content, failing the verbatim echo check) and no quota burned on thinking.
     token = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenRouter')
-    assert token.model_adapter.config.extra_body == {'reasoning': {'max_tokens': 1024}}
+    assert token.model_adapter.config.extra_body == {'reasoning': {'enabled': False}}
     sequence = _build_openai_sequence_judge_with_fakes(monkeypatch)  # OpenRouter provider
-    assert sequence.model_adapter.config.extra_body == {'reasoning': {'max_tokens': 1024}}
+    assert sequence.model_adapter.config.extra_body == {'reasoning': {'enabled': False}}
+
+
+def test_openrouter_judges_cap_reasoning_for_other_models(monkeypatch):
+    # A visitor-picked model is not verified to accept 'enabled': False, so it keeps the
+    # official cap that stops an unbounded chain-of-thought from overrunning the budget.
+    # The pasted key marks the model choice as the visitor's own (hosted-safe).
+    token = _build_openai_token_judge_with_fakes(
+        monkeypatch,
+        provider='OpenRouter',
+        judge_model='qwen/qwen3-8b',
+        judge_api_key='sk-visitor',
+    )
+    assert token.model_adapter.config.extra_body == {'reasoning': {'max_tokens': 1024}}
 
 
 def test_custom_judge_thinking_opt_out_env(monkeypatch):
@@ -526,7 +541,7 @@ def test_openrouter_judge_does_not_use_openai_key(monkeypatch):
 
 
 def _build_openai_token_judge_with_fakes(
-    monkeypatch, provider='OpenRouter', set_provider_key=True
+    monkeypatch, provider='OpenRouter', set_provider_key=True, **builder_kwargs
 ):
     # The builder imports the real span-tag prompt constants from this submodule; cache the real
     # module so it survives the fake `sirin.detection.judging` namespace registered below.
@@ -581,7 +596,7 @@ def _build_openai_token_judge_with_fakes(
         types.SimpleNamespace(OpenAIConfig=FakeConfig),
     )
 
-    return presets._build_openai_token_judge(api_provider=provider)
+    return presets._build_openai_token_judge(api_provider=provider, **builder_kwargs)
 
 
 def test_answerability_preset_uses_env_checkpoint(monkeypatch, tmp_path):
