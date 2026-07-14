@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Offline replay of verified SIRIN inspection artifacts.">
+    <title>SIRIN UI Demo</title>
+    <style>
+      :root {
+        --bg: #10091c;
+        --panel: rgba(26, 16, 44, .82);
+        --line: rgba(255, 255, 255, .14);
+        --text: #f6f1fc;
+        --muted: #c9bedb;
+        --mint: #a9f0d6;
+        --pink: #f07bbb;
+        --violet: #af8dff;
+        --danger: #ff637f;
+        color-scheme: dark;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--text);
+        background: linear-gradient(rgba(16, 9, 28, .88), rgba(16, 9, 28, .93)),
+          url("assets/silk_bg.jpg") center / cover fixed, var(--bg);
+        font: 16px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      .shell { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 64px; }
+      .hero { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+      .logo { width: 58px; height: 58px; object-fit: contain; }
+      h1, h2, h3, p { margin: 0; }
+      h1 { font-size: clamp(2rem, 5vw, 3.2rem); letter-spacing: -.05em; }
+      h2 { font-size: 1.15rem; margin-bottom: 12px; }
+      .lede, .muted { color: var(--muted); }
+      .notice { margin: 26px 0 18px; padding: 14px 16px; border-left: 3px solid var(--mint); color: var(--muted); background: rgba(169, 240, 214, .08); }
+      .tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 24px; }
+      button {
+        border: 1px solid var(--line); border-radius: 999px; padding: 9px 15px; cursor: pointer;
+        color: var(--text); background: rgba(255, 255, 255, .06); font: inherit; transition: .18s ease;
+      }
+      button:hover, button[aria-selected="true"] { border-color: var(--pink); background: rgba(240, 123, 187, .18); box-shadow: 0 0 0 3px rgba(240, 123, 187, .1); }
+      .grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .9fr); gap: 18px; }
+      .panel { border: 1px solid var(--line); border-radius: 18px; padding: clamp(18px, 3vw, 28px); background: var(--panel); backdrop-filter: blur(14px); box-shadow: 0 16px 48px rgba(0, 0, 0, .2); }
+      .case-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+      .question { margin-top: 4px; color: var(--muted); font-size: 1.04rem; }
+      .pill { flex: none; border-radius: 999px; padding: 5px 10px; color: #190b20; background: var(--mint); font-size: .8rem; font-weight: 750; }
+      .response { margin-top: 22px; padding: 18px; border-radius: 14px; border: 1px solid rgba(240, 123, 187, .32); background: rgba(240, 123, 187, .08); }
+      .eyebrow { display: block; margin-bottom: 7px; color: var(--pink); font-size: .73rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+      .answer { font-size: 1.24rem; font-weight: 750; line-height: 1.9; }
+      .heat { border-bottom: 3px solid var(--pink); border-radius: 4px; padding: .05em .15em; }
+      .gold { margin-top: 11px; color: var(--muted); font-size: .9rem; }
+      .gold strong { color: var(--mint); }
+      .section { margin-top: 22px; }
+      .evidence { display: grid; gap: 10px; }
+      .evidence article { padding: 13px 14px; border-left: 3px solid var(--violet); border-radius: 0 10px 10px 0; background: rgba(175, 141, 255, .09); }
+      .evidence h3 { color: var(--mint); font-size: .85rem; }
+      .evidence p { margin-top: 4px; color: var(--muted); font-size: .94rem; }
+      .metric { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+      .metric div { padding: 12px; border-radius: 10px; background: rgba(255, 255, 255, .055); }
+      .metric span { display: block; color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; }
+      .metric strong { display: block; margin-top: 2px; font-size: .9rem; }
+      details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+      summary { cursor: pointer; color: var(--mint); font-weight: 700; }
+      pre { overflow: auto; margin: 12px 0 0; padding: 12px; border-radius: 10px; background: rgba(0, 0, 0, .28); color: var(--muted); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+      footer { margin-top: 26px; color: var(--muted); font-size: .85rem; }
+      a { color: var(--mint); }
+      .error { color: #ffd5dd; border-left-color: var(--danger); }
+      @media (max-width: 760px) { .shell { width: min(100% - 24px, 1160px); padding-top: 24px; } .grid { grid-template-columns: 1fr; } .case-head { display: block; } .pill { display: inline-block; margin-top: 10px; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <img class="logo" src="assets/logo.png" alt="SIRIN logo">
+        <div>
+          <h1>SIRIN</h1>
+          <p class="lede">Semantic Inconsistency Recognition &amp; Inspection Nexus</p>
+        </div>
+      </header>
+      <p class="notice">Offline replay of verified LongMemEval artifacts. This public Space does not load model weights, run detectors, make API calls, or retain user data.</p>
+      <nav id="tabs" class="tabs" aria-label="Recorded cases"></nav>
+      <section id="app" aria-live="polite"><p class="muted">Loading verified artifacts…</p></section>
+      <footer>For the full live workflow, visit <a href="https://github.com/sb-ai-lab/SIRIN">the SIRIN repository</a>.</footer>
+    </main>
+    <script>
+      const tabs = document.querySelector('#tabs');
+      const app = document.querySelector('#app');
+      const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[character]));
+      const scoreColor = score => `hsl(${Math.round(148 - Math.max(0, Math.min(1, score)) * 148)} 86% 66%)`;
+
+      function renderedAnswer(caseData) {
+        const trace = caseData.token_trace;
+        if (trace?.token_pieces?.length) {
+          return trace.token_pieces.map((piece, index) => {
+            const score = trace.normalized_scores[index] ?? 0;
+            return `<span class="heat" title="relative token uncertainty: ${score.toFixed(3)}" style="border-bottom-color:${scoreColor(score)};background:${scoreColor(score)}22">${escapeHtml(piece)}</span>`;
+          }).join('');
+        }
+        const score = Number(caseData.score ?? 0);
+        return `<span class="heat" title="recorded sequence score: ${score.toFixed(3)}" style="border-bottom-color:${scoreColor(score)};background:${scoreColor(score)}22">${escapeHtml(caseData.prediction)}</span>`;
+      }
+
+      function render(caseData) {
+        const provenance = caseData.provenance || {};
+        const metric = caseData.token_trace
+          ? 'Token uncertainty · localization only'
+          : `Recorded sequence score · ${Number(caseData.score).toFixed(3)}`;
+        app.innerHTML = `
+          <div class="grid">
+            <article class="panel">
+              <div class="case-head"><div><h2>${escapeHtml(caseData.title)}</h2><p class="question">${escapeHtml(caseData.question)}</p></div><span class="pill">${metric}</span></div>
+              <section class="response"><span class="eyebrow">Recorded response</span><div class="answer">${renderedAnswer(caseData)}</div><p class="gold">Dataset reference: <strong>${escapeHtml(caseData.gold)}</strong></p></section>
+              <section class="section"><span class="eyebrow">Decisive evidence</span><div class="evidence">${(caseData.evidence_excerpts || []).map(evidence => `<article><h3>${escapeHtml(evidence.cue || evidence.label)} · rank ${escapeHtml(evidence.rank)}${evidence.date ? ` · ${escapeHtml(evidence.date)}` : ''}</h3><p>${escapeHtml(evidence.content)}</p></article>`).join('')}</div></section>
+            </article>
+            <aside class="panel">
+              <span class="eyebrow">Recorded scorer</span><h2>${escapeHtml(caseData.detector)}</h2>
+              <div class="metric"><div><span>Dataset</span><strong>${escapeHtml(provenance.dataset || '—')}-${escapeHtml(provenance.dataset_variant || '—')}</strong></div><div><span>Model</span><strong>${escapeHtml(provenance.model || '—')}</strong></div><div><span>Protocol</span><strong>${escapeHtml(provenance.score_protocol || '—')}</strong></div><div><span>Generation temp.</span><strong>${escapeHtml(provenance.generation_temperature ?? '—')}</strong></div></div>
+              <details><summary>Artifact provenance</summary><pre>${escapeHtml(JSON.stringify({ sample_id: caseData.sample_id, prompt_sha256: caseData.prompt_sha256, messages_sha256: caseData.messages_sha256, detector: caseData.detector, score: caseData.score, provenance }, null, 2))}</pre></details>
+            </aside>
+          </div>`;
+        [...tabs.children].forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.id === caseData.sample_id)));
+      }
+
+      fetch('assets/demo_cases.json')
+        .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+        .then(payload => {
+          const cases = payload.cases || [];
+          if (!cases.length) throw new Error('No recorded cases were found.');
+          cases.forEach((caseData, index) => {
+            const tab = document.createElement('button');
+            tab.type = 'button'; tab.dataset.id = caseData.sample_id; tab.textContent = caseData.title;
+            tab.setAttribute('aria-selected', String(index === 0)); tab.addEventListener('click', () => render(caseData)); tabs.append(tab);
+          });
+          render(cases[0]);
+        })
+        .catch(error => { app.innerHTML = `<p class="notice error">Unable to load the verified demo artifacts: ${escapeHtml(error.message)}</p>`; });
+    </script>
+  </body>
+</html>

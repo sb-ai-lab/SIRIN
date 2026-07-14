@@ -1,132 +1,92 @@
+
 # SIRIN Streamlit UI
 
-A local chat demo for SIRIN: chat with a model, then inspect hallucination and
-answerability signals with a bespoke visualization per detector type — on a
-holographic *silk* backdrop (a self-contained baked gradient recreated from the design
-reference, no external assets) with dark frosted-glass panels.
+SIRIN has one canonical Streamlit entrypoint and a unified component workspace:
+
+- **Analyze** generates and scores an answer, scores a supplied answer, or runs answerability.
+- **Runs** keeps terminal run records and supports a separate quick-prompt composer.
+- **Diagnostics** summarizes the runtime; sensitive attention, capture, path, and unload controls are available only in trusted-local mode.
+
+The native Streamlit sidebar remains authoritative for generator, detector, provider consent, and appearance. Theme and background motion are set only in the sidebar; the workspace header stays compact and the component mirrors the canonical server-side appearance state. Python owns execution and validation, while the component owns workspace navigation, drafts, and result presentation.
 
 ## Start
-
-Activate your preferred Python environment first, then:
 
 ```bash
 python -m pip install -e '.[ui]'
 python -m streamlit run sirin/ui/streamlit_app.py
 ```
 
-Open the URL Streamlit prints (usually `http://localhost:8501`).
+The unified workspace uses the `sirin.workspace.v2` session namespace. Historical runs retain the setup snapshot used to produce them.
 
-For API-backed generation or judge presets, set the matching provider key first:
+The new workspace is unconditional; no `SIRIN_UI_WORKSPACE` feature flag is required. Runtime wheels include the compiled component assets.
 
-```bash
-export OPENAI_API_KEY=...      # OpenAI provider
-export OPENROUTER_API_KEY=...  # OpenRouter provider
-export ANTHROPIC_API_KEY=...   # Anthropic provider
-```
+For API-backed generation or judges, paste the provider key into the masked sidebar field and confirm the destination. A pasted key is held only in this browser session — never persisted, logged, exported, or echoed — and is keyed per provider, so it never follows a provider switch. If no key is pasted, the run falls back to the provider-specific environment variable (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY`); the sidebar caption shows which of the three states applies. When the judge and generator target the same provider, one pasted key serves both. Keys never fall back between providers.
 
-## Use
+## Analyze
 
-1. In the sidebar, pick a **generator** backend (`HF`, `OpenAI`, `OpenRouter`, `Anthropic`, `vLLM`), model, and device.
-2. Pick a **detector preset** (see below). Checkpoint-based presets show a
-   *Checkpoint directory* field.
-3. Type a message in the chat box — put the context and question together, e.g.
-   `Context: ... \n Question: ...` — or click a suggestion chip.
-4. SIRIN generates an answer, runs the selected detector on the
-   `[user, assistant]` pair, and renders the analysis inline under the answer.
-5. Use **Attention tools** in the sidebar only when you need diagnostics:
-   **Cached explorer** opens offline feature-cache inspection, and **Live capture**
-   opens the GPU-backed Qwen attention capture path.
+Faithfulness is the default task. Enter context and a question, then use **Generate & score**. Faithfulness also supports **Score supplied answer**. Answerability accepts only context and question and does not invoke a generator. Incompatible detector/task combinations remain unavailable rather than being relabelled.
 
-## Detector presets
+Curated examples fill the editor but do not run automatically. A recorded replay uses the exact verified stored answer and messages, then runs detection live. It is labelled **Recorded answer · live detection** and is distinct from **Generated now**, **Supplied answer · live detection**, and **Imported snapshot**. SHA-256 verification establishes artifact integrity, not answer truthfulness. When a curated example is selected, replaying its verified answer becomes the primary action and generation steps back to secondary; with no example selected, generation stays primary.
 
-Built directly in Python (`sirin/ui/presets.py`), so the UI can reach detectors the
-Hydra `train` config cannot:
+A fresh shared-safe faithfulness session lands on a seeded **Recorded result** card, not an empty editor. It shows the census span-probe result — graded spans, threshold, and layer recorded once on 2026-07-14 by running the live probe over the verified held-out PsiloQA answer through the product detect path, with the same-day recorded-replay export attributed alongside the stored per-character trace — so a first-time viewer sees a full graded result immediately. Because its scores were recorded, not computed live, it is labelled **Recorded result · verified — detection not live** and is deliberately distinct from **Recorded answer · live detection**: SHA-256 checks (payload, messages, and exact per-token character alignment) establish artifact integrity, never live detection. The seed is a first-class run — exportable, immutable, and rerunnable — and its **Run it live** action starts the real recorded replay (verified answer, live probe) for the same case. It is created once per new session and is never recreated after it is cleared, deleted, or once any other run exists; it is not added to imported sessions.
 
-| Preset | Runs without a checkpoint? | Output |
-|--------|---------------------------|--------|
-| **Uncertainty — Sequence (zero-shot)** | ✅ local HF model | raw uncertainty score + threshold |
-| **Uncertainty — Token (zero-shot)** | ✅ local HF model | per-token uncertainty highlight over the answer |
-| **Judge — API (zero-shot)** | ✅ API (needs provider key) | verdict + confidence + reasoning |
-| **Probing — Sequence TabPFN (checkpoint)** | ❌ needs a trained checkpoint dir | calibrated probability gauge |
+Execution uses a queued/running/terminal controller handshake. The browser shows an immediate honest busy state while Python performs synchronous generation and detection. Browser delivery of live token chunks is not guaranteed; a run may move directly from busy to a complete or partial answer. A successful generation is retained if detection fails, and retrying detection is a new explicit action.
 
-Uncertainty and OpenAI-judge scores are **not** calibrated probabilities, so they are
-shown as a raw score against the detector's threshold — never as a 0–100% gauge. The
-checkpoint presets light up once you point them at a trained SIRIN checkpoint directory
-(`config.joblib` + `model.tabpfn_fit`).
+Invalid detector setup is rejected before a run is queued, so generation is not started when scoring cannot run. Unexpected detector failures preserve a generated answer and emit the same correlation reference in the UI and server log.
 
-## Shared-Safe Defaults
+## Appearance and motion
 
-The UI defaults to shared-safe controls:
+The Streamlit host owns a single theme-matched silk background — `silk_bg.jpg` on Light, a purpose-graded `silk_bg_dark.jpg` on Dark — behind a radial readability scrim. The component canvas is transparent; compact token-based glass surfaces provide contrast behind dense text and controls without rendering a second background image. One design-token source (`sirin/ui/tokens.json`) drives both the host CSS and the component theme.
 
-- OpenAI uses only `OPENAI_API_KEY` and `https://api.openai.com/v1`.
-- OpenRouter uses only `OPENROUTER_API_KEY` and `https://openrouter.ai/api/v1`.
-- Anthropic uses only `ANTHROPIC_API_KEY` and `https://api.anthropic.com/v1/`.
-- API keys never fall back across providers.
-- External API calls require a per-session sidebar confirmation because prompts, generated
-  answers, and judge prompts may leave the server.
-- Provider base URLs, device, tokenizer, Hydra, and raw path controls are limited by
-  default; API and local model names remain editable.
-- Set `SIRIN_OPENAI_MODEL`, `SIRIN_OPENROUTER_MODEL`, or `SIRIN_ANTHROPIC_MODEL`
-  to choose API model defaults without editing code.
-- `Max tokens` remains user-controlled and uncapped.
+Light and dark modes style both the component and native Streamlit controls. Motion supports **Static**, **Subtle**, and **Lively** — background drift is compositor-only and result reveals play once per run — with `prefers-reduced-motion` respected. Appearance state is server-owned and mirrored by the component, so appearance changes never create rerun feedback loops.
 
-For single-user local development, trusted mode restores the sharp controls:
+## Runs and portable JSON
 
-```bash
-export SIRIN_UI_TRUSTED_LOCAL=1
-```
+Runs records successful, partial, failed, and catchably interrupted terminal runs for the current Streamlit session. Each record retains the setup snapshot used at execution time. Imported records are immutable; rerunning one creates a linked new run under the current setup.
 
-Trusted mode allows custom OpenAI-compatible generator endpoints, arbitrary local
-model/device/tokenizer fields, raw Explorer paths, checkpoint paths, and the Advanced
-Hydra detector expander.
-Use it only when the Streamlit server is not exposed to untrusted users.
+Portable data is plain UTF-8 JSON:
 
-In shared-safe mode, local files must be under explicit roots:
+- `sirin.run`, version 1: one run, maximum 5 MiB.
+- `sirin.bundle`, version 1: up to 50 runs, maximum 10 MiB.
+
+Exports include inputs, visible answers/results, safe setup, timestamps, hashes, and provenance. They exclude secrets, absolute paths, provider consent, hidden reasoning, tensors, traces, model objects, Hydra targets, and raw exceptions. Import validation rejects unknown versions or fields, duplicate keys, excessive nesting, invalid Unicode or spans, non-finite numbers, and ID collisions.
+
+## Detector and score semantics
+
+Presets are built from `sirin/ui/presets.py`. Sequence, token/span, claim, multiclass, judge, and uncertainty results retain their native semantics. Uncalibrated confidence, logits, probe scores, and uncertainty values are never presented as probabilities. A sequence score is not copied across tokens to imply localization. Token and span evidence is accompanied by equivalent readable details rather than relying on color alone.
+
+Fresh shared-safe sessions default to **Probing — Token Linear · PsiloQA/Qwen3-4B** with the bundled PsiloQA checkpoint and pinned Qwen3-4B revision. The Sequence TabPFN preset remains available, but requires a trained checkpoint directory. Presets with incomplete setup disable generation and detection until corrected.
+
+Token evidence is accepted only when feature scores, predictions, tokenizer offsets, and displayed answer text align exactly. Answer-token indices and character offsets come from the same full rendered tokenization, including prompt/answer boundary tokens. Alignment failures are detection failures, never silent successful runs with an empty result.
+
+The live UI keeps the existing 30,000-character combined detector-input guard and current generation-token controls. Exact verified demo prompts retain their existing exception. Setup changes do not mutate historical result labels.
+
+## Trust and provenance
+
+Shared-safe mode is a private single-user redaction and resource-hardening profile, not authentication or hostile multi-tenant isolation. Put deployments behind authenticated TLS and keep the raw Streamlit port private.
+
+- External calls require per-destination, per-session consent.
+- Arbitrary local paths, custom endpoints, Hydra controls, live attention capture, filesystem provenance capture, and unload actions require `SIRIN_UI_TRUSTED_LOCAL=1`.
+- Shared-safe paths remain constrained by `SIRIN_UI_DATA_ROOTS` and `SIRIN_UI_CHECKPOINT_ROOTS`.
+- Browser errors are sanitized; raw provider/CUDA errors, stack traces, credentials, response bodies, environment values, and absolute paths are not component payloads.
+- Model/checkpoint provenance and score semantics travel with each run.
+
+Do not expose trusted-local mode to untrusted users.
+
+## Component development and packaging
+
+Runtime wheels contain the component manifest and committed Vite build, so users do not need Node or network access to start the UI. Contributors rebuilding the component use Node 20 or newer:
 
 ```bash
-export SIRIN_UI_DATA_ROOTS=/path/to/datasets:/path/to/feature_caches
-export SIRIN_UI_CHECKPOINT_ROOTS=/path/to/checkpoints
+cd sirin/ui/workspace/frontend
+npm ci
+npm run build
 ```
 
-## Visualizations
+Commit the generated `build/` assets together with frontend source changes. The package-data configuration includes the component manifest, npm manifests, and recursive build assets. Global Streamlit CSS uses purposeful local font fallbacks; the component remains style-isolated.
 
-- **Sequence** — calibrated probes show a gauge with a threshold marker + verdict badge;
-  uncertainty/judge show a raw-score chip + verdict.
-- **Token** — a character heatmap over the answer (per-sample min–max normalized for
-  uncertainty) rendered as inline evidence chips with hover metadata. Missing score
-  coverage is neutral, not green.
-- **Claim** — one card per extracted fact (probability + verdict) with an overall verdict.
-- **Attention tools** — LookbackLens matrices show low-context-attention intensity as
-  a diagnostic signal. They are not calibrated hallucination probabilities unless a
-  detector explicitly produced calibrated token scores.
-- **Reasoning** — judge-generated text, when available, in an expander.
-- **Per-method uncertainty** and **Debug** (feature-processor shapes) are shown in expanders.
+User-facing UI changes are recorded in the [development UI changelog](development/CHANGELOG.md).
 
-Chat is the default app surface. Explorer and Live Capture are sidebar-launched tools,
-not a three-way top-level view switch. If the tool surface grows beyond the sidebar
-launcher, move those tools to native Streamlit pages as the fallback navigation model.
+## Deferred paper features
 
-## Appearance
-
-The **Appearance → Background motion** control in the sidebar switches the silk backdrop
-between **Subtle** (default gentle drift), **Static** (no animation — lightest for low-power
-devices), and **Lively**. The app also honours the OS `prefers-reduced-motion` setting
-(forces static). All accent colours are defined once in `sirin/ui/styles.py` (`PALETTE`) and
-reused by the result visualizers, so the whole app stays on one palette.
-
-## Notes
-
-- Uncertainty detectors re-generate and score their own answer (lm-polygraph), so the token
-  heatmap is drawn over the text the detector actually scored (`last_generated_text`), which
-  can differ from an answer you edited by hand.
-- The generator model and the detector's feature extractor are shared when both use the HF
-  backend (one model in VRAM).
-
-## Smoke checks
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 python -m pytest -q tests/test_streamlit_ui.py
-python -m ruff check sirin/ui/
-python sirin/ui/styles.py && python sirin/ui/presets.py && python sirin/ui/visualizers.py
-PYTHONDONTWRITEBYTECODE=1 python -c "from streamlit.testing.v1 import AppTest; a=AppTest.from_file('sirin/ui/streamlit_app.py'); a.run(timeout=60); assert not a.exception, a.exception"
-```
+Compare views, detector agreement matrices, context heat bars, detailed latency breakdowns, an Add Detector guide, RAGTruth/Mu-SHROOM galleries, memory controls, and multi-model warm pooling are intentionally deferred. The static Hugging Face replay deployment remains separate and unchanged.

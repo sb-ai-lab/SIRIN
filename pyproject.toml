@@ -54,8 +54,26 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = [
-    "streamlit>=1,<2",
+    "streamlit>=1.58,<2",
 ]
+
+[[tool.streamlit.component.components]]
+name = "sirin_workspace"
+asset_dir = "ui/workspace/frontend/build"
+
+[tool.setuptools.package-data]
+"sirin.ui" = ["assets/*.json", "assets/*.png", "assets/*.jpg", "static/*.jpg"]
+"sirin.ui.workspace" = [
+    "pyproject.toml",
+    "frontend/package.json",
+    "frontend/package-lock.json",
+    "frontend/build/*",
+    "frontend/build/**/*",
+    "frontend/src/assets/fonts/*-OFL.txt",
+]
+
+[tool.setuptools.packages.find]
+include = ["sirin*"]
 
 [tool.ruff.lint]
 select = ["Q002", "Q003"]

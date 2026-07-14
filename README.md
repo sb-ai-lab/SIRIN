@@ -59,7 +59,7 @@ python -m pip install -e '.[ui]'
 python -m streamlit run sirin/ui/streamlit_app.py
 ```
 
-Open the URL printed by Streamlit (for instance `http://localhost:8501`). In the sidebar, select a generator and detector (choose a zero-shot preset if you do not have a trained checkpoint), then enter a context and question in the chat box. API-backed options require the corresponding provider key and confirmation of external API calls. See [the UI guide](docs/ui.md) for details.
+Open the URL printed by Streamlit (for instance `http://localhost:8501`). The unified workspace provides **Analyze**, **Runs**, and **Diagnostics** while the native sidebar owns detector and generator setup. API-backed options require the corresponding provider key and confirmation of external API calls. See [the UI guide](docs/ui.md) for behavior, trust, provenance, and contributor build details.
 
 ## 🧩 Architecture & Overview
 
