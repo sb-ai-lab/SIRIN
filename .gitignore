@@ -2,6 +2,8 @@
 trace.json
 _private_*.yaml
 .vscode
+output
+demo
 outputs
 outputs_debug
 __pycache__
@@ -15,6 +17,7 @@ notebooks/
 .claude
 .agents
 .superpowers/
+.playwright-cli
 *.csv
 poetry.lock
 nohup.out
@@ -35,3 +38,19 @@ sirin/detection/lm-polygraph/build/
 sirin/detection/lm-polygraph/dist/
 sirin/detection/lm-polygraph/*.egg-info/
 sirin/detection/lm-polygraph/src/*.egg-info/
+
+# secrets - never commit
+.env
+.env.*
+
+# local packaging snapshot at the repo root (recovered demo source lives here; not a build input)
+/build/
+
+# frontend dependencies (the committed Vite build/ under frontend is kept)
+node_modules/
+
+# local screenshots and photos dropped at the repo root
+/photo_*.jpg
+/2026-*.jpg
+/Screenshot*.png
+/*.jpeg
