@@ -99,7 +99,9 @@ def test_n1_logprobs_return_shape_unchanged():
     logprobs = types.SimpleNamespace(
         content=[
             types.SimpleNamespace(
-                top_logprobs=[types.SimpleNamespace(logprob=-0.25)], logprob=-0.25
+                top_logprobs=[types.SimpleNamespace(token='1', logprob=-0.25)],
+                token='1',
+                logprob=-0.25,
             )
         ]
     )
@@ -113,7 +115,8 @@ def test_n1_logprobs_return_shape_unchanged():
     )
 
     assert texts == ['only']
-    assert lps == [[[-0.25]]]
+    # (token, logprob) tuples: the token string is what lets judges read class probabilities.
+    assert lps == [[[('1', -0.25)]]]
 
 
 def test_finish_reasons_align_with_generations_across_top_up():

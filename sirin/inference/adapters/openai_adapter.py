@@ -13,6 +13,28 @@ from sirin.inference.model_manager import manage_active_model
 from sirin.models.inference import OpenAIConfig
 
 
+def _extract_sequence_logprobs(token_logprobs) -> List[List[Tuple[str, float]]]:
+    """Flatten an OpenAI ``logprobs.content`` payload to ``[[(token, logprob), ...], ...]``.
+
+    One inner list per generated position, holding that position's top-k alternatives in
+    descending-probability order (the API's own ordering).
+
+    The token STRING is load-bearing and must not be dropped. A classifier judge needs to
+    know *which* class a logprob belongs to; a bare float only says how confident the model
+    was, which is identical for a confident "0" and a confident "1". Returning floats alone
+    is what forced `SequenceOpenAIJudge`/`ClaimOpenAIJudge` into `prob = -logprob`, a
+    class-blind score that yields chance-level AUROC.
+    """
+    sequence_logprobs = []
+    for token_info in token_logprobs:
+        if token_info.top_logprobs:
+            alternatives = [(t.token, t.logprob) for t in token_info.top_logprobs]
+        else:
+            alternatives = [(token_info.token, token_info.logprob)]
+        sequence_logprobs.append(alternatives)
+    return sequence_logprobs
+
+
 class OpenAIModelAdapter(ModelAdapterBase):
     """OpenAI API model implementation for inference."""
 
@@ -69,22 +91,6 @@ class OpenAIModelAdapter(ModelAdapterBase):
         self._model_name = self.config.model_path
         self._is_loaded = True
         lg.info(f'Loaded OpenAI client for model: {self.config.model_path}')
-
-    
-    @staticmethod
-    def _extract_logprobs(choice) -> List:
-        """Flatten one choice's token logprobs to the adapter's [[float,...],...] shape."""
-        token_logprobs = choice.logprobs.content
-        if not token_logprobs:
-            return []
-        sequence_logprobs = []
-        for token_info in token_logprobs:
-            if token_info.top_logprobs:
-                top_logprobs = [top_token.logprob for top_token in token_info.top_logprobs]
-            else:
-                top_logprobs = [token_info.logprob]
-            sequence_logprobs.append(top_logprobs)
-        return sequence_logprobs
 
     async def _create_with_retry_async(self, messages: List[Dict], **create_kwargs):
         """One async chat completion with exponential-backoff retry."""
@@ -152,7 +158,8 @@ class OpenAIModelAdapter(ModelAdapterBase):
             return_logprobs
             and getattr(response.choices[0], 'logprobs', None) is not None
         ):
-            return generated_text, self._extract_logprobs(response.choices[0])
+            token_logprobs = response.choices[0].logprobs.content
+            return generated_text, _extract_sequence_logprobs(token_logprobs or [])
         return (generated_text, []) if return_logprobs else generated_text
 
     def _make_single_request_sync(
@@ -181,7 +188,8 @@ class OpenAIModelAdapter(ModelAdapterBase):
             return_logprobs
             and getattr(response.choices[0], 'logprobs', None) is not None
         ):
-            return generated_text, self._extract_logprobs(response.choices[0])
+            token_logprobs = response.choices[0].logprobs.content
+            return generated_text, _extract_sequence_logprobs(token_logprobs or [])
         return (generated_text, []) if return_logprobs else generated_text
 
     async def _make_batch_async(

@@ -1,6 +1,11 @@
 from sirin.detection.judging.judges.utils.decoder import (
     prepare_decoder_inputs_with_labels,
 )
+from sirin.detection.judging.judges.utils.logprobs import (
+    parse_binary_prediction,
+    probabilities_and_predictions,
+    probability_of_positive_class,
+)
 from sirin.detection.judging.judges.utils.metrics import (
     calibrate_and_compute_metrics,
     process_logits_to_probs,
