@@ -95,3 +95,6 @@ class OpenAIConfig(ModelAdapterBaseConfig):
     timeout: int = 30
     max_retries: int = 3
     proxy_url: Optional[str] = None
+    # Provider-specific request extensions forwarded verbatim on every chat completion
+    # (e.g. vLLM's {'chat_template_kwargs': {'enable_thinking': False}}). None sends nothing.
+    extra_body: Optional[dict] = None

@@ -85,6 +85,8 @@ class OpenAIModelAdapter(ModelAdapterBase):
 
     async def _create_with_retry_async(self, messages: List[Dict], **create_kwargs):
         """One async chat completion with exponential-backoff retry."""
+        if self.config.extra_body:
+            create_kwargs.setdefault('extra_body', self.config.extra_body)
         for attempt in range(self.config.max_retries):
             try:
                 return await self._async_client.chat.completions.create(
@@ -98,6 +100,8 @@ class OpenAIModelAdapter(ModelAdapterBase):
 
     def _create_with_retry_sync(self, messages: List[Dict], **create_kwargs):
         """One synchronous chat completion with exponential-backoff retry."""
+        if self.config.extra_body:
+            create_kwargs.setdefault('extra_body', self.config.extra_body)
         for attempt in range(self.config.max_retries):
             try:
                 return self._client.chat.completions.create(
