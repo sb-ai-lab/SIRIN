@@ -106,17 +106,19 @@ def resolve_api_provider(
 
 
 def require_shared_key_model(provider: str, model: str, pasted_key: str | None) -> None:
-    """On the hosted profile, the server's shared env key covers free models only.
+    """On the hosted profile, the server's shared env key serves ONLY the configured
+    default model (``SIRIN_OPENROUTER_MODEL``).
 
     The model field is visitor-editable, so without this gate a public Space carrying a
-    funded OPENROUTER_API_KEY secret would let any visitor bill paid models to it. A
-    pasted key is the visitor's own — no restriction. Non-hosted deployments (local
+    funded OPENROUTER_API_KEY secret would let any visitor bill arbitrary models to it.
+    A pasted key is the visitor's own — no restriction. Non-hosted deployments (local
     dev, campaign scripts) keep full env-key freedom.
     """
     if pasted_key or not is_hosted():
         return
-    if provider == OPENROUTER_PROVIDER and not model.endswith(':free'):
+    if provider == OPENROUTER_PROVIDER and model != provider_models(provider)[0]:
         raise ValueError(
-            f'The shared demo key covers free OpenRouter models only — paste your own '
-            f'API key in the sidebar to use {model}.'
+            f'The shared demo key serves only the default model '
+            f'({provider_models(provider)[0]}) — paste your own API key in the '
+            f'sidebar to use {model}.'
         )

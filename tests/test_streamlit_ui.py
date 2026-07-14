@@ -1290,8 +1290,9 @@ def test_judge_preset_reserves_consent_slot_under_judge_key(monkeypatch):
     slot = cfg.pop('_consent_slot')
 
     assert slot is not None
-    # The checkbox renders into the reserved slot and, unticked, denies consent.
-    assert ui._external_confirmed(st, cfg, slot=slot) is False
+    # The checkbox renders into the reserved slot; it now defaults to checked, so the
+    # harness (which returns the widget default) reports consent granted.
+    assert ui._external_confirmed(st, cfg, slot=slot) is True
 
 
 def test_non_judge_sidebar_reserves_no_consent_slot(monkeypatch):

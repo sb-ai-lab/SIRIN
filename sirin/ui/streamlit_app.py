@@ -1404,13 +1404,14 @@ def _external_confirmed(
     if not requires_external_confirmation(cfg):
         return True
     # A judge preset reserves a slot under the Judge API key input; otherwise the checkbox lands
-    # at the end of the sidebar's generator settings, as before.
+    # at the end of the sidebar's generator settings, as before. Checked by default — the demo's
+    # whole point is the external judge call; unticking it still blocks every external request.
     with slot if slot is not None else st.sidebar:
         return st.checkbox(
             'Allow external API calls',
-            value=False,
+            value=True,
             key=key,
-            help='Context, questions, generated answers, and judge prompts may be sent to the selected external API provider.',
+            help='Context, questions, generated answers, and judge prompts may be sent to the selected external API provider. Untick to block all external calls.',
         )
 
 

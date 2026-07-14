@@ -67,19 +67,26 @@ def test_non_hosted_seed_runs_keep_the_census_hero(not_hosted):
     assert any(r.setup_snapshot.detector_preset == QWEN35_PRESET for r in runs)
 
 
-def test_shared_env_key_is_limited_to_free_models_on_hosted(monkeypatch):
+def test_shared_env_key_serves_only_the_configured_default_model(monkeypatch):
     import pytest
 
     from sirin.ui.providers import OPENROUTER_PROVIDER, require_shared_key_model
 
     monkeypatch.setenv('SIRIN_UI_HOSTED', '1')
-    # Shared env key + free model: allowed (the demo default path).
+    monkeypatch.setenv(
+        'SIRIN_OPENROUTER_MODEL', 'nvidia/nemotron-3-super-120b-a12b:free'
+    )
+    # Shared env key + the configured default: allowed (the demo path).
     require_shared_key_model(
         OPENROUTER_PROVIDER, 'nvidia/nemotron-3-super-120b-a12b:free', None
     )
-    # Shared env key + paid model: blocked with actionable copy.
+    # Any other model — even another free one — is blocked with actionable copy.
     with pytest.raises(ValueError, match='paste your own'):
         require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', None)
+    with pytest.raises(ValueError, match='paste your own'):
+        require_shared_key_model(
+            OPENROUTER_PROVIDER, 'qwen/qwen3-8b:free', None
+        )
     # A pasted key is the visitor's own: no restriction.
     require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', 'sk-user')
 
@@ -90,3 +97,30 @@ def test_shared_key_guard_is_hosted_only(monkeypatch):
     monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
     # Local/campaign use keeps full env-key freedom.
     require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', None)
+
+
+def test_external_consent_defaults_to_checked():
+    import sirin.ui.streamlit_app as ui
+
+    captured = {}
+
+    class _Sidebar:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class _St:
+        sidebar = _Sidebar()
+
+        @staticmethod
+        def checkbox(label, value=None, **kwargs):
+            captured['value'] = value
+            return value
+
+    confirmed = ui._external_confirmed(
+        _St, {'preset_name': 'Judge — API Span (zero-shot)', 'backend': 'OpenRouter'}
+    )
+    assert captured['value'] is True
+    assert confirmed is True
