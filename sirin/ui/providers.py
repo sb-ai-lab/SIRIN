@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import urllib.request
 from dataclasses import dataclass
 
 from sirin.ui.path_policy import is_trusted_local
@@ -32,6 +34,25 @@ API_PROVIDER_DEFAULT_MODELS = {
     OPENROUTER_PROVIDER: 'openai/gpt-4.1-mini',
     ANTHROPIC_PROVIDER: 'claude-sonnet-4-6',
 }
+LOCAL_OPENAI_DEFAULT_BASE_URL = 'http://localhost:8000/v1'
+
+
+def custom_openai_base_url() -> str:
+    """Custom-provider base URL: the env override, else the local vLLM default."""
+    return os.getenv('SIRIN_CUSTOM_OPENAI_BASE_URL', '') or LOCAL_OPENAI_DEFAULT_BASE_URL
+
+
+def local_openai_models(base_url: str, timeout: float = 1.5) -> list[str]:
+    """Model ids served by an OpenAI-compatible ``/models`` endpoint; [] when unreachable."""
+    try:
+        with urllib.request.urlopen(
+            f"{base_url.rstrip('/')}/models", timeout=timeout
+        ) as response:
+            payload = json.load(response)
+    except (OSError, ValueError):
+        return []
+    data = payload.get('data') if isinstance(payload, dict) else None
+    return [str(item['id']) for item in data or [] if isinstance(item, dict) and item.get('id')]
 
 
 @dataclass(frozen=True)

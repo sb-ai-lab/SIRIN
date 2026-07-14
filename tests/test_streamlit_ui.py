@@ -789,6 +789,9 @@ class _SidebarHarness:
     def expander(self, label, **kwargs):
         return self
 
+    def container(self):
+        return self
+
     def checkbox(self, label, value=False, **kwargs):
         return value
 
@@ -1160,6 +1163,85 @@ def test_judge_provider_model_is_editable_not_allowlisted(monkeypatch):
     assert cfg['judge_model'] == 'gpt-4.1'
     assert ('Judge model', 'gpt-4.1-mini') in st.text_input_calls
     assert not any(label == 'Judge model' for label, _ in st.selectbox_calls)
+
+
+def _judge_preset_sidebar(monkeypatch, **harness_kwargs):
+    from sirin.ui import presets
+
+    monkeypatch.setattr(
+        presets,
+        'list_presets',
+        lambda: [_Preset(name='Judge — API Token (zero-shot)', family='judge')],
+    )
+    return _SidebarHarness(**harness_kwargs)
+
+
+def test_trusted_custom_judge_lists_local_models(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.setattr(
+        ui, 'local_openai_models', lambda base_url, timeout=1.5: ['Qwen/Qwen3.5-4B']
+    )
+    st = _judge_preset_sidebar(
+        monkeypatch,
+        selectbox_values={'Judge provider': ui.CUSTOM_PROVIDER, 'Backend': 'HF'},
+    )
+
+    cfg = ui._sidebar(st)
+
+    assert cfg['judge_provider'] == ui.CUSTOM_PROVIDER
+    assert cfg['judge_model'] == 'Qwen/Qwen3.5-4B'
+    assert ('Judge model', ['Qwen/Qwen3.5-4B']) in st.selectbox_calls
+    assert not any(label == 'Judge model' for label, _ in st.text_input_calls)
+
+
+def test_custom_judge_falls_back_to_text_input_when_no_local_server(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.setattr(ui, 'local_openai_models', lambda base_url, timeout=1.5: [])
+    st = _judge_preset_sidebar(
+        monkeypatch,
+        selectbox_values={'Judge provider': ui.CUSTOM_PROVIDER, 'Backend': 'HF'},
+    )
+
+    cfg = ui._sidebar(st)
+
+    assert any(label == 'Judge model' for label, _ in st.text_input_calls)
+    assert not any(label == 'Judge model' for label, _ in st.selectbox_calls)
+    assert cfg['judge_provider'] == ui.CUSTOM_PROVIDER
+
+
+def test_local_judge_model_probe_is_cached_per_session(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ui,
+        'local_openai_models',
+        lambda base_url, timeout=1.5: calls.append(base_url) or [],
+    )
+    st = _SidebarHarness()
+
+    assert ui._local_judge_models(st) == []
+    assert ui._local_judge_models(st) == []
+
+    assert len(calls) == 1
+
+
+def test_judge_preset_reserves_consent_slot_under_judge_key(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    st = _judge_preset_sidebar(monkeypatch, selectbox_values={'Backend': 'HF'})
+
+    cfg = ui._sidebar(st)
+    slot = cfg.pop('_consent_slot')
+
+    assert slot is not None
+    # The checkbox renders into the reserved slot and, unticked, denies consent.
+    assert ui._external_confirmed(st, cfg, slot=slot) is False
+
+
+def test_non_judge_sidebar_reserves_no_consent_slot(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+
+    cfg = ui._sidebar(_SidebarHarness())
+
+    assert cfg.pop('_consent_slot') is None
 
 
 def test_detection_view_model_handles_sequence_token_and_claim_outputs():

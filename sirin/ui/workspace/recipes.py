@@ -115,7 +115,7 @@ def detector_recipes() -> list[DetectorRecipe]:
             id='wrap_openai_judge',
             title='Wrap an OpenAI-compatible endpoint as a judge',
             description=(
-                'Point SIRIN at any OpenAI-compatible chat endpoint and score faithfulness with an '
+                'Point SIRIN at any OpenAI-compatible chat endpoint and score hallucinations with an '
                 'LLM-as-judge. No training, no checkpoint — just a model id, key, and base URL.'
             ),
             code=_WRAP_OPENAI_JUDGE,

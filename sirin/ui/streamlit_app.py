@@ -24,6 +24,8 @@ from sirin.ui.providers import (
     OPENAI_PROVIDER,
     OPENROUTER_PROVIDER,
     API_PROVIDER_KEY_ENVS,
+    custom_openai_base_url,
+    local_openai_models,
     provider_models,
     resolve_api_provider,
 )
@@ -988,10 +990,20 @@ def _api_key_input(st: Any, provider: str, *, label: str) -> str:
     return str(pasted or '')
 
 
+def _local_judge_models(st: Any) -> list[str]:
+    """Models served by the Custom judge endpoint, probed once per session (silent when down)."""
+    base_url = custom_openai_base_url()
+    cache_key = f'local_judge_models:{base_url}'
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = local_openai_models(base_url)
+    return list(st.session_state[cache_key])
+
+
 def _sidebar(st: Any) -> dict[str, Any]:
     from sirin.ui import presets
 
     key_rendered: set[str] = set()
+    consent_slot = None
 
     with st.sidebar:
         st.html('<p class="sirin-side-heading">Detector</p>')
@@ -1031,12 +1043,20 @@ def _sidebar(st: Any) -> dict[str, Any]:
             if is_trusted_local():
                 judge_providers.append(CUSTOM_PROVIDER)
             judge_provider = st.selectbox('Judge provider', judge_providers)
-            judge_model = st.text_input(
-                'Judge model',
-                value=provider_models(judge_provider)[0],
+            local_models = (
+                _local_judge_models(st) if judge_provider == CUSTOM_PROVIDER else []
             )
+            if local_models:
+                judge_model = st.selectbox('Judge model', local_models)
+            else:
+                judge_model = st.text_input(
+                    'Judge model',
+                    value=provider_models(judge_provider)[0],
+                )
             judge_api_key = _api_key_input(st, judge_provider, label='Judge API key')
             key_rendered.add(judge_provider)
+            # Reserved for the consent checkbox so _external_confirmed renders it right here.
+            consent_slot = st.container()
 
         checkpoint_dir = ''
         if preset.requires_checkpoint:
@@ -1159,6 +1179,8 @@ def _sidebar(st: Any) -> dict[str, Any]:
         'config_name': _clean_field(config_name),
         'overrides_text': _clean_field(overrides_text),
         'hydra_checkpoint': _clean_path_field(hydra_checkpoint),
+        # Popped by the caller before cfg is digested/exported; never part of run identity.
+        '_consent_slot': consent_slot,
     }
 
 
@@ -1303,10 +1325,13 @@ def _external_confirmed(
     cfg: dict[str, Any],
     *,
     key: str = 'external_api_consent',
+    slot: Any = None,
 ) -> bool:
     if not requires_external_confirmation(cfg):
         return True
-    with st.sidebar:
+    # A judge preset reserves a slot under the Judge API key input; otherwise the checkbox lands
+    # at the end of the sidebar's generator settings, as before.
+    with slot if slot is not None else st.sidebar:
         return st.checkbox(
             'Allow external API calls',
             value=False,
@@ -1485,6 +1510,7 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
         st,
         cfg,
         key='sirin.workspace.v2.external_api_consent',
+        slot=cfg.pop('_consent_slot', None),
     )
     setup_error = _detector_setup_error(cfg)
     _appearance_sidebar(st, key_prefix='sirin.workspace.v2.')

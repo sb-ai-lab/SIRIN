@@ -18,11 +18,19 @@ This changelog records user-facing and runtime changes to the canonical Streamli
 
 - Every preset now derives a truthful score meaning (calibrated probability / raw score vs decision threshold / relative within answer / judge agreement / verdict) with distinct card copy; sequence thresholded scores render as a decision band against τ.
 - Model loading routes through ModelManager: switching local models evicts the previous one (`SIRIN_UI_MAX_ACTIVE_MODELS`, default 1); stateless API adapters skip the manager.
+- The Analyze task is labelled **Hallucination**, matching the paper's "contextual hallucination detection / query answerability" pairing; the portable-JSON task key stays `faithfulness`, so existing exports keep importing.
+- Scoring/generating is always the pink primary action, placed right of the secondary **Replay recorded answer** button.
+- The workspace content fills the shell's padded width instead of a 960px column; the Runs and Compare layouts share it.
+- Background motion is perceptible immediately: larger drift amplitudes, shorter cycles (Subtle 45s, Lively 16s), and each cycle starts at its midpoint instead of an ease-in-out standstill.
+- The "Allow external API calls" consent renders directly under the Judge API key whenever a judge preset is active (one session-wide checkbox, unchanged key and semantics).
+- The Custom judge provider (trusted-local) defaults to `http://localhost:8000/v1` when `SIRIN_CUSTOM_OPENAI_BASE_URL` is unset and lists the served models from `/v1/models` (1.5s probe, cached per session, silent when nothing is running).
 
 ### Fixed
 
 - The sequence API judge prompt never embedded the dialogue (missing `{sample}` placeholder) — every verdict scored an empty conversation; it now embeds the dialogue and forces a bare leading digit so the one-token logprob verdict cannot collapse into a JSON opener.
 - Empty provider generations count as invalid judge votes instead of crashing detection.
+- An API judge on a route that returns no logprobs — or a reasoning model that spends the one-token verdict budget on thinking — no longer fabricates a "supported" verdict or crashes with a generic "detection failed": digit verdicts render honestly without a probability, and non-verdicts surface an actionable message naming the cause.
+- The Theme and Background-motion dropdowns open above their trigger, so the last options are reachable at any viewport height (previously clipped below the fold; the old fix only nudged them on ≤720px viewports).
 
 ## 2026-07-14
 

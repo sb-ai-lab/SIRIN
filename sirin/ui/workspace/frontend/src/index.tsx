@@ -137,6 +137,12 @@ function titleCase(value: string | undefined): string {
   return value.replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+// Display label only: the paper calls the task (contextual) hallucination detection, while
+// "faithfulness" stays the protocol-v1 wire value inside exports and digests.
+function taskLabel(task: string | undefined): string {
+  return task === "faithfulness" ? "Hallucination" : titleCase(task)
+}
+
 function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
@@ -515,7 +521,7 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
   const capabilities = payload.capabilities ?? {}
   const extendedCapabilities = capabilities as typeof capabilities & { canAnswerability?: boolean | Capability }
   const setupTask = String((payload.setup as (SetupSummary & { task?: TaskName }) | undefined)?.task ?? "faithfulness") as TaskName
-  const detectorCapability: boolean | Capability = setupTask === draft.task ? true : { enabled: false, reason: `The active detector supports ${titleCase(setupTask)}, not ${titleCase(draft.task)}.` }
+  const detectorCapability: boolean | Capability = setupTask === draft.task ? true : { enabled: false, reason: `The active detector supports ${taskLabel(setupTask)}, not ${taskLabel(draft.task)}.` }
   const taskCapability = draft.task === "answerability" ? (extendedCapabilities.canAnswerability ?? detectorCapability) : detectorCapability
   const generationCapability = draft.task === "faithfulness" && draft.mode === "generate" ? capabilities.canGenerate : true
   const hasGroundingInput = draft.prompt.trim().length > 0 || (draft.context.trim().length > 0 && draft.question.trim().length > 0)
@@ -568,7 +574,7 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
     <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} onSelect={chooseExample} />
     <form className="analysis-form" onSubmit={submit}>
       <div className="form-row">
-        <Field label="Task"><Select value={draft.task} onChange={(event) => { const task = event.target.value as TaskName; setDraft({ ...draft, task, mode: task === "answerability" ? "generate" : draft.mode }, true) }}><option value="faithfulness" disabled={setupTask !== "faithfulness"}>Faithfulness</option><option value="answerability" disabled={!enabled(extendedCapabilities.canAnswerability ?? (setupTask === "answerability"))}>Answerability</option></Select></Field>
+        <Field label="Task"><Select value={draft.task} onChange={(event) => { const task = event.target.value as TaskName; setDraft({ ...draft, task, mode: task === "answerability" ? "generate" : draft.mode }, true) }}><option value="faithfulness" disabled={setupTask !== "faithfulness"}>Hallucination</option><option value="answerability" disabled={!enabled(extendedCapabilities.canAnswerability ?? (setupTask === "answerability"))}>Answerability</option></Select></Field>
         {draft.task === "faithfulness" && <Field label="Answer source"><Select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value as AnalyzeDraft["mode"] }, true)}><option value="generate" disabled={!enabled(capabilities.canGenerate)}>Generate an answer</option><option value="supplied">Score supplied answer</option></Select></Field>}
       </div>
       {draft.prompt && <details className="prompt-disclosure"><summary><svg className="disclosure-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><span>Exact model prompt</span><span className="disclosure-count">{draft.prompt.length.toLocaleString()} characters</span></summary><Field label="Prompt"><textarea rows={5} value={draft.prompt} placeholder="Verified example or imported prompt…" onChange={(event) => setDraft({ ...draft, prompt: event.target.value, exampleId: null })} onBlur={() => setDraft(draft, true)} /></Field></details>}
@@ -579,10 +585,10 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
       {!enabled(generationCapability) && <p className="field-error">{disabledReason(generationCapability) ?? "Generation is not available with the active setup."}</p>}
       {draft.sourceRunId && <div className="inline-notice info"><b>Imported run prepared</b><span>Review these inputs, then submit explicitly with the current setup.</span></div>}
       <div className="form-actions">
-        {/* When a recorded example is selected, replaying its verified answer is the primary path; the
-            generate button steps back to secondary. With no example selected, generate stays primary. */}
-        {recordedCta && <button type="button" className="primary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
-        <button className={recordedCta ? "secondary" : "primary"} type="submit" disabled={!canSubmit || busy}><Icon name="spark" />{draft.task === "answerability" ? "Check answerability" : draft.mode === "supplied" ? "Score answer" : "Generate & score"}</button>
+        {/* Scoring/generating is always the pink primary CTA, placed right of the replay button;
+            replaying a selected example's verified answer is the secondary path. */}
+        {recordedCta && <button type="button" className="secondary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
+        <button className="primary" type="submit" disabled={!canSubmit || busy}><Icon name="spark" />{draft.task === "answerability" ? "Check answerability" : draft.mode === "supplied" ? "Score answer" : "Generate & score"}</button>
         {/* Compare: side A is the sidebar detector, side B is a preset from the same catalog. Both score
             the SAME answer A produces/receives — the honest, apples-to-apples comparison. */}
         {availablePresets.length > 0 && <button type="button" className="quiet" disabled={busy} aria-expanded={compareOpen} onClick={() => setCompareOpen((value) => !value)}>Compare detectors…</button>}
@@ -660,7 +666,7 @@ function RunList({ runs, selectedId, onSelect, onAnalyze }: { runs: RunRecord[];
   const filtered = runs.filter((run) => (status === "all" || run.status === status) && `${run.title ?? ""} ${run.question ?? ""} ${run.prompt ?? ""} ${run.answer ?? ""}`.toLowerCase().includes(query.toLowerCase()))
   return <section className="run-browser">
     <div className="section-heading"><div><p className="eyebrow">History</p><h2>{runs.length} {runs.length === 1 ? "run" : "runs"}</h2></div><div className="filters"><input type="search" aria-label="Search runs" value={query} placeholder="Search runs" onChange={(event) => setQuery(event.target.value)} /><Select ariaLabel="Filter runs by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All outcomes</option><option value="succeeded">Succeeded</option><option value="partial">Partial</option><option value="failed">Failed</option><option value="interrupted">Interrupted</option></Select></div></div>
-    <div className="run-list">{filtered.length ? filtered.map((run) => <button type="button" key={run.id} className={selectedId === run.id ? "selected" : ""} onClick={() => onSelect(run)}><StatusDot status={run.status} /><span><b>{run.title ?? run.question ?? run.prompt ?? `Run ${run.id}`}</b><small>{formatTime(run.completedAt ?? run.createdAt)} · {titleCase(run.task)} · {titleCase(run.status)}</small></span><strong>{typeof run.verdict === "boolean" ? run.task === "answerability" ? run.verdict ? "Answerable" : "Unanswerable" : run.verdict ? "Unsupported" : "Supported" : run.verdict ?? scoreText(run.score, run.scoreSemantics)}</strong><Icon name="arrow" /></button>) : runs.length === 0 ? <div className="empty-list">No runs yet — <button type="button" className="empty-link" onClick={onAnalyze}>analyze a case</button> to get started.</div> : <div className="empty-list">No runs match these filters.</div>}</div>
+    <div className="run-list">{filtered.length ? filtered.map((run) => <button type="button" key={run.id} className={selectedId === run.id ? "selected" : ""} onClick={() => onSelect(run)}><StatusDot status={run.status} /><span><b>{run.title ?? run.question ?? run.prompt ?? `Run ${run.id}`}</b><small>{formatTime(run.completedAt ?? run.createdAt)} · {taskLabel(run.task)} · {titleCase(run.status)}</small></span><strong>{typeof run.verdict === "boolean" ? run.task === "answerability" ? run.verdict ? "Answerable" : "Unanswerable" : run.verdict ? "Unsupported" : "Supported" : run.verdict ?? scoreText(run.score, run.scoreSemantics)}</strong><Icon name="arrow" /></button>) : runs.length === 0 ? <div className="empty-list">No runs yet — <button type="button" className="empty-link" onClick={onAnalyze}>analyze a case</button> to get started.</div> : <div className="empty-list">No runs match these filters.</div>}</div>
   </section>
 }
 
@@ -685,7 +691,7 @@ function RunsWorkspace({ payload, quickPrompt, setQuickPrompt, selectedId, setSe
     <form className="quick-run" onSubmit={(event) => { event.preventDefault(); if (quickPrompt.trim() && !busy && faithfulnessSetup) onAction("submit", { task: "faithfulness", mode: "quickPrompt", context: "", question: "", suppliedAnswer: "", prompt: quickPrompt, exampleId: null }) }}>
       <div><p className="eyebrow">Quick run</p><h2>Ask without building a thread.</h2><p>Each prompt becomes an independent, auditable run.</p></div>
       <Field label="Prompt"><textarea rows={3} value={quickPrompt} placeholder="Ask the active generator…" onChange={(event) => setQuickPrompt(event.target.value)} onBlur={() => setQuickPrompt(quickPrompt, true)} /></Field>
-      <div className="form-actions"><button type="submit" className="primary" title={faithfulnessSetup ? undefined : "Quick Run requires a faithfulness detector."} disabled={!quickPrompt.trim() || busy || !enabled(payload.capabilities?.canGenerate) || !faithfulnessSetup}><Icon name="spark" />Run prompt</button><ImportControl disabled={!enabled(payload.capabilities?.canImport)} onImport={(content) => onAction("import", { json: content })} /><button type="button" className="quiet" disabled={!runs.length || !enabled(payload.capabilities?.canExport)} onClick={() => onAction("exportBundle", {})}><Icon name="download" />Export session</button></div>
+      <div className="form-actions"><button type="submit" className="primary" title={faithfulnessSetup ? undefined : "Quick Run requires a hallucination detector."} disabled={!quickPrompt.trim() || busy || !enabled(payload.capabilities?.canGenerate) || !faithfulnessSetup}><Icon name="spark" />Run prompt</button><ImportControl disabled={!enabled(payload.capabilities?.canImport)} onImport={(content) => onAction("import", { json: content })} /><button type="button" className="quiet" disabled={!runs.length || !enabled(payload.capabilities?.canExport)} onClick={() => onAction("exportBundle", {})}><Icon name="download" />Export session</button></div>
     </form>
     {busy && <ActivityCard activity={payload.activity} runs={payload.runs ?? []} />}
     <div className="runs-grid">

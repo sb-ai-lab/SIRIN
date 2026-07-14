@@ -403,6 +403,40 @@ def test_custom_judge_requires_trusted_local(monkeypatch):
         )
 
 
+def test_custom_judge_defaults_to_local_vllm_base_url(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.delenv('SIRIN_CUSTOM_OPENAI_BASE_URL', raising=False)
+
+    detector = _build_openai_token_judge_with_fakes(
+        monkeypatch, provider=presets.CUSTOM_PROVIDER
+    )
+
+    assert detector.model_adapter.config.base_url == 'http://localhost:8000/v1'
+
+
+def test_local_openai_models_lists_served_ids(monkeypatch):
+    import io
+    import urllib.request
+
+    from sirin.ui import providers
+
+    body = json.dumps({'data': [{'id': 'Qwen/Qwen3.5-4B'}, {'object': 'junk'}]})
+    monkeypatch.setattr(
+        urllib.request, 'urlopen', lambda url, timeout: io.BytesIO(body.encode())
+    )
+
+    assert providers.local_openai_models('http://localhost:8000/v1') == [
+        'Qwen/Qwen3.5-4B'
+    ]
+
+
+def test_local_openai_models_empty_when_unreachable():
+    from sirin.ui import providers
+
+    # Nothing listens on the discard port; the probe must fail silently and fast.
+    assert providers.local_openai_models('http://127.0.0.1:9', timeout=0.2) == []
+
+
 def test_openai_judge_uses_provider_specific_base_url_and_key(monkeypatch):
     detector = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenAI')
 

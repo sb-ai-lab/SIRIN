@@ -18,6 +18,7 @@ from sirin.definitions import DetectionTaskType
 from sirin.ui.providers import (
     CUSTOM_PROVIDER,
     OPENROUTER_PROVIDER,
+    custom_openai_base_url,
     provider_models,
     resolve_api_provider,
 )
@@ -142,12 +143,11 @@ def _resolve_judge(
     judge_api_key: str | None,
     api_provider: str = OPENROUTER_PROVIDER,
 ) -> tuple[str, str, str]:
-    # A trusted-local Custom judge resolves its base URL from SIRIN_CUSTOM_OPENAI_BASE_URL (the pasted
-    # key wins, else SIRIN_CUSTOM_OPENAI_API_KEY, else 'EMPTY' — resolve_api_provider handles that).
+    # A trusted-local Custom judge resolves its base URL from SIRIN_CUSTOM_OPENAI_BASE_URL, falling
+    # back to the local vLLM default (the pasted key wins, else SIRIN_CUSTOM_OPENAI_API_KEY, else
+    # 'EMPTY' — resolve_api_provider handles that).
     custom_base_url = (
-        os.getenv('SIRIN_CUSTOM_OPENAI_BASE_URL', '')
-        if api_provider == CUSTOM_PROVIDER
-        else ''
+        custom_openai_base_url() if api_provider == CUSTOM_PROVIDER else ''
     )
     provider = resolve_api_provider(
         api_provider, custom_base_url, api_key=judge_api_key
@@ -772,7 +772,7 @@ PRESETS: dict[str, Preset] = {
         build=_build_openai_judge,
         display_mode='verdict',
         is_judge=True,
-        census_caption='single-digit faithfulness verdict · one judge pass, not calibrated',
+        census_caption='single-digit hallucination verdict · one judge pass, not calibrated',
     ),
     "Judge — API Token (zero-shot)": Preset(
         name="Judge — API Token (zero-shot)",
