@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
+import json
+import math
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import httpx
 from loguru import logger as lg
@@ -65,88 +68,110 @@ class OpenAIModelAdapter(ModelAdapterBase):
         lg.info(f'Loaded OpenAI client for model: {self.config.model_path}')
 
     
-    async def _make_single_request_async(
-        self, 
-        messages: List[Dict], 
-        return_logprobs: bool, 
-        **sampling_kwargs
-    ) -> Union[str, Tuple[str, List]]:
-        """Make a single async request to OpenAI API with retry logic."""
+    @staticmethod
+    def _extract_logprobs(choice) -> List:
+        """Flatten one choice's token logprobs to the adapter's [[float,...],...] shape."""
+        token_logprobs = choice.logprobs.content
+        if not token_logprobs:
+            return []
+        sequence_logprobs = []
+        for token_info in token_logprobs:
+            if token_info.top_logprobs:
+                top_logprobs = [top_token.logprob for top_token in token_info.top_logprobs]
+            else:
+                top_logprobs = [token_info.logprob]
+            sequence_logprobs.append(top_logprobs)
+        return sequence_logprobs
+
+    async def _create_with_retry_async(self, messages: List[Dict], **create_kwargs):
+        """One async chat completion with exponential-backoff retry."""
         for attempt in range(self.config.max_retries):
             try:
-                response = await self._async_client.chat.completions.create(
-                    model=self.config.model_path, 
-                    messages=messages, 
-                    **sampling_kwargs
+                return await self._async_client.chat.completions.create(
+                    model=self.config.model_path, messages=messages, **create_kwargs
                 )
-
-                generated_text = response.choices[0].message.content
-                
-                if return_logprobs and hasattr(response.choices[0], 'logprobs') and response.choices[0].logprobs is not None:
-                    token_logprobs = response.choices[0].logprobs.content
-                    if token_logprobs:
-                        sequence_logprobs = []
-                        for token_info in token_logprobs:
-                            top_logprobs = []
-                            if token_info.top_logprobs:
-                                for top_token in token_info.top_logprobs:
-                                    top_logprobs.append(top_token.logprob)                                        
-                            else:
-                                top_logprobs.append(token_info.logprob)                                    
-                            sequence_logprobs.append(top_logprobs)
-                        return generated_text, sequence_logprobs
-                    else:
-                        return generated_text, []
-                else:
-                    return (generated_text, []) if return_logprobs else generated_text
-                
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
                 if attempt == self.config.max_retries - 1:
                     raise e
                 await asyncio.sleep(2**attempt)
-    
-    def _make_single_request_sync(
-        self, 
-        messages: List[Dict], 
-        return_logprobs: bool, 
-        **sampling_kwargs
-    ) -> Union[str, Tuple[str, List]]:
-        """Make a single synchronous request to OpenAI API with retry logic."""
+
+    def _create_with_retry_sync(self, messages: List[Dict], **create_kwargs):
+        """One synchronous chat completion with exponential-backoff retry."""
         for attempt in range(self.config.max_retries):
             try:
-                response = self._client.chat.completions.create(
-                    model=self.config.model_path, 
-                    messages=messages, 
-                    **sampling_kwargs
+                return self._client.chat.completions.create(
+                    model=self.config.model_path, messages=messages, **create_kwargs
                 )
-
-                generated_text = response.choices[0].message.content
-                
-                if return_logprobs and hasattr(response.choices[0], 'logprobs') and response.choices[0].logprobs is not None:
-                    token_logprobs = response.choices[0].logprobs.content
-                    if token_logprobs:
-                        sequence_logprobs = []
-                        for token_info in token_logprobs:
-                            top_logprobs = []
-                            if token_info.top_logprobs:
-                                for top_token in token_info.top_logprobs:
-                                    top_logprobs.append(top_token.logprob)                                        
-                            else:
-                                top_logprobs.append(token_info.logprob)                                    
-                            sequence_logprobs.append(top_logprobs)
-                        return generated_text, sequence_logprobs
-                    else:
-                        return generated_text, []
-                else:
-                    return (generated_text, []) if return_logprobs else generated_text
-                
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
                 if attempt == self.config.max_retries - 1:
                     raise e
                 time.sleep(2**attempt)
-    
+
+    @staticmethod
+    def _texts_from_response(response, texts: List[str]) -> None:
+        new = [choice.message.content for choice in response.choices]
+        if not new:
+            raise ValueError('OpenAI-compatible response returned no choices for n>1.')
+        texts.extend(new)
+
+    async def _make_single_request_async(
+        self,
+        messages: List[Dict],
+        return_logprobs: bool,
+        **sampling_kwargs
+    ) -> Union[str, List[str], Tuple[str, List]]:
+        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or list[str] (n>1)."""
+        n = sampling_kwargs.pop('n', 1)
+        if n > 1:
+            texts: List[str] = []
+            per_call = n  # ask for all n first; top up singly when the provider returns fewer.
+            while len(texts) < n:
+                response = await self._create_with_retry_async(
+                    messages, n=per_call, **sampling_kwargs
+                )
+                self._texts_from_response(response, texts)
+                per_call = 1
+            return texts[:n]
+
+        response = await self._create_with_retry_async(messages, **sampling_kwargs)
+        generated_text = response.choices[0].message.content
+        if (
+            return_logprobs
+            and getattr(response.choices[0], 'logprobs', None) is not None
+        ):
+            return generated_text, self._extract_logprobs(response.choices[0])
+        return (generated_text, []) if return_logprobs else generated_text
+
+    def _make_single_request_sync(
+        self,
+        messages: List[Dict],
+        return_logprobs: bool,
+        **sampling_kwargs
+    ) -> Union[str, List[str], Tuple[str, List]]:
+        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or list[str] (n>1)."""
+        n = sampling_kwargs.pop('n', 1)
+        if n > 1:
+            texts: List[str] = []
+            per_call = n  # ask for all n first; top up singly when the provider returns fewer.
+            while len(texts) < n:
+                response = self._create_with_retry_sync(
+                    messages, n=per_call, **sampling_kwargs
+                )
+                self._texts_from_response(response, texts)
+                per_call = 1
+            return texts[:n]
+
+        response = self._create_with_retry_sync(messages, **sampling_kwargs)
+        generated_text = response.choices[0].message.content
+        if (
+            return_logprobs
+            and getattr(response.choices[0], 'logprobs', None) is not None
+        ):
+            return generated_text, self._extract_logprobs(response.choices[0])
+        return (generated_text, []) if return_logprobs else generated_text
+
     async def _make_batch_async(
         self, 
         messages_batch: List[List[Dict]], 
@@ -231,12 +256,13 @@ class OpenAIModelAdapter(ModelAdapterBase):
         return_logprobs: bool = False,
         top_logprobs: int = 1,
         num_return_sequences: int = 1,
+        n: int = 1,
         use_async: bool = True,
         max_concurrent: int = 10,
         **kwargs: Any,
-    ) -> Union[List[str], Tuple[List[str], List[List[List[Tuple[str, float]]]]]]:
+    ) -> Union[List[str], List[List[str]], Tuple[List[str], List[List[List[Tuple[str, float]]]]]]:
         """Generate text using OpenAI API with sampling parameters.
-        
+
         Args:
             inputs: List of input strings or message lists
             max_tokens: Maximum tokens to generate
@@ -246,19 +272,30 @@ class OpenAIModelAdapter(ModelAdapterBase):
             frequency_penalty: Frequency penalty
             presence_penalty: Presence penalty
             stop_sequences: List of stop sequences
-            return_logprobs: Whether to return logprobs
+            return_logprobs: Whether to return logprobs (only valid with n==1)
             top_logprobs: Number of top logprobs to return
-            num_return_sequences: Number of sequences to return (not supported by OpenAI)
+            num_return_sequences: Ignored by this adapter (HF-signature compatibility only);
+                use ``n`` to request multiple generations per input.
+            n: Generations per input. n==1 keeps the single-generation shape; n>1 requests
+                multiple. Providers that ignore/return-fewer choices are topped up with n=1 calls.
             use_async: Whether to use async processing for parallel requests
             max_concurrent: Maximum number of concurrent requests (for async mode)
             **kwargs: Additional sampling parameters
-            
+
         Returns:
-            List of generated texts, or tuple of (texts, logprobs) if return_logprobs=True
+            - n==1: ``list[str]`` (one text per input), or ``(list[str], list[logprobs])`` if
+              ``return_logprobs``.
+            - n>1: ``list[list[str]]`` (one inner list of n texts per input). ``return_logprobs``
+              is NOT supported here and raises ``ValueError``.
         """
+        if return_logprobs and n > 1:
+            raise ValueError('return_logprobs=True is not supported together with n>1.')
         if num_return_sequences > 1:
-            lg.warning('num_return_sequences > 1 is not supported by OpenAI API, using n=1.')
-        
+            lg.warning(
+                'num_return_sequences is ignored by OpenAIModelAdapter; pass n=<k> to '
+                'request multiple generations per input.'
+            )
+
         messages_batch = []
         for input_item in inputs:
             if isinstance(input_item, list):
@@ -290,6 +327,11 @@ class OpenAIModelAdapter(ModelAdapterBase):
         kwargs.pop('max_concurrent', None)
         sampling_kwargs.update(kwargs)
 
+        # n is consumed per-request by _make_single_request_*; only forward it when >1 so the
+        # n==1 request stays byte-identical to before (some providers reject an explicit n=1).
+        if n > 1:
+            sampling_kwargs['n'] = n
+
         if return_logprobs:
             results, logprobs_results = self._make_request(
                 messages_batch, 
@@ -308,6 +350,131 @@ class OpenAIModelAdapter(ModelAdapterBase):
                 **sampling_kwargs
             )
             return results
+
+    @manage_active_model
+    def stream(
+        self,
+        inputs: Union[List[str], List[List[Dict]]],
+        max_tokens: int = 100,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        top_k: int = -1,
+        stop_sequences: Optional[List[str]] = None,
+        capture_token_uncertainty: bool = False,
+        top_logprobs: int = 20,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Stream one OpenAI-compatible response and retain its exact token trace."""
+        if len(inputs) != 1:
+            raise ValueError('OpenAI-compatible streaming supports one input at a time.')
+        input_item = inputs[0]
+        messages = (
+            input_item
+            if isinstance(input_item, list)
+            else [{'role': 'user', 'content': input_item}]
+        )
+
+        request: Dict[str, Any] = {
+            'model': self.config.model_path,
+            'messages': messages,
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'top_p': top_p,
+            'stream': True,
+        }
+        if stop_sequences:
+            request['stop'] = stop_sequences
+        if top_k > 0:
+            lg.warning('top_k parameter is not supported by OpenAI APIs, ignoring.')
+        if capture_token_uncertainty:
+            request.update(logprobs=True, top_logprobs=top_logprobs)
+            self.last_generation_trace = None
+        if 'qwen3.5' in self.config.model_path.lower():
+            request['extra_body'] = {
+                'chat_template_kwargs': {'enable_thinking': False}
+            }
+        for key in ('seed', 'frequency_penalty', 'presence_penalty'):
+            if key in kwargs:
+                request[key] = kwargs[key]
+
+        text = ''
+        pieces: List[str] = []
+        chosen_nll: List[float] = []
+        token_entropy: List[float] = []
+        response = self._client.chat.completions.create(**request)
+        for event in response:
+            if not event.choices:
+                continue
+            choice = event.choices[0]
+            chunk = choice.delta.content or ''
+            if not chunk:
+                continue
+            if capture_token_uncertainty:
+                infos = list(getattr(choice.logprobs, 'content', None) or [])
+                if not infos:
+                    raise ValueError(
+                        'OpenAI-compatible streamed content has no token logprobs.'
+                    )
+                scored_chunk = []
+                reconstructed = ''
+                for info in infos:
+                    if reconstructed == chunk:
+                        break  # vLLM may bundle the trailing stop token in this chunk.
+                    piece = (
+                        bytes(info.bytes).decode('utf-8')
+                        if info.bytes
+                        else info.token
+                    )
+                    if not chunk.startswith(reconstructed + piece):
+                        break
+                    reconstructed += piece
+                    scored_chunk.append((piece, info))
+                if reconstructed != chunk:
+                    raise ValueError(
+                        'OpenAI-compatible token trace does not reconstruct the '
+                        'streamed answer exactly.'
+                    )
+                for piece, info in scored_chunk:
+                    top = list(info.top_logprobs or [])
+                    entropy = -sum(
+                        math.exp(item.logprob) * item.logprob
+                        for item in top
+                        if math.isfinite(item.logprob)
+                    )
+                    pieces.append(piece)
+                    chosen_nll.append(float(-info.logprob))
+                    token_entropy.append(float(entropy))
+            text += chunk
+            yield chunk
+
+        if capture_token_uncertainty:
+            if not pieces or ''.join(pieces) != text:
+                raise ValueError('OpenAI-compatible token trace is incomplete.')
+            offsets = []
+            cursor = 0
+            for piece in pieces:
+                offsets.append([cursor, cursor + len(piece)])
+                cursor += len(piece)
+            trace = {
+                'text': text,
+                'pieces': pieces,
+                'offsets': offsets,
+                'MaximumTokenProbability': chosen_nll,
+                'TokenEntropy': token_entropy,
+                'methods': ['MaximumTokenProbability', 'TokenEntropy'],
+                'entropy_scope': f'top-{top_logprobs}',
+                'temperature': float(temperature),
+                'max_tokens': int(max_tokens),
+                'input_sha256': hashlib.sha256(
+                    json.dumps(
+                        inputs, ensure_ascii=False, separators=(',', ':')
+                    ).encode()
+                ).hexdigest(),
+            }
+            trace['trace_sha256'] = hashlib.sha256(
+                json.dumps(trace, ensure_ascii=False, sort_keys=True).encode()
+            ).hexdigest()
+            self.last_generation_trace = trace
 
     def _convert_logprobs_to_tensor(self, token_logprobs):
         """Convert OpenAI logprobs to tensor format."""

@@ -34,6 +34,7 @@ from .judges import (
     ClaimEncoderJudge,
     ClaimOpenAIJudge,
     HfJudgeBase,
+    JudgeAnnotationError,
     OpenAIJudgeBase,
 )
 from .pipeline import JudgePipeline

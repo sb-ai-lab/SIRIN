@@ -4,10 +4,11 @@ import numpy as np
 import torch
 
 from sirin.definitions import DetectionLevel, DataCollatorType
-from sirin.detection.judging.judges.base import OpenAIJudgeBase
+from sirin.detection.judging.judges.base import JudgeAnnotationError, OpenAIJudgeBase
 from sirin.detection.judging.judges.utils import (
     build_prompt_messages,
     calculate_character_probabilities,
+    extract_answer_from_generation,
     find_span_segments,
 )
 from sirin.detection.utils.token import convert_spans_to_labels
@@ -30,6 +31,20 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         self.class_token_ids = None
         self.last_generations: list[str] | None = None
         self.last_spans: list[list[tuple[int, int]]] | None = None
+        self.last_consensus: list[dict] | None = None
+
+    @staticmethod
+    def _reference_answer(sample: Union[str, List[Dict]]) -> str:
+        """The assistant answer the char scores must align to (matches format_dialogue_samples)."""
+        if isinstance(sample, list) and len(sample) >= 2 and isinstance(sample[1], dict):
+            return sample[1]['content']
+        return sample
+
+    @staticmethod
+    def _echo_of(generation: str) -> str:
+        """A generation's answer with reasoning wrapper and span tags removed, for echo checking."""
+        text = extract_answer_from_generation(generation)  # strips <think>… and outer whitespace
+        return text.replace('[SPAN]', '').replace('[/SPAN]', '').strip()
 
     def detect(
         self,
@@ -39,33 +54,50 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """
         Uses OpenAI API for token-level classification with multiple generations.
-        Calculates character probabilities from span tag consistency across generations.
+
+        Each sample is annotated by ``num_beams`` independent generations. A generation only
+        votes if it echoes the reference answer verbatim (after stripping any reasoning wrapper
+        and the span tags); paraphrases/misaligned echoes are dropped. Each character's score is
+        the fraction of VALID generations that flagged it, over the reference's characters. If no
+        generation validates for a sample we raise instead of emitting a misleading all-clear.
         """
         samples, group_ids = self._split_context_samples(samples)
+        references = [self._reference_answer(sample) for sample in samples]
         formatted_input = build_prompt_messages(self.config, samples)
 
-        all_generated_sequences = []
-        generated_texts = self.model_adapter.sample(
+        n = self.config.num_beams
+        generated = self.model_adapter.sample(
             inputs=formatted_input,
+            max_tokens=self.config.max_new_tokens,  # 100-token default truncates a real answer.
             temperature=self.config.temperature,
             top_p=self.config.top_p,
-            n=self.config.num_beams,
+            n=n,
         )
-        self.last_generations = list(generated_texts)
-        self.last_spans = [find_span_segments(text) for text in generated_texts]
-        # Consensus across the DISTINCT generations: each independently marks [SPAN]s, so a character's
-        # score is the fraction of generations that flagged it. (Was: num_beams copies of
-        # generated_texts[0], which threw away every other generation and forced each char to a hard 0/1.)
-        all_generated_sequences.append(list(generated_texts))
+        # Adapter contract: n==1 -> list[str] (one per sample); n>1 -> list[list[str]] (n per sample).
+        per_sample_gens = [[g] for g in generated] if n == 1 else generated
 
         all_char_probs = []
         all_char_preds = []
-
-        for generated_texts in all_generated_sequences:
-            sample_char_probs = calculate_character_probabilities(generated_texts)
-            sample_char_probs = torch.tensor(sample_char_probs)
+        self.last_consensus = []
+        for reference, gens in zip(references, per_sample_gens):
+            valid = [g for g in gens if self._echo_of(g) == str(reference).strip()]
+            self.last_consensus.append(
+                {'requested': n, 'valid': len(valid), 'temperature': self.config.temperature}
+            )
+            if not valid:
+                raise JudgeAnnotationError(
+                    f'No judge generation echoed the answer verbatim '
+                    f'({len(gens)} generation(s) all dropped); cannot annotate spans.'
+                )
+            sample_char_probs = torch.tensor(
+                calculate_character_probabilities(valid, reference=reference)
+            )
             all_char_probs.append(sample_char_probs)
             all_char_preds.append((sample_char_probs > self.threshold).long())
+
+        # Expose sample 0's generations/spans for the UI (reads gens[0]/spans[0]).
+        self.last_generations = list(per_sample_gens[0]) if per_sample_gens else []
+        self.last_spans = [find_span_segments(g) for g in self.last_generations]
 
         char_probs = [prob.tolist() for prob in all_char_probs]
         char_preds = [pred.tolist() for pred in all_char_preds]
