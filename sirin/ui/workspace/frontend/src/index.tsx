@@ -860,7 +860,7 @@ function WorkspaceApp({ componentKey, payload, setStateValue, setTriggerValue }:
       {workspace === "runs" && <RunsWorkspace payload={payload} quickPrompt={draft.quickPrompt} setQuickPrompt={setQuickPrompt} selectedId={selectedRunId} setSelectedId={setSelectedRunId} busy={busy} motion={appearance.motion} onAction={emit} onPrepareRerun={prepareRerun} onAnalyze={() => setWorkspace("analyze")} />}
       {workspace === "compare" && <CompareWorkspace payload={payload} motion={appearance.motion} onAction={emit} onPrepareRerun={prepareRerun} onBack={() => setWorkspace("analyze")} />}
       {workspace === "diagnostics" && <DiagnosticsWorkspace payload={payload} busy={busy} onAction={emit} />}
-      <footer><span>SIRIN</span><span>Detector confidence is not automatically a calibrated probability.</span></footer>
+      <footer><span>SIRIN — <a href="https://github.com/sb-ai-lab/SIRIN" target="_blank" rel="noreferrer">github.com/sb-ai-lab/SIRIN</a></span><span>Detector confidence is not automatically a calibrated probability.</span></footer>
     </div>
   </div>
 }

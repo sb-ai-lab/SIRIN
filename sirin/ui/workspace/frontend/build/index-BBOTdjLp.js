@@ -6619,7 +6619,10 @@ function ap({ componentKey: u, payload: a, setStateValue: c, setTriggerValue: y 
     R === "compare" && /* @__PURE__ */ o.jsx(_f, { payload: a, motion: E.motion, onAction: oe, onPrepareRerun: G, onBack: () => pe("analyze") }),
     R === "diagnostics" && /* @__PURE__ */ o.jsx(sp, { payload: a, busy: ze, onAction: oe }),
     /* @__PURE__ */ o.jsxs("footer", { children: [
-      /* @__PURE__ */ o.jsx("span", { children: "SIRIN" }),
+      /* @__PURE__ */ o.jsxs("span", { children: [
+        "SIRIN — ",
+        /* @__PURE__ */ o.jsx("a", { href: "https://github.com/sb-ai-lab/SIRIN", target: "_blank", rel: "noreferrer", children: "github.com/sb-ai-lab/SIRIN" })
+      ] }),
       /* @__PURE__ */ o.jsx("span", { children: "Detector confidence is not automatically a calibrated probability." })
     ] })
   ] }) });
