@@ -32,6 +32,7 @@ This changelog records user-facing and runtime changes to the canonical Streamli
 - Empty provider generations count as invalid judge votes instead of crashing detection.
 - An API judge on a route that returns no logprobs — or a reasoning model that spends the one-token verdict budget on thinking — no longer fabricates a "supported" verdict or crashes with a generic "detection failed": digit verdicts render honestly without a probability, and non-verdicts surface an actionable message naming the cause.
 - The Theme and Background-motion dropdowns open above their trigger, so the last options are reachable at any viewport height (previously clipped below the fold; the old fix only nudged them on ≤720px viewports).
+- The Compare picker no longer offers detectors that cannot run as side B (checkpoint-requiring presets with no bundled checkpoint always hit "needs a trained checkpoint directory"); to compare against such a preset, select it as the sidebar detector with its checkpoint directory and pick the other detector as side B — the rejection message now says exactly that.
 
 ## 2026-07-14
 

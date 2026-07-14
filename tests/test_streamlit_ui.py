@@ -572,6 +572,64 @@ def test_detector_setup_error_requires_sequence_probe_checkpoint():
     assert error == 'This preset needs a trained checkpoint directory.'
 
 
+def test_compare_picker_omits_checkpoint_presets_that_cannot_run_as_side_b():
+    from sirin.ui import presets
+
+    offered = ui._compare_available_presets(
+        presets.PSILOQA_TOKEN_LINEAR_PRESET, 'faithfulness'
+    )
+
+    # Side B never takes a typed checkpoint, so this preset could never run there.
+    assert 'Probing — Sequence TabPFN (checkpoint)' not in offered
+    assert presets.PSILOQA_TOKEN_LINEAR_PRESET not in offered  # side A itself
+    # Bundled-checkpoint and zero-shot presets stay offered.
+    assert presets.PSILOQA_TOKEN_LINEAR_PRESET_QWEN35 in offered
+    assert 'Judge — API Sequence (zero-shot)' in offered
+    assert all('Uncertainty' not in name for name in offered)
+
+
+def test_compare_side_b_error_names_checkpoint_preset_and_gives_fix():
+    import types
+
+    from sirin.ui import presets
+
+    cfg = {
+        'use_hydra': False,
+        'preset_name': presets.PSILOQA_TOKEN_LINEAR_PRESET,
+        'checkpoint_dir': '',
+    }
+
+    error = ui._compare_side_b_error(
+        cfg,
+        types.SimpleNamespace(session_state={}),
+        'Probing — Sequence TabPFN (checkpoint)',
+    )
+
+    assert 'Probing — Sequence TabPFN (checkpoint)' in error
+    assert 'side A' in error
+
+
+def test_compare_side_b_accepts_bundled_checkpoint_preset():
+    import types
+
+    from sirin.ui import presets
+
+    cfg = {
+        'use_hydra': False,
+        'preset_name': 'Probing — Sequence TabPFN (checkpoint)',
+        'checkpoint_dir': '/tmp/probe',
+        'backend': 'HF',
+    }
+
+    error = ui._compare_side_b_error(
+        cfg,
+        types.SimpleNamespace(session_state={}),
+        presets.PSILOQA_TOKEN_LINEAR_PRESET,
+    )
+
+    assert error is None
+
+
 def test_detector_setup_error_rejects_api_backend_for_sequence_probe():
     error = ui._detector_setup_error(
         {

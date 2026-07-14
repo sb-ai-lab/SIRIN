@@ -1233,6 +1233,41 @@ def _compare_cfg(cfg: dict[str, Any], st: Any, preset_name: str) -> dict[str, An
     return cfg_b
 
 
+def _preset_task(name: str) -> str:
+    return 'answerability' if 'Answerability' in name else 'faithfulness'
+
+
+def _needs_checkpoint_side_b_cannot_take(preset: Any) -> bool:
+    """True when a preset needs a checkpoint directory compare side B can never receive.
+
+    Side B always drops the sidebar checkpoint path (see _compare_cfg), so a checkpoint-requiring
+    preset can only run as B off its bundled checkpoint.
+    """
+    return bool(
+        getattr(preset, 'requires_checkpoint', False)
+        and not getattr(preset, 'builtin_checkpoint', None)
+    )
+
+
+def _compare_available_presets(active_preset: str, task: str) -> list[str]:
+    """Presets offered in the compare picker: valid for the task AND actually runnable as side B.
+
+    Excludes side A itself, uncertainty detectors (they must generate, so they cannot score side A's
+    answer), and checkpoint-requiring presets without a bundled checkpoint (side B has no checkpoint
+    input, so they could never run — see _needs_checkpoint_side_b_cannot_take).
+    """
+    from sirin.ui import presets
+
+    return [
+        preset.name
+        for preset in presets.list_presets()
+        if preset.name != active_preset
+        and _preset_task(preset.name) == task
+        and preset.family != 'uncertainty'
+        and not _needs_checkpoint_side_b_cannot_take(preset)
+    ]
+
+
 def _compare_side_b_error(cfg: dict[str, Any], st: Any, preset_name: str) -> str | None:
     """Actionable reason side B cannot run (missing checkpoint / backend / API key), or None.
 
@@ -1244,6 +1279,15 @@ def _compare_side_b_error(cfg: dict[str, Any], st: Any, preset_name: str) -> str
     preset_b = presets.PRESETS.get(preset_name)
     if preset_b is None:
         return None
+    if preset_name != cfg.get('preset_name') and _needs_checkpoint_side_b_cannot_take(
+        preset_b
+    ):
+        return (
+            f'The comparison detector "{preset_name}" needs a trained checkpoint '
+            'directory, and side B cannot take one. Select it as the sidebar detector '
+            '(side A), enter its checkpoint directory there, and pick the other '
+            'detector as side B.'
+        )
     cfg_b = _compare_cfg(cfg, st, preset_name)
     error = _detector_setup_error(cfg_b)
     if error:
@@ -1556,9 +1600,6 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
     }
     setup = _dto(SetupSnapshot, setup_values)
 
-    def _preset_task(name: str) -> str:
-        return 'answerability' if 'Answerability' in name else 'faithfulness'
-
     # Compare side B: resolve a preset name into its OWN SetupSnapshot (built the same way as side A).
     # Raises ValueError (caught by the controller as a reject) when B is unknown, is A itself, or does
     # not support the active task.
@@ -1589,15 +1630,7 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
             'provider_label': cfg['backend'],
         })
 
-    # Presets valid for the active task, excluding side A — the choices offered in the compare picker.
-    available_presets = [
-        preset_obj.name
-        for preset_obj in presets.list_presets()
-        if preset_obj.name != cfg['preset_name']
-        and _preset_task(preset_obj.name) == setup_values['task']
-        # Uncertainty detectors must generate to score; they cannot score side A's answer (see below).
-        and preset_obj.family != 'uncertainty'
-    ]
+    available_presets = _compare_available_presets(cfg['preset_name'], setup_values['task'])
     model_loaded = bool(getattr(ModelManager, '_active_models', {}))
     trusted_local = is_trusted_local()
     capabilities = _dto(
