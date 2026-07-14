@@ -155,6 +155,149 @@ def test_openai_token_judge_uses_span_tag_prompts(monkeypatch):
     assert detector.config.temperature == 0.7
 
 
+def test_sequence_judge_prompt_embeds_dialogue_via_sample_placeholder(monkeypatch):
+    from sirin.detection.judging.judges.utils.prompts import build_prompt_messages
+    from sirin.models.detection import OpenAIJudgeConfig
+
+    detector = _build_openai_sequence_judge_with_fakes(monkeypatch)
+
+    # The preset must ship the {sample} slot; without it build_prompt_messages drops the dialogue and
+    # the judge scores an empty conversation.
+    assert '{sample}' in detector.config.user_prompt
+    # Single-digit format clause guards token 0 against a JSON '{' collapse under max_tokens=1.
+    assert 'SINGLE character' in detector.config.user_prompt
+
+    # A formatted message must actually embed the dialogue text (real formatter, real config defaults).
+    config = OpenAIJudgeConfig(user_prompt=presets._JUDGE_PROMPT, temperature=0.0)
+    sample = [
+        {'role': 'user', 'content': 'Where is the Eiffel Tower?'},
+        {'role': 'assistant', 'content': 'The Eiffel Tower is in Berlin.'},
+    ]
+    messages = build_prompt_messages(config, [sample])
+    user_message = messages[0][1]['content']
+    assert 'The Eiffel Tower is in Berlin.' in user_message
+    assert 'Where is the Eiffel Tower?' in user_message
+
+
+def test_sequence_probability_preset_wires_maximum_sequence_probability(monkeypatch):
+    from lm_polygraph import estimators
+
+    # The method name must resolve to a real single-pass, sdpa-safe lm-polygraph estimator.
+    assert hasattr(estimators, 'MaximumSequenceProbability')
+
+    detector = _build_uncertainty_sequence_msp_with_fakes(monkeypatch)
+    assert detector.feature_processor.config.uncertainty_methods == [
+        'MaximumSequenceProbability'
+    ]
+    assert presets.describe_detector(detector)['family'] == 'uncertainty'
+    assert presets.describe_detector(detector)['calibrated'] is False
+
+
+def test_every_uncertainty_and_judge_preset_has_a_one_line_census_caption():
+    """Census sidebar copy must state each method's truth in one line (no dynamic checkpoint meta)."""
+    for preset in presets.list_presets():
+        if preset.family not in {'uncertainty', 'judge'}:
+            continue
+        caption = presets.detector_census_caption(preset)
+        assert caption, preset.name
+        assert '\n' not in caption, preset.name
+        assert len(caption) <= 80, preset.name
+
+
+def _build_openai_sequence_judge_with_fakes(monkeypatch):
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'openrouter-key')
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+
+    class FakeAdapter:
+        def __init__(self, config):
+            self.config = config
+
+    class FakeJudge:
+        def __init__(self, config, model_adapter):
+            self.config = config
+            self.model_adapter = model_adapter
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    monkeypatch.setitem(sys.modules, 'sirin.detection', types.ModuleType('sirin.detection'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.judging',
+        types.SimpleNamespace(SequenceOpenAIJudge=FakeJudge),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.inference', types.ModuleType('sirin.inference'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.inference.adapters',
+        types.SimpleNamespace(OpenAIModelAdapter=FakeAdapter),
+    )
+    monkeypatch.setitem(sys.modules, 'sirin.models', types.ModuleType('sirin.models'))
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.detection',
+        types.SimpleNamespace(OpenAIJudgeConfig=FakeConfig),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.inference',
+        types.SimpleNamespace(OpenAIConfig=FakeConfig),
+    )
+
+    return presets._build_openai_judge(api_provider='OpenRouter')
+
+
+def _build_uncertainty_sequence_msp_with_fakes(monkeypatch):
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class FakeProcessor:
+        def __init__(self, config, extractor):
+            self.config = config
+            self.extractor = extractor
+
+    class FakeDetector:
+        def __init__(self, config, feature_processor):
+            self.config = config
+            self.feature_processor = feature_processor
+            self.threshold = 0.5
+
+    class FakeGenerator:
+        # non-None so _uncertainty_adapter returns it directly (no HfModelAdapter import needed).
+        def generate_hiddens(self):
+            pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.processors',
+        types.SimpleNamespace(
+            SequenceUncertaintyFeatureProcessor=FakeProcessor,
+            TokenUncertaintyFeatureProcessor=FakeProcessor,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.detection.uncertainty',
+        types.SimpleNamespace(
+            SequenceUncertaintyDetector=FakeDetector,
+            TokenUncertaintyDetector=FakeDetector,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        'sirin.models.detection',
+        types.SimpleNamespace(
+            UncertaintyDetectorConfig=FakeConfig,
+            UncertaintyFeatureProcessorConfig=FakeConfig,
+        ),
+    )
+    return presets._build_uncertainty_sequence_msp(
+        device='cuda:3', generator_adapter=FakeGenerator()
+    )
+
+
 def test_openai_judge_uses_provider_specific_base_url_and_key(monkeypatch):
     detector = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenAI')
 

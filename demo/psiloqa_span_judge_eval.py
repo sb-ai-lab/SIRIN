@@ -224,7 +224,17 @@ def run_token_sample(judge: Any, capture: _GenerationCapture, sample: list[dict]
 def run_sequence_sample(judge: Any, sample: list[dict]) -> dict:
     """One sequence-judge verdict. ``prob`` is the judge's NLL of the emitted token;
     ``p_hallucination`` = P(verdict == 1), derived from that NLL and the predicted digit."""
-    probs, preds, _ = judge.detect([sample])
+    try:
+        probs, preds, _ = judge.detect([sample])
+    except openai.BadRequestError as error:  # e.g. prompt exceeds the model context window
+        return {
+            "status": "api_error",
+            "prob": float("nan"),
+            "pred": None,
+            "p_hallucination": float("nan"),
+            "generation": None,
+            "error": str(error)[:500],
+        }
     prob = float(probs[0])
     pred = int(preds[0])
     if math.isfinite(prob):

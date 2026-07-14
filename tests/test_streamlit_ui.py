@@ -323,6 +323,42 @@ def test_preset_detector_does_not_cache_a_stale_extractor(monkeypatch):
     assert built == [first, second]
 
 
+class _FakeSequenceDetector:
+    _ui_family = 'uncertainty'
+    _ui_level = 'sequence'
+    _ui_calibrated = False
+    _ui_display_mode = 'raw'
+    _ui_threshold = None
+    _ui_task = 'hallucination'
+    last_generated_text = None
+
+    def __init__(self, chunk_scores):
+        self.last_context_chunk_scores = chunk_scores
+
+
+def test_view_model_surfaces_per_chunk_scores_for_multi_chunk_sequence_run():
+    detector = _FakeSequenceDetector([
+        {'index': 0, 'score': 0.2, 'chars': [0, 100]},
+        {'index': 1, 'score': 0.9, 'chars': [100, 220]},
+    ])
+
+    view = ui.detection_view_model(([0.7], [1], None), 'answer text', detector)
+
+    assert view['level'] == 'sequence'
+    chunks = view['context_chunk_scores']
+    assert [chunk['index'] for chunk in chunks] == [0, 1]
+    assert chunks[1]['chars'] == [100, 220]
+    assert chunks[1]['score'] == 0.9
+
+
+def test_view_model_omits_chunk_scores_when_context_is_not_split():
+    detector = _FakeSequenceDetector([{'index': 0, 'score': 0.5, 'chars': [0, 40]}])
+
+    view = ui.detection_view_model(([0.5], [0], None), 'answer text', detector)
+
+    assert 'context_chunk_scores' not in view
+
+
 def test_qwen35_sequence_uncertainty_does_not_mix_calibration_contracts(monkeypatch):
     from sirin.ui import presets
 

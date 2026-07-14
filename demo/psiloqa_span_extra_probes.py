@@ -289,7 +289,7 @@ def train_token_tabpfn(train, val, test, args):
     sub_x = train.features[idx].astype(np.float32)
     sub_y = train.labels[idx]
     x, extras = _preprocess(sub_x, scale=True, pca_components=args.tabpfn_pca, seed=args.seed)
-    clf = TabPFNClassifier(device="cpu", ignore_pretraining_limits=True, random_state=args.seed)
+    clf = TabPFNClassifier(device=args.tabpfn_device, ignore_pretraining_limits=True, random_state=args.seed)
     clf.fit(x, sub_y)
     val_scores = clf.predict_proba(_apply(extras, val.features.astype(np.float32)))[:, 1]
     test_scores = clf.predict_proba(_apply(extras, test.features.astype(np.float32)))[:, 1]
@@ -367,7 +367,7 @@ def train_sequence_tabpfn(train, val, test, args):
 
     (tr_x, tr_y), (va_x, va_y), (te_x, te_y) = _sequence_split(train, val, test)
     x, extras = _preprocess(tr_x, scale=True, pca_components=args.tabpfn_pca, seed=args.seed)
-    clf = TabPFNClassifier(device="cpu", ignore_pretraining_limits=True, random_state=args.seed)
+    clf = TabPFNClassifier(device=args.tabpfn_device, ignore_pretraining_limits=True, random_state=args.seed)
     clf.fit(x, tr_y)
     val_scores = clf.predict_proba(_apply(extras, va_x))[:, 1]
     test_scores = clf.predict_proba(_apply(extras, te_x))[:, 1]
@@ -590,6 +590,10 @@ def parse_args():
     parser.add_argument("--tabpfn-subsample-tokens", type=int, default=50000)
     parser.add_argument("--tabpfn-per-answer-cap", type=int, default=128)
     parser.add_argument("--tabpfn-pca", type=int, default=100)
+    parser.add_argument(
+        "--tabpfn-device", default="cpu",
+        help="TabPFN inference device; 50k-context prediction is hours on CPU, minutes on cuda",
+    )
     args = parser.parse_args()
     args.shard_dir = args.shard_dir or args.base_dir / "feature_shards"
     args.probes_dir = args.probes_dir or args.base_dir / "probes"

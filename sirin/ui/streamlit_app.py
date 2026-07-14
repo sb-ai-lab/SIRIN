@@ -377,6 +377,21 @@ def _pick_answer_text(
     return text, source, tagged
 
 
+def _detector_context_chunks(detector: Any) -> list[dict[str, Any]]:
+    """Pre-aggregation per-chunk scores a sequence detector may publish for a split context.
+
+    A long context can be split into chunks; the detector aggregates their scores into one. When it also
+    exposes the per-chunk scores as ``last_context_chunk_scores`` (a list of
+    ``{'index', 'score', 'chars': [start, end]}``), surface them so the card can draw a per-chunk
+    heat-bar. Only meaningful with >1 chunk. No bundled preset configures a context split today, so this
+    is dormant until one does (or an imported/fixture payload carries it) — never fabricated here.
+    """
+    chunks = getattr(detector, 'last_context_chunk_scores', None)
+    if not isinstance(chunks, (list, tuple)) or len(chunks) < 2:
+        return []
+    return [dict(chunk) for chunk in chunks if isinstance(chunk, dict)]
+
+
 def detection_view_model(
     result: tuple[Any, Any, Any],
     answer: str,
@@ -535,7 +550,7 @@ def detection_view_model(
         if info['family'] == 'uncertainty' and generated_text
         else answer
     )
-    return {
+    sequence_view = {
         'level': 'sequence',
         'display_mode': display_mode,
         'probability': probability,
@@ -560,6 +575,12 @@ def detection_view_model(
         ),
         'spans': spans,
     }
+    # Sequence-only: per-chunk context scores never localize within the answer (the honesty gate in
+    # the presenter also drops them for token/span/claim/multiclass kinds).
+    context_chunks = _detector_context_chunks(detector)
+    if context_chunks:
+        sequence_view['context_chunk_scores'] = context_chunks
+    return sequence_view
 
 
 def debug_summary(debug: dict[str, Any] | None) -> dict[str, Any]:

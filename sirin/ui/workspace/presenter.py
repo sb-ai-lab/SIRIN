@@ -10,6 +10,7 @@ from .contracts import (
     AnalysisResult,
     CategoryScore,
     ClaimScore,
+    ContextChunkScore,
     ScoreSemantics,
     SetupSnapshot,
     TaskType,
@@ -165,6 +166,25 @@ def _normalize_legacy_view(answer: str, data: Mapping[str, Any]) -> dict[str, An
     return normalized
 
 
+def _context_chunk_scores(data: Mapping[str, Any], kind: AnalysisKind) -> list[ContextChunkScore]:
+    """Pre-aggregation per-chunk scores for a split sequence run, only when localization is NOT shown.
+
+    Chunk scores describe the context split, not the answer characters. A token/span/claim/multiclass
+    result already localizes evidence, so surfacing chunk cells there would double-count and mislead —
+    the honesty gate keeps them to sequence/uncertainty kinds. Fewer than two chunks is not a split.
+    """
+    if kind not in {AnalysisKind.SEQUENCE, AnalysisKind.UNCERTAINTY}:
+        return []
+    raw = data.get('context_chunk_scores')
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or len(raw) < 2:
+        return []
+    try:
+        return [ContextChunkScore.model_validate(_plain(item)) for item in raw]
+    except Exception:
+        # A malformed chunk payload drops the whole heat-bar rather than rendering a partial, misleading one.
+        return []
+
+
 def present_analysis(answer: str, setup: SetupSnapshot, output: Any) -> AnalysisResult:
     """Normalize common SIRIN detector outputs without inventing missing localization."""
     if isinstance(output, AnalysisResult):
@@ -250,5 +270,6 @@ def present_analysis(answer: str, setup: SetupSnapshot, output: Any) -> Analysis
         segments=segments,
         categories=categories,
         claims=claims,
+        context_chunk_scores=_context_chunk_scores(data, kind),
         note=note,
     )

@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from sirin.ui.workspace.contracts import (
     AnalysisKind,
+    ContextChunkScore,
     ExampleSummary,
     Provenance,
     RunMode,
@@ -13,6 +14,76 @@ from sirin.ui.workspace.contracts import (
     TextSegment,
 )
 from sirin.ui.workspace.presenter import present_analysis
+
+
+def _sequence_setup() -> SetupSnapshot:
+    return SetupSnapshot(
+        detector_preset='seq',
+        detector_family='uncertainty',
+        detector_level='sequence',
+        score_semantics=ScoreSemantics.RELATIVE_WITHIN_ANSWER,
+    )
+
+
+def test_context_chunk_scores_round_trip_for_split_sequence_runs():
+    result = present_analysis(
+        'answer text',
+        _sequence_setup(),
+        {
+            'probability': 0.7,
+            'prediction': 1,
+            'context_chunk_scores': [
+                {'index': 0, 'score': 0.2, 'chars': [0, 100]},
+                {'index': 1, 'score': 0.8, 'chars': [100, 210]},
+            ],
+        },
+    )
+
+    assert [chunk.index for chunk in result.context_chunk_scores] == [0, 1]
+    dumped = result.model_dump(by_alias=True)
+    assert dumped['contextChunkScores'][1]['score'] == 0.8
+    assert dumped['contextChunkScores'][1]['chars'] == [100, 210]
+    # A round-trip back through the DTO must validate the camelCase alias.
+    ContextChunkScore.model_validate(dumped['contextChunkScores'][0])
+
+
+def test_context_chunk_scores_are_dropped_for_localized_token_results():
+    setup = SetupSnapshot(
+        detector_preset='tok',
+        detector_family='judge',
+        detector_level='token',
+        calibrated=True,
+    )
+
+    result = present_analysis(
+        'abc',
+        setup,
+        {
+            'char_scores': [0.1, 0.2, 0.3],
+            'char_predictions': [0, 1, 0],
+            'context_chunk_scores': [
+                {'index': 0, 'score': 0.2, 'chars': [0, 5]},
+                {'index': 1, 'score': 0.8, 'chars': [5, 9]},
+            ],
+        },
+    )
+
+    # Localized (span) results already show where evidence is; chunk cells would double-count.
+    assert result.kind is AnalysisKind.SPAN
+    assert result.context_chunk_scores == []
+
+
+def test_single_context_chunk_is_not_treated_as_a_split():
+    result = present_analysis(
+        'answer',
+        _sequence_setup(),
+        {
+            'probability': 0.5,
+            'context_chunk_scores': [{'index': 0, 'score': 0.5, 'chars': [0, 10]}],
+        },
+    )
+
+    assert result.context_chunk_scores == []
 
 
 def test_contracts_serialize_camel_case_and_reject_unknown_fields():

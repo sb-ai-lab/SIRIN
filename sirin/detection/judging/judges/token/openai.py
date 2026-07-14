@@ -41,8 +41,14 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         return sample
 
     @staticmethod
-    def _echo_of(generation: str) -> str:
-        """A generation's answer with reasoning wrapper and span tags removed, for echo checking."""
+    def _echo_of(generation: Optional[str]) -> str:
+        """A generation's answer with reasoning wrapper and span tags removed, for echo checking.
+
+        A ``None``/empty generation (a provider may return empty content, e.g. when a reasoning
+        budget is exhausted) is just an invalid vote: it returns '' and fails the echo check.
+        """
+        if not generation:
+            return ''
         text = extract_answer_from_generation(generation)  # strips <think>… and outer whitespace
         return text.replace('[SPAN]', '').replace('[/SPAN]', '').strip()
 

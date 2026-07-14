@@ -34,6 +34,7 @@ from .contracts import (
     utc_now,
 )
 from .examples import ExampleRegistry, cached_example_registry
+from .recipes import detector_recipes
 from .run_engine import RunEngine
 from .seed import build_seed_runs, seed_draft
 from .session import PortableFormatError, WorkspaceSession, export_bundle, export_run, import_portable_json
@@ -124,6 +125,7 @@ class WorkspaceController:
             draft=draft,
             compare=self._compare_payload(),
             available_presets=available_presets or [],
+            recipes=detector_recipes(),
         )
 
     def _compare_payload(self):

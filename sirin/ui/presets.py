@@ -23,6 +23,9 @@ from sirin.ui.providers import (
 
 # default zero-shot uncertainty methods that need no attention maps (sdpa-safe).
 _SEQ_UNC_METHODS = ['MeanTokenEntropy', 'Perplexity']
+# Single-pass greedy sequence log-probability. sdpa-safe, no sampling, no attention — the only one of
+# the two brief candidates that qualifies (MonteCarloSequenceEntropy needs multiple sampled generations).
+_SEQ_UNC_METHODS_MSP = ['MaximumSequenceProbability']
 _TOK_UNC_METHODS = ['MaximumTokenProbability', 'TokenEntropy']
 _DEFAULT_HF_MODEL = 'Qwen/Qwen3-4B'
 PSILOQA_TOKEN_LINEAR_PRESET = 'Probing — Token Linear · PsiloQA/Qwen3-4B'
@@ -40,10 +43,20 @@ ANSWERABILITY_CHECKPOINT_DIR = str(
     / 'trust_assistant/checkpoints/probing/answerability_tabpfn/Hiddens_L_TabPFN'
 )
 _SEQUENCE_TABPFN_LAYERS = [20, 35, 36, 37, 38, 39]
+# The sequence API judge formats this as the user_prompt via build_prompt_messages(sample=dialogue),
+# so it MUST carry the {sample} slot — without it the dialogue is never inserted and the judge scores
+# an empty conversation. The trailing single-digit clause forces token 0 to be a bare '0'/'1': on long
+# structured prompts the model otherwise opens a JSON object ('{' as token 0) and the max_tokens=1
+# logprob verdict collapses. Mirrors demo/psiloqa_span_judge_eval.py::SEQUENCE_VERDICT_PROMPT (verified
+# live to yield clean 0/1 top-2 logprobs). System prompt stays the JudgeBaseConfig default.
 _JUDGE_PROMPT = (
     "You verify whether the assistant response is faithful to the provided context. "
     "Reply with 1 if it contains hallucinated, unsupported, or contradicted claims, "
-    "otherwise reply with 0."
+    "otherwise reply with 0.\n"
+    'Dialogue: "{sample}"\n'
+    "Answer with a SINGLE character that is the digit 1 or the digit 0. Do not output JSON, "
+    "quotes, spaces, reasoning, or any other character. Your entire reply must be exactly one "
+    "digit: "
 )
 
 
@@ -60,6 +73,9 @@ class Preset:
     display_mode: str = 'gauge'
     is_judge: bool = False
     builtin_checkpoint: str | None = None  # bundled, SHA-256-verified; no path input needed.
+    # One-line census-sidebar truth about the method (names it + its honest score scale). Used only when
+    # the preset exposes no dynamic checkpoint meta (layer/τ/SHA); '' falls back to the description.
+    census_caption: str | None = None
 
 
 def _hf_adapter(device: str, generator_adapter: Any) -> Any:
@@ -119,6 +135,7 @@ def _build_uncertainty(
     uncertainty_threshold: float | None = None,
     uncertainty_max_new_tokens: int | None = None,
     uncertainty_threshold_source: str | None = None,
+    methods: list[str] | None = None,
     **kwargs: Any,
 ) -> Any:
     from sirin.detection.processors import (
@@ -136,7 +153,8 @@ def _build_uncertainty(
 
     extractor = _uncertainty_adapter(device, generator_adapter)
     feature_config = UncertaintyFeatureProcessorConfig(
-        uncertainty_methods=_TOK_UNC_METHODS if level == 'token' else _SEQ_UNC_METHODS,
+        uncertainty_methods=methods
+        or (_TOK_UNC_METHODS if level == 'token' else _SEQ_UNC_METHODS),
         model_kwargs={'instruct': True},  # apply the chat template inside lm-polygraph
         max_new_tokens=uncertainty_max_new_tokens or 256,
     )
@@ -180,6 +198,29 @@ def _build_uncertainty_sequence(
 ) -> Any:
     return _build_uncertainty(
         'sequence',
+        device=device,
+        checkpoint_dir=checkpoint_dir,
+        generator_adapter=generator_adapter,
+        judge_model=judge_model,
+        judge_api_key=judge_api_key,
+        **kwargs,
+    )
+
+
+def _build_uncertainty_sequence_msp(
+    *,
+    device: str = 'cuda',
+    checkpoint_dir: str | None = None,
+    generator_adapter: Any = None,
+    judge_model: str | None = None,
+    judge_api_key: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    # MaximumSequenceProbability only. Never wire a generation_trace to this preset: the sequence
+    # detector's trace fast-path supports MeanTokenEntropy/Perplexity only. The UI never passes one.
+    return _build_uncertainty(
+        'sequence',
+        methods=_SEQ_UNC_METHODS_MSP,
         device=device,
         checkpoint_dir=checkpoint_dir,
         generator_adapter=generator_adapter,
@@ -574,6 +615,23 @@ PRESETS: dict[str, Preset] = {
         build=_build_uncertainty_sequence,
         display_mode='raw',
         is_judge=False,
+        census_caption='MeanTokenEntropy + Perplexity · relative within-answer, uncalibrated',
+    ),
+    "Uncertainty — Sequence · Sequence Probability (zero-shot)": Preset(
+        name="Uncertainty — Sequence · Sequence Probability (zero-shot)",
+        family='uncertainty',
+        level='sequence',
+        calibrated=False,
+        requires_checkpoint=False,
+        description=(
+            'Single greedy-pass sequence log-probability (MaximumSequenceProbability). Raw, '
+            'length-sensitive score comparable only within one answer; not a calibrated probability. '
+            'No training.'
+        ),
+        build=_build_uncertainty_sequence_msp,
+        display_mode='raw',
+        is_judge=False,
+        census_caption='MaximumSequenceProbability · raw sequence log-prob, uncalibrated',
     ),
     "Uncertainty — Token (zero-shot)": Preset(
         name="Uncertainty — Token (zero-shot)",
@@ -585,6 +643,7 @@ PRESETS: dict[str, Preset] = {
         build=_build_uncertainty_token,
         display_mode='heatmap',
         is_judge=False,
+        census_caption='MaximumTokenProbability + TokenEntropy · relative within-answer, uncalibrated',
     ),
     "Judge — API Sequence (zero-shot)": Preset(
         name="Judge — API Sequence (zero-shot)",
@@ -596,6 +655,7 @@ PRESETS: dict[str, Preset] = {
         build=_build_openai_judge,
         display_mode='verdict',
         is_judge=True,
+        census_caption='single-digit faithfulness verdict · one judge pass, not calibrated',
     ),
     "Judge — API Token (zero-shot)": Preset(
         name="Judge — API Token (zero-shot)",
@@ -607,6 +667,7 @@ PRESETS: dict[str, Preset] = {
         build=_build_openai_token_judge,
         display_mode='heatmap',
         is_judge=True,
+        census_caption='verbatim span-tag annotation · k/n consensus, not calibrated',
     ),
     "Probing — Answerability TabPFN (checkpoint)": Preset(
         name="Probing — Answerability TabPFN (checkpoint)",
@@ -660,7 +721,8 @@ def detector_census_caption(preset: Preset, checkpoint_dir: str | None = None) -
         parts.append(f'τ = {threshold:.2f}')
     if preset.builtin_checkpoint:
         parts.append('SHA-256-verified checkpoint')
-    return ' · '.join(parts)
+    # Presets with no dynamic checkpoint meta (uncertainty/judge) carry a static one-line method truth.
+    return ' · '.join(parts) or (getattr(preset, 'census_caption', None) or '')
 
 
 def _level_of(detector: Any) -> str:

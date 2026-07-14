@@ -172,6 +172,33 @@ class TextSegment(DTO):
         return self
 
 
+class ContextChunkScore(DTO):
+    """One pre-aggregation score for a single context chunk of a split, sequence-level run.
+
+    ``chars`` are [start, end) code-point offsets into the (chunked) context. The score inherits the
+    run's score semantics — it is never a standalone probability and never implies localization within
+    the answer (sequence detectors do not localize).
+    """
+
+    index: int = Field(ge=0)
+    score: float
+    chars: list[int] = Field(min_length=2, max_length=2)
+
+    @field_validator('score')
+    @classmethod
+    def finite_score(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError('chunk score must be finite')
+        return value
+
+    @model_validator(mode='after')
+    def valid_chars(self) -> 'ContextChunkScore':
+        start, end = self.chars
+        if start < 0 or end < start:
+            raise ValueError('chunk chars must be a non-negative [start, end] range')
+        return self
+
+
 class CategoryScore(DTO):
     label: str = Field(min_length=1, max_length=120)
     score: float
@@ -208,6 +235,9 @@ class AnalysisResult(DTO):
     segments: list[TextSegment] = Field(default_factory=list, max_length=10_000)
     categories: list[CategoryScore] = Field(default_factory=list, max_length=100)
     claims: list[ClaimScore] = Field(default_factory=list, max_length=2_000)
+    context_chunk_scores: list[ContextChunkScore] = Field(
+        default_factory=list, max_length=2_000
+    )
     note: str | None = Field(default=None, max_length=500)
 
     @field_validator('score', 'threshold')
@@ -486,6 +516,16 @@ class ComparePayload(DTO):
         return value
 
 
+class DetectorRecipe(DTO):
+    """A static, copy-paste recipe for extending SIRIN with a new detector (see recipes.py)."""
+
+    id: str = Field(min_length=1, max_length=64, pattern=r'^[a-z0-9_]+$')
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=600)
+    code: str = Field(min_length=1, max_length=6000)
+    reference: str | None = Field(default=None, max_length=400)
+
+
 def default_view_state() -> dict[str, Any]:
     return {
         'workspace': 'analyze',
@@ -512,6 +552,7 @@ class WorkspacePayload(DTO):
     draft: dict[str, Any] | None = None
     compare: ComparePayload | None = None
     available_presets: list[str] = Field(default_factory=list)
+    recipes: list[DetectorRecipe] = Field(default_factory=list)
 
 
 class ActionEnvelope(DTO):

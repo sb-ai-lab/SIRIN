@@ -171,6 +171,13 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .answer-block { margin-top: 26px; padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .answer-label { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .11em; font-size: 0.6875rem; font-weight: 650; color: var(--muted); }
 .answer-label small { padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; text-transform: none; letter-spacing: .02em; font-weight: 650; }
+/* Per-chunk context heat-bar (PR-11): one cell per split context chunk, coloured by rank on the span
+   ramp. Sits above the answer; never implies localization within the answer text. */
+.context-heatbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.context-heatbar-title { flex: none; text-transform: uppercase; letter-spacing: .11em; font-size: 0.625rem; font-weight: 650; color: var(--muted); }
+.context-heatbar-cells { display: flex; flex: 1; gap: 3px; min-width: 0; }
+.context-heatbar-cell { flex: 1; min-width: 6px; height: 12px; border-radius: 3px; background-image: linear-gradient(var(--seg-wash), var(--seg-wash)); border-bottom: 2px solid var(--seg-line); }
+.context-heatbar-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .answer-copy { margin: 0; white-space: pre-wrap; font-size: clamp(17px, 2.2vw, 22px); line-height: 1.68; letter-spacing: -.012em; }
 .caret { display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: -.18em; background: var(--brand); animation: blink 800ms steps(2) infinite; }
 .caret.hidden { display: none; }
@@ -356,6 +363,19 @@ button.secondary:disabled, button.quiet:disabled, .example-list button:disabled 
 .diagnostic-details dl { display: grid; gap: 7px; }
 .diagnostic-details dl div { display: grid; grid-template-columns: 180px 1fr; gap: 18px; padding-top: 7px; border-top: 1px solid var(--line); }
 .diagnostic-details dt { color: var(--muted); font-size: 11px; }.diagnostic-details dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 0.6875rem; }
+
+/* "Add a detector" recipes (PR-12). Copy-paste snippets in the shared mono style; a horizontal scroll
+   keeps long code lines inside the card instead of stretching the page. */
+.recipes-section { margin-top: 28px; }
+.recipe-list { display: grid; gap: 16px; margin-top: 16px; }
+.recipe-card { padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface-solid) 88%, transparent); }
+.recipe-head { display: flex; align-items: flex-start; gap: 14px; }
+.recipe-head > div { flex: 1; min-width: 0; }
+.recipe-head h3 { margin: 0 0 4px; font-size: 1rem; }
+.recipe-head p { margin: 0; color: var(--muted); font-size: 0.8125rem; line-height: 1.5; }
+.recipe-reference { margin: 12px 0 0; color: var(--muted); font-size: 0.75rem; }
+.recipe-reference code, .recipe-code code { font-family: var(--font-mono); }
+.recipe-code { margin: 12px 0 0; padding: 14px; overflow-x: auto; border-radius: 10px; background: color-mix(in srgb, var(--canvas) 70%, transparent); border: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; white-space: pre; }
 
 footer { width: min(960px, 100%); margin: 42px auto 0; padding: 10px 12px; display: flex; justify-content: space-between; gap: 20px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-solid) 88%, transparent); color: var(--muted); font-size: 0.6875rem; }
 footer span:first-child { color: var(--brand); font-weight: 650; letter-spacing: .16em; }

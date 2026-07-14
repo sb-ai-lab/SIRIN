@@ -151,6 +151,12 @@ export interface ClassScore {
   score: number
 }
 
+export interface ContextChunkScore {
+  index: number
+  score: number
+  chars: [number, number] | number[]
+}
+
 export interface AnalysisResult {
   kind?: "sequence" | "token" | "span" | "claim" | "multiclass" | "judge" | "uncertainty" | "unavailable" | string
   verdict?: string | boolean | null
@@ -168,6 +174,7 @@ export interface AnalysisResult {
   claims?: ClaimResult[]
   classes?: ClassScore[] | Record<string, number>
   categories?: ClassScore[]
+  contextChunkScores?: ContextChunkScore[]
   values?: number[]
   unavailableReason?: string
   note?: string | null
@@ -270,6 +277,14 @@ export interface DownloadTransfer {
   content: string
 }
 
+export interface DetectorRecipe {
+  id: string
+  title: string
+  description: string
+  code: string
+  reference?: string | null
+}
+
 export interface CompareAgreement {
   both: number
   aOnly: number
@@ -306,5 +321,6 @@ export interface WorkspacePayload {
   draft?: ClientDraft | null
   compare?: ComparePayload | null
   availablePresets?: string[]
+  recipes?: DetectorRecipe[]
   ui?: { title?: string; subtitle?: string }
 }

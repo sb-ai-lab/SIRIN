@@ -18,6 +18,8 @@ import type {
   ClientDraft,
   CompareAgreement,
   ComparePayload,
+  ContextChunkScore,
+  DetectorRecipe,
   DiagnosticMetric,
   DownloadTransfer,
   ExampleRecord,
@@ -367,6 +369,31 @@ function SegmentAnswer({ answer, result }: { answer: string; result: AnalysisRes
   })}</p>
 }
 
+// Per-chunk context heat-bar (PR-11). A long context split into chunks for a sequence detector yields
+// one pre-aggregation score per chunk (AnalysisResult.contextChunkScores). The presenter only attaches
+// them to sequence/uncertainty results, so this NEVER localizes within the answer — cells are colored by
+// each chunk's RANK among the others (min-max within this bar), matching the "relative within answer"
+// honesty of an uncalibrated sequence score; the tooltip states the chunk index, raw score, and scale.
+function ContextHeatBar({ chunks, semantics }: { chunks: ContextChunkScore[]; semantics?: string }) {
+  if (!chunks || chunks.length < 2) return null
+  const values = chunks.map((chunk) => finite(chunk.score)).filter((value): value is number => value !== null)
+  if (!values.length) return null
+  const min = Math.min(...values)
+  const span = Math.max(...values) - min
+  const label = scoreLabel(semantics) ?? "relative within this answer"
+  return <div className="context-heatbar" role="group" aria-label="Per-chunk context scores">
+    <span className="context-heatbar-title">Context chunks</span>
+    <div className="context-heatbar-cells">
+      {chunks.map((chunk, index) => {
+        const value = finite(chunk.score)
+        const t = value === null || span <= 0 ? 0.5 : clamp01((value - min) / span)
+        const detail = `Chunk ${(finite(chunk.index) ?? index) + 1} of ${chunks.length}${value !== null ? ` · score ${value.toFixed(2)}` : ""} · ${label}`
+        return <span key={index} className="context-heatbar-cell" style={{ "--seg-wash": rampMix("--span-wash-low", "--span-wash-high", t), "--seg-line": rampMix("--span-line-low", "--span-line-high", t) } as CSSProperties} tabIndex={0} title={detail} aria-label={detail} />
+      })}
+    </div>
+  </div>
+}
+
 // Card footer for span-capable results (demo_renderer.py::_footer_html): ramp-colored verdict dot +
 // "N suspect spans · max risk X" on the left, and a τ→1.00 gradient risk legend on the right. Replaces
 // the sequence-level score orb for span results; the orb is kept only for single-score sequence results.
@@ -466,6 +493,7 @@ function ResultCard({ run, motion, onAction, onPrepareRerun }: { run: RunRecord;
     </div>
     <div className="answer-block">
       <div className="answer-label"><span>Answer</span><small>{recordedResult ? ORIGIN_LABELS.recordedResultVerified : replay ? "Recorded answer · live detection" : run.origin === "importedSnapshot" || run.origin === "imported" ? "Imported snapshot" : /answerability/i.test(run.origin ?? run.mode ?? "") ? "Answerability · live detection" : /supplied/i.test(run.origin ?? run.mode ?? "") ? "Supplied answer · live detection" : "Generated now"}</small></div>
+      {!isSpanResult && (result.contextChunkScores?.length ?? 0) > 1 && <ContextHeatBar chunks={result.contextChunkScores!} semantics={semantics} />}
       {stageReplay && !replayFinished ? <ReplayAnswer answer={run.answer ?? ""} onComplete={() => setReplayFinished(true)} /> : <><SegmentAnswer answer={run.answer ?? ""} result={result} />{isSpanResult && <SpanFooter result={result} />}</>}
     </div>
     {result.unavailableReason && <div className="inline-notice warning"><b>Analysis unavailable</b><span>{result.unavailableReason}</span></div>}
@@ -678,6 +706,36 @@ function AttentionTable({ diagnostics }: { diagnostics: WorkspacePayload["diagno
   return <section className="attention-card"><div className="section-heading"><div><p className="eyebrow">Attention</p><h2>{attention.title ?? "Bounded attention summary"}</h2></div></div><div className="table-scroll"><table><thead><tr><th>Token</th>{(attention.columnLabels ?? []).map((label) => <th key={label}>{label}</th>)}</tr></thead><tbody>{attention.values.map((row, rowIndex) => <tr key={rowIndex}><th>{attention.rowLabels?.[rowIndex] ?? rowIndex + 1}</th>{row.map((value, columnIndex) => <td key={columnIndex} style={value === null ? undefined : ({ "--attention": String(Math.max(0, Math.min(1, value))) } as CSSProperties)}><span>{value === null ? "—" : value.toFixed(2)}</span></td>)}</tr>)}</tbody></table></div>{attention.note && <p className="caption">{attention.note}</p>}</section>
 }
 
+// "Add a detector" recipes (PR-12). Static, copy-paste starting points sourced from the payload
+// (sirin/ui/workspace/recipes.py), so copy edits never touch this component. Rendered as a Diagnostics
+// section rather than a fourth top-level tab — developer-facing extension docs sit naturally beside the
+// runtime view, and it needs no new routing.
+function RecipeCard({ recipe }: { recipe: DetectorRecipe }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    globalThis.navigator?.clipboard?.writeText(recipe.code).then(
+      () => { setCopied(true); globalThis.setTimeout(() => setCopied(false), 1500) },
+      () => {},
+    )
+  }
+  return <article className="recipe-card">
+    <div className="recipe-head">
+      <div><h3>{recipe.title}</h3><p>{recipe.description}</p></div>
+      <button type="button" className="quiet" onClick={copy} aria-label={`Copy the ${recipe.title} snippet`}>{copied ? "Copied" : "Copy"}</button>
+    </div>
+    {recipe.reference && <p className="recipe-reference">Reference: <code>{recipe.reference}</code></p>}
+    <pre className="recipe-code"><code>{recipe.code}</code></pre>
+  </article>
+}
+
+function AddDetectorRecipes({ recipes }: { recipes: DetectorRecipe[] }) {
+  if (!recipes.length) return null
+  return <section className="recipes-section">
+    <div className="section-heading"><div><p className="eyebrow">Extend</p><h2>Add a detector</h2><p>Copy-paste starting points — each snippet is real SIRIN API you can adapt.</p></div></div>
+    <div className="recipe-list">{recipes.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} />)}</div>
+  </section>
+}
+
 function DiagnosticsWorkspace({ payload, busy, onAction }: { payload: WorkspacePayload; busy: boolean; onAction: (type: string, payload: Record<string, unknown>) => void }) {
   const diagnostics = payload.diagnostics
   const capabilities = (payload.capabilities ?? {}) as NonNullable<WorkspacePayload["capabilities"]> & { canRefreshDiagnostics?: boolean | Capability; canOpenCachedAttention?: boolean | Capability; canOpenLiveAttention?: boolean | Capability; canUnloadModels?: boolean | Capability }
@@ -701,6 +759,7 @@ function DiagnosticsWorkspace({ payload, busy, onAction }: { payload: WorkspaceP
     {diagnostics?.message && <div className="inline-notice info">{diagnostics.message}</div>}
     <AttentionTable diagnostics={diagnostics} />
     {trusted && diagnostics?.details && <details className="diagnostic-details"><summary>Trusted-local details</summary><dl>{Object.entries(diagnostics.details).map(([key, value]) => <div key={key}><dt>{titleCase(key)}</dt><dd>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl></details>}
+    <AddDetectorRecipes recipes={payload.recipes ?? []} />
   </main>
 }
 
