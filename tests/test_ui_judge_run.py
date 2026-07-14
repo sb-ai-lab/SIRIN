@@ -137,6 +137,44 @@ def test_judge_annotation_error_maps_to_actionable_partial():
     assert 'verbatim' in run.error.message
 
 
+def _run_sequence_judge(monkeypatch, generation, logprob_result):
+    from sirin.ui.presets import _build_openai_judge
+
+    judge = _build_openai_judge(
+        judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
+    )
+    monkeypatch.setattr(
+        judge.model_adapter,
+        'sample',
+        lambda inputs, **kwargs: ([generation], [logprob_result]),
+    )
+    return judge, judge.detect([build_sample('the prompt', ANSWER)])
+
+
+def test_sequence_judge_never_fabricates_a_verdict(monkeypatch):
+    # A reasoning model spends the one-token budget on thinking ('We'), returns no
+    # logprobs (OpenRouter :free routes): raise, never a silent pred=0 all-clear.
+    from sirin.detection.judging.judges.base import JudgeAnnotationError
+
+    with pytest.raises(JudgeAnnotationError, match='bare class digit'):
+        _run_sequence_judge(monkeypatch, 'We', None)
+
+
+def test_sequence_judge_digit_without_logprobs_keeps_verdict_no_score(monkeypatch):
+    _judge, (probs, preds, _) = _run_sequence_judge(monkeypatch, '1', None)
+
+    assert preds[0] == 1
+    assert probs[0] != probs[0]  # nan score: verdict holds, probability honestly absent
+
+
+def test_presenter_scalar_drops_non_finite_scores():
+    from sirin.ui.workspace.presenter import _scalar
+
+    assert _scalar(float('nan')) is None
+    assert _scalar(float('inf')) is None
+    assert _scalar(0.5) == 0.5
+
+
 def test_pasted_key_wins_over_env_and_absence_is_actionable(monkeypatch):
     monkeypatch.setenv('OPENAI_API_KEY', 'env-key')
     assert resolve_api_provider('OpenAI', api_key='pasted-key').api_key == 'pasted-key'

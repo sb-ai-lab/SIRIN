@@ -224,8 +224,19 @@ def run_token_sample(judge: Any, capture: _GenerationCapture, sample: list[dict]
 def run_sequence_sample(judge: Any, sample: list[dict]) -> dict:
     """One sequence-judge verdict. ``prob`` is the judge's NLL of the emitted token;
     ``p_hallucination`` = P(verdict == 1), derived from that NLL and the predicted digit."""
+    from sirin.detection.judging.judges.base import JudgeAnnotationError
+
     try:
         probs, preds, _ = judge.detect([sample])
+    except JudgeAnnotationError as error:  # first token was not a class digit (e.g. reasoning)
+        return {
+            "status": "no_digit_verdict",
+            "prob": float("nan"),
+            "pred": None,
+            "p_hallucination": float("nan"),
+            "generation": (judge.last_generations or [None])[0],
+            "error": str(error)[:500],
+        }
     except openai.BadRequestError as error:  # e.g. prompt exceeds the model context window
         return {
             "status": "api_error",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -31,7 +32,9 @@ def _scalar(value: Any) -> float | None:
         value = value[0]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    # Providers that omit logprobs yield nan scores; contracts require finite numbers, so a
+    # non-finite scalar honestly becomes "no score" instead of a downstream ValidationError.
+    return float(value) if math.isfinite(value) else None
 
 
 def _semantics(setup: SetupSnapshot, kind: AnalysisKind) -> ScoreSemantics:

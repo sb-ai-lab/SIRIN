@@ -184,10 +184,11 @@ class RunEngine:
                 if not answer:
                     raise
                 if _is_judge_annotation_error(exc):
-                    # The judge returned no verbatim annotation to align: preserve the answer and
-                    # surface an actionable partial rather than a generic, opaque failure.
+                    # The judge produced nothing alignable (no verbatim echo / no digit verdict):
+                    # preserve the answer and surface the judge's own actionable message. These
+                    # messages are authored in sirin code, never raw provider output.
                     code = 'judge_no_aligned_annotation'
-                    message = (
+                    message = str(exc)[:240] or (
                         'The judge model did not return a verbatim annotated answer. '
                         'Try another judge model, or lower the temperature.'
                     )
