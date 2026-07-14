@@ -17,6 +17,8 @@ sequence average-precision (~0.99) is inflated by that class imbalance.
 | detector | ROC (test) | AP (test) | F1 (test) | IoU (test) | ROC (val) | IoU (val) |
 |---|---|---|---|---|---|---|
 | Token Linear probe (layer 16, seed 13, τ=0.3851) | 0.7656 | 0.7725 | 0.7542 | 0.6273 | 0.8229 | 0.6349 |
+| Token CatBoost (layer 16) | 0.7633 | 0.7689 | 0.7576 | 0.6364 | 0.8152 | 0.6348 |
+| Token TabPFN (layer 16, 25k-token stratified subsample, PCA-100, GPU) | 0.7511 | 0.7650 | 0.7492 | 0.6174 | 0.7916 | 0.6239 |
 | UE · MaximumTokenProbability | 0.5585 | 0.5784 | 0.6964 | 0.4572 | 0.5647 | 0.4626 |
 | UE · TokenEntropy | 0.5650 | 0.5984 | 0.6964 | 0.4572 | 0.5712 | 0.4626 |
 | Judge · API Token (span-tag, test) | 0.6469 | 0.6358 | 0.7154 | 0.5220 | — | — |
@@ -70,6 +72,14 @@ Judge-span ROC (n = strict-positive-eligible rows, temperature 0.7, num_beams 3)
 | SimpleMem | 0.555 (n=409) | 0.489 (n=395) | 0.503 (n=395) |
 | LightMem | 0.743 (n=384) | 0.629 (n=336) | 0.639 (n=336) |
 | Mem0 | 0.793 (n=295) | 0.630 (n=240) | 0.652 (n=240) |
+
+TrustMem answerability judges (same 4B model through the trustmem runner; `LLM` = binary verdict,
+`LLM_probs` = verdict-token logprob score):
+
+| variant | LLM (binary) ROC | LLM_probs ROC |
+|---|---|---|
+| SimpleMem | 0.616 | 0.769 |
+| LightMem | 0.616 | 0.805 |
 
 ## Provenance notes
 

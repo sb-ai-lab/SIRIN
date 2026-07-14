@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from sirin.definitions import DetectionTaskType
 from sirin.ui.providers import (
+    CUSTOM_PROVIDER,
     OPENROUTER_PROVIDER,
     provider_models,
     resolve_api_provider,
@@ -141,9 +142,31 @@ def _resolve_judge(
     judge_api_key: str | None,
     api_provider: str = OPENROUTER_PROVIDER,
 ) -> tuple[str, str, str]:
-    provider = resolve_api_provider(api_provider, api_key=judge_api_key)
+    # A trusted-local Custom judge resolves its base URL from SIRIN_CUSTOM_OPENAI_BASE_URL (the pasted
+    # key wins, else SIRIN_CUSTOM_OPENAI_API_KEY, else 'EMPTY' — resolve_api_provider handles that).
+    custom_base_url = (
+        os.getenv('SIRIN_CUSTOM_OPENAI_BASE_URL', '')
+        if api_provider == CUSTOM_PROVIDER
+        else ''
+    )
+    provider = resolve_api_provider(
+        api_provider, custom_base_url, api_key=judge_api_key
+    )
     model_path = judge_model or provider_models(api_provider)[0]
     return model_path, provider.api_key, provider.base_url
+
+
+def _judge_extra_body(api_provider: str) -> dict[str, Any] | None:
+    """Per-request extension for a Custom judge endpoint; None for external providers.
+
+    A trusted-local vLLM Qwen judge otherwise lands every generation in its reasoning channel, so
+    every verbatim echo is invalid (JudgeAnnotationError); disabling thinking makes the verdict/
+    annotation stable. External providers get None — they may reject unknown fields. Opt back in with
+    SIRIN_CUSTOM_JUDGE_THINKING=1.
+    """
+    if api_provider != CUSTOM_PROVIDER or os.getenv('SIRIN_CUSTOM_JUDGE_THINKING') == '1':
+        return None
+    return {'chat_template_kwargs': {'enable_thinking': False}}
 
 
 def _build_uncertainty(
@@ -292,7 +315,12 @@ def _build_openai_judge(
         judge_model, judge_api_key, api_provider
     )
     model = OpenAIModelAdapter(
-        OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
+        OpenAIConfig(
+            model_path=model_path,
+            api_key=api_key,
+            base_url=base_url,
+            extra_body=_judge_extra_body(api_provider),
+        )
     )
     judge = SequenceOpenAIJudge(
         # temperature 0 keeps the single-token verdict deterministic.
@@ -325,7 +353,12 @@ def _build_openai_token_judge(
         judge_model, judge_api_key, api_provider
     )
     model = OpenAIModelAdapter(
-        OpenAIConfig(model_path=model_path, api_key=api_key, base_url=base_url)
+        OpenAIConfig(
+            model_path=model_path,
+            api_key=api_key,
+            base_url=base_url,
+            extra_body=_judge_extra_body(api_provider),
+        )
     )
     judge = TokenOpenAIJudge(
         # Span-tag prompts make the model echo the answer verbatim with [SPAN]…[/SPAN] around

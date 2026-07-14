@@ -357,6 +357,52 @@ def _build_uncertainty_sequence_msp_with_fakes(monkeypatch):
     )
 
 
+def test_custom_judge_forwards_base_url_and_disables_thinking(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.setenv('SIRIN_CUSTOM_OPENAI_BASE_URL', 'http://127.0.0.1:8000/v1')
+    monkeypatch.delenv('SIRIN_CUSTOM_JUDGE_THINKING', raising=False)
+    monkeypatch.delenv('SIRIN_CUSTOM_OPENAI_API_KEY', raising=False)
+
+    detector = _build_openai_token_judge_with_fakes(
+        monkeypatch, provider=presets.CUSTOM_PROVIDER
+    )
+    cfg = detector.model_adapter.config
+
+    assert cfg.base_url == 'http://127.0.0.1:8000/v1'
+    assert cfg.api_key == 'EMPTY'  # no pasted/env key -> trusted-local EMPTY fallback
+    assert cfg.extra_body == {'chat_template_kwargs': {'enable_thinking': False}}
+
+
+def test_external_judges_never_send_extra_body(monkeypatch):
+    # extra_body carries the vLLM enable_thinking toggle; external providers may reject unknown
+    # fields, so only the Custom provider gets it.
+    token = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenRouter')
+    assert token.model_adapter.config.extra_body is None
+    sequence = _build_openai_sequence_judge_with_fakes(monkeypatch)
+    assert sequence.model_adapter.config.extra_body is None
+
+
+def test_custom_judge_thinking_opt_out_env(monkeypatch):
+    monkeypatch.setenv('SIRIN_UI_TRUSTED_LOCAL', '1')
+    monkeypatch.setenv('SIRIN_CUSTOM_OPENAI_BASE_URL', 'http://127.0.0.1:8000/v1')
+    monkeypatch.setenv('SIRIN_CUSTOM_JUDGE_THINKING', '1')
+
+    detector = _build_openai_token_judge_with_fakes(
+        monkeypatch, provider=presets.CUSTOM_PROVIDER
+    )
+    assert detector.model_adapter.config.extra_body is None
+
+
+def test_custom_judge_requires_trusted_local(monkeypatch):
+    monkeypatch.delenv('SIRIN_UI_TRUSTED_LOCAL', raising=False)
+    monkeypatch.setenv('SIRIN_CUSTOM_OPENAI_BASE_URL', 'http://127.0.0.1:8000/v1')
+
+    with pytest.raises(ValueError, match='trusted local'):
+        _build_openai_token_judge_with_fakes(
+            monkeypatch, provider=presets.CUSTOM_PROVIDER
+        )
+
+
 def test_openai_judge_uses_provider_specific_base_url_and_key(monkeypatch):
     detector = _build_openai_token_judge_with_fakes(monkeypatch, provider='OpenAI')
 

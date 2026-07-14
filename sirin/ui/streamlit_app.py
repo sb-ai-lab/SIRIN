@@ -1027,10 +1027,10 @@ def _sidebar(st: Any) -> dict[str, Any]:
         judge_model = ''
         judge_api_key = ''
         if is_judge:
-            judge_provider = st.selectbox(
-                'Judge provider',
-                [OPENROUTER_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER],
-            )
+            judge_providers = [OPENROUTER_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER]
+            if is_trusted_local():
+                judge_providers.append(CUSTOM_PROVIDER)
+            judge_provider = st.selectbox('Judge provider', judge_providers)
             judge_model = st.text_input(
                 'Judge model',
                 value=provider_models(judge_provider)[0],

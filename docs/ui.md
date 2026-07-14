@@ -71,6 +71,7 @@ Shared-safe mode is a private single-user redaction and resource-hardening profi
 
 - External calls require per-destination, per-session consent.
 - Arbitrary local paths, custom endpoints, Hydra controls, live attention capture, filesystem provenance capture, and unload actions require `SIRIN_UI_TRUSTED_LOCAL=1`.
+- Trusted-local Custom judge endpoints (`SIRIN_CUSTOM_OPENAI_BASE_URL`) get thinking disabled by default for verdict/annotation stability; set `SIRIN_CUSTOM_JUDGE_THINKING=1` to re-enable it.
 - Shared-safe paths remain constrained by `SIRIN_UI_DATA_ROOTS` and `SIRIN_UI_CHECKPOINT_ROOTS`.
 - Browser errors are sanitized; raw provider/CUDA errors, stack traces, credentials, response bodies, environment values, and absolute paths are not component payloads.
 - Model/checkpoint provenance and score semantics travel with each run.
@@ -93,4 +94,4 @@ User-facing UI changes are recorded in the [development UI changelog](developmen
 
 ## Deferred paper features
 
-Compare views, detector agreement matrices, context heat bars, detailed latency breakdowns, an Add Detector guide, RAGTruth/Mu-SHROOM galleries, memory controls, and multi-model warm pooling are intentionally deferred. The static Hugging Face replay deployment remains separate and unchanged.
+Compare views (with the localization-agreement bar and scale-gated score deltas), context heat bars, latency breakdowns, the Add-a-detector guide, the RAGTruth gallery, and multi-model pooling (ModelManager-owned loading, `SIRIN_UI_MAX_ACTIVE_MODELS`) have shipped. Still intentionally deferred: SimpleMem serve/retry/abstain memory controls (the LongMemEval profiles and per-variant detector artifacts that feed them are bundled) and a Mu-SHROOM gallery (no verified local dataset). The static Hugging Face replay deployment remains separate and unchanged.

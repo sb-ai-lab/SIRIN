@@ -2,6 +2,28 @@
 
 This changelog records user-facing and runtime changes to the canonical Streamlit UI. The static Hugging Face replay deployment is maintained separately.
 
+## 2026-07-14 — paper features and the Qwen3.5-4B campaign
+
+### Added
+
+- **Compare mode**: two detectors score the same answer side by side, with a per-character localization-agreement bar (both/A-only/B-only/neither) and score deltas only when both sides share a calibrated-probability scale — every other pairing states "Different score scales — localization overlap only."
+- **Pasted API keys**: masked per-provider key fields for judges and API generators; keys live only in session memory, never persisted, logged, exported, or echoed (sentinel-tested), and never follow a provider switch.
+- **Span-level API judge that works**: span-tag annotation prompts, reference-aligned k/n consensus (non-verbatim generations are dropped; zero valid annotations surface as an actionable partial, never a false all-clear), honest `spanAgreement` semantics, and judge disclosures (model, provider, valid/requested, temperature) on every run.
+- A second built-in probe preset — **PsiloQA/Qwen3.5-4B token linear** (layer 16, τ = 0.385, SHA-256-verified checkpoint) — plus multi-profile LongMemEval support with SimpleMem/LightMem/Mem0 Qwen3.5-4B profiles, re-curated PsiloQA demo cases, a RAGTruth gallery, and two new recorded-result landing cards (Qwen3.5-4B probe and a token-judge annotation whose spans match the hidden gold exactly).
+- Latency strip (generation/detection/total) on live result cards; recorded results honestly show none.
+- Per-chunk context heat-bar for sequence detectors and an "Add a detector" guide with import-checked recipes in Diagnostics.
+- Campaign metrics summary: [campaign_qwen35_4b.md](campaign_qwen35_4b.md).
+
+### Changed
+
+- Every preset now derives a truthful score meaning (calibrated probability / raw score vs decision threshold / relative within answer / judge agreement / verdict) with distinct card copy; sequence thresholded scores render as a decision band against τ.
+- Model loading routes through ModelManager: switching local models evicts the previous one (`SIRIN_UI_MAX_ACTIVE_MODELS`, default 1); stateless API adapters skip the manager.
+
+### Fixed
+
+- The sequence API judge prompt never embedded the dialogue (missing `{sample}` placeholder) — every verdict scored an empty conversation; it now embeds the dialogue and forces a bare leading digit so the one-token logprob verdict cannot collapse into a JSON opener.
+- Empty provider generations count as invalid judge votes instead of crashing detection.
+
 ## 2026-07-14
 
 ### Added
