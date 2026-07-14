@@ -34,15 +34,34 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
         samples, group_ids = self._split_context_samples(samples)
         formatted_input = build_prompt_messages(self.config, samples)
 
-        results, logprobs_results = self.model_adapter.sample(
-            inputs=formatted_input,
-            max_tokens=1,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            return_logprobs=True,
-            top_logprobs=2,
-            **kwargs
-        )
+        def _sample(return_logprobs: bool):
+            return self.model_adapter.sample(
+                inputs=formatted_input,
+                max_tokens=self.config.verdict_max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                return_logprobs=return_logprobs,
+                top_logprobs=2,
+                **kwargs
+            )
+
+        try:
+            results, logprobs_results = _sample(return_logprobs=True)
+        except Exception as exc:
+            # Some providers reject logprobs outright (400): retry once without them and
+            # keep the honest no-score verdict (nan). Anything else propagates unchanged.
+            try:
+                import openai
+                logprobs_rejected = (
+                    isinstance(exc, openai.BadRequestError)
+                    and 'logprob' in str(exc).lower()
+                )
+            except ImportError:
+                logprobs_rejected = False
+            if not logprobs_rejected:
+                raise
+            results = _sample(return_logprobs=False)
+            logprobs_results = [None] * len(results)
         self.last_generations = list(results)
 
         probs = []
@@ -50,22 +69,28 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
 
         num_classes = max(self.config.num_classification_heads, 2)
         for idx, logprob_result in enumerate(logprobs_results):
-            # Some models omit logprobs: score becomes nan (not a crash); the verdict still holds.
-            if logprob_result and logprob_result[0]:
+            text = str(results[idx]).strip()
+            # Reasoning models return prose in content; take the first valid class digit.
+            digit = next(
+                (int(c) for c in text if c.isdigit() and int(c) < num_classes), None
+            )
+            if digit is None:
+                # Never fabricate a verdict when no valid class digit appears anywhere.
+                raise JudgeAnnotationError(
+                    f'The judge model did not answer with a bare class digit and no class '
+                    f'digit appears anywhere in its answer (got {text!r}). Choose a judge '
+                    'model that states the verdict digit, or raise verdict_max_tokens '
+                    f'(currently {self.config.verdict_max_tokens}) so a reasoning model '
+                    'can finish thinking before the digit.'
+                )
+            preds.append(digit)
+            # The adapter's logprobs carry floats only (no token text), so the first-token
+            # logprob is provably the digit's only when the whole answer IS the digit.
+            # Some models also omit logprobs entirely. Either way: nan, verdict still holds.
+            if logprob_result and logprob_result[0] and text == str(digit):
                 probs.append(-1 * logprob_result[0][0])
             else:
                 probs.append(float('nan'))
-
-            text = str(results[idx]).strip()
-            if not (text.isdigit() and int(text) < num_classes):
-                # Never fabricate a verdict: reasoning models spend the one-token budget on
-                # thinking, so the first token is not the digit the prompt demands.
-                raise JudgeAnnotationError(
-                    f'The judge model did not answer with a bare class digit (got {text!r}). '
-                    'Choose a judge model that returns the verdict as its first token; '
-                    'reasoning models spend the one-token budget on thinking.'
-                )
-            preds.append(int(text))
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)

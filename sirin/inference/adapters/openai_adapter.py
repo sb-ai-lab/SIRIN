@@ -34,6 +34,9 @@ class OpenAIModelAdapter(ModelAdapterBase):
         super().__init__(config, model, tokenizer)
         self._client = None
         self._async_client = None
+        # Per-choice finish_reasons of the last n>1 sample() call: one inner list per input,
+        # aligned 1:1 with that input's returned generations. None for n==1 calls.
+        self.last_finish_reasons: Optional[List[List[Optional[str]]]] = None
 
     def load(self, model: Any = None, tokenizer: Any = None):
         """Load the OpenAI client."""
@@ -114,11 +117,14 @@ class OpenAIModelAdapter(ModelAdapterBase):
                 time.sleep(2**attempt)
 
     @staticmethod
-    def _texts_from_response(response, texts: List[str]) -> None:
-        new = [choice.message.content for choice in response.choices]
-        if not new:
+    def _texts_from_response(
+        response, texts: List[str], finish_reasons: List[Optional[str]]
+    ) -> None:
+        if not response.choices:
             raise ValueError('OpenAI-compatible response returned no choices for n>1.')
-        texts.extend(new)
+        for choice in response.choices:
+            texts.append(choice.message.content)
+            finish_reasons.append(getattr(choice, 'finish_reason', None))
 
     async def _make_single_request_async(
         self,
@@ -126,18 +132,19 @@ class OpenAIModelAdapter(ModelAdapterBase):
         return_logprobs: bool,
         **sampling_kwargs
     ) -> Union[str, List[str], Tuple[str, List]]:
-        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or list[str] (n>1)."""
+        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or (texts, finish_reasons) (n>1)."""
         n = sampling_kwargs.pop('n', 1)
         if n > 1:
             texts: List[str] = []
+            finish_reasons: List[Optional[str]] = []
             per_call = n  # ask for all n first; top up singly when the provider returns fewer.
             while len(texts) < n:
                 response = await self._create_with_retry_async(
                     messages, n=per_call, **sampling_kwargs
                 )
-                self._texts_from_response(response, texts)
+                self._texts_from_response(response, texts, finish_reasons)
                 per_call = 1
-            return texts[:n]
+            return texts[:n], finish_reasons[:n]
 
         response = await self._create_with_retry_async(messages, **sampling_kwargs)
         generated_text = response.choices[0].message.content
@@ -154,18 +161,19 @@ class OpenAIModelAdapter(ModelAdapterBase):
         return_logprobs: bool,
         **sampling_kwargs
     ) -> Union[str, List[str], Tuple[str, List]]:
-        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or list[str] (n>1)."""
+        """One input -> str (n==1), (str, logprobs) (n==1 + logprobs), or (texts, finish_reasons) (n>1)."""
         n = sampling_kwargs.pop('n', 1)
         if n > 1:
             texts: List[str] = []
+            finish_reasons: List[Optional[str]] = []
             per_call = n  # ask for all n first; top up singly when the provider returns fewer.
             while len(texts) < n:
                 response = self._create_with_retry_sync(
                     messages, n=per_call, **sampling_kwargs
                 )
-                self._texts_from_response(response, texts)
+                self._texts_from_response(response, texts, finish_reasons)
                 per_call = 1
-            return texts[:n]
+            return texts[:n], finish_reasons[:n]
 
         response = self._create_with_retry_sync(messages, **sampling_kwargs)
         generated_text = response.choices[0].message.content
@@ -291,7 +299,12 @@ class OpenAIModelAdapter(ModelAdapterBase):
               ``return_logprobs``.
             - n>1: ``list[list[str]]`` (one inner list of n texts per input). ``return_logprobs``
               is NOT supported here and raises ``ValueError``.
+
+        Side channel: ``self.last_finish_reasons`` is reset every call; after an n>1 call it holds
+        one inner list per input, aligned 1:1 with that input's returned generations
+        (e.g. 'length' marks a generation truncated by the token budget).
         """
+        self.last_finish_reasons = None
         if return_logprobs and n > 1:
             raise ValueError('return_logprobs=True is not supported together with n>1.')
         if num_return_sequences > 1:
@@ -347,12 +360,17 @@ class OpenAIModelAdapter(ModelAdapterBase):
             return results, logprobs_results
         else:
             results = self._make_request(
-                messages_batch, 
+                messages_batch,
                 return_logprobs=False,
                 use_async=use_async,
                 max_concurrent=max_concurrent,
                 **sampling_kwargs
             )
+            if n > 1:
+                # n>1 per-input results are (texts, finish_reasons) tuples; split the side
+                # channel off so the public return shape stays list[list[str]].
+                self.last_finish_reasons = [list(reasons) for _, reasons in results]
+                return [list(texts) for texts, _ in results]
             return results
 
     @manage_active_model

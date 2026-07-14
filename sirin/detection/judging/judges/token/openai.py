@@ -81,15 +81,34 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         )
         # Adapter contract: n==1 -> list[str] (one per sample); n>1 -> list[list[str]] (n per sample).
         per_sample_gens = [[g] for g in generated] if n == 1 else generated
+        # Adapter side channel (n>1): per-sample finish_reasons aligned 1:1 with the generations;
+        # 'length' means the completion budget truncated that generation mid-reasoning.
+        per_sample_reasons = getattr(self.model_adapter, 'last_finish_reasons', None) or []
 
         all_char_probs = []
         all_char_preds = []
         self.last_consensus = []
-        for reference, gens in zip(references, per_sample_gens):
-            valid = [g for g in gens if self._echo_of(g) == str(reference).strip()]
-            self.last_consensus.append(
-                {'requested': n, 'valid': len(valid), 'temperature': self.config.temperature}
-            )
+        for i, (reference, gens) in enumerate(zip(references, per_sample_gens)):
+            reasons = list(per_sample_reasons[i]) if i < len(per_sample_reasons) else []
+            reasons += [None] * (len(gens) - len(reasons))
+            valid = []
+            invalid = {'truncated': 0, 'empty': 0, 'not_verbatim': 0}
+            for gen, reason in zip(gens, reasons):
+                if self._echo_of(gen) == str(reference).strip():
+                    valid.append(gen)
+                elif reason == 'length':
+                    invalid['truncated'] += 1
+                elif not gen:
+                    invalid['empty'] += 1
+                else:
+                    invalid['not_verbatim'] += 1
+            entry = {
+                'requested': n, 'valid': len(valid), 'temperature': self.config.temperature,
+            }
+            counts = {kind: count for kind, count in invalid.items() if count}
+            if counts:
+                entry['invalid'] = counts
+            self.last_consensus.append(entry)
             if not valid:
                 raise JudgeAnnotationError(
                     f'No judge generation echoed the answer verbatim '
@@ -103,7 +122,9 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
 
         # Expose sample 0's generations/spans for the UI (reads gens[0]/spans[0]).
         self.last_generations = list(per_sample_gens[0]) if per_sample_gens else []
-        self.last_spans = [find_span_segments(g) for g in self.last_generations]
+        # `or ''`: a provider may return None content (e.g. exhausted reasoning budget) for one
+        # generation while the sample still validates on the others.
+        self.last_spans = [find_span_segments(g or '') for g in self.last_generations]
 
         char_probs = [prob.tolist() for prob in all_char_probs]
         char_preds = [pred.tolist() for pred in all_char_preds]

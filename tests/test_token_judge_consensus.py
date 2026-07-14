@@ -93,7 +93,12 @@ def test_shorter_longer_and_paraphrased_echoes_are_dropped():
     probs, _, _ = judge.detect([_sample('abcd')])
 
     assert probs[0] == [0.0, 1.0, 1.0, 0.0]  # only the one valid echo votes
-    assert judge.last_consensus[0] == {'requested': 4, 'valid': 1, 'temperature': 0.7}
+    assert judge.last_consensus[0] == {
+        'requested': 4,
+        'valid': 1,
+        'temperature': 0.7,
+        'invalid': {'not_verbatim': 3},
+    }
 
 
 def test_all_invalid_raises_annotation_error_never_all_clear():
@@ -145,3 +150,60 @@ def test_detect_single_generation_path():
 
     assert probs[0] == [0.0, 1.0, 1.0, 0.0]
     assert judge.last_consensus[0] == {'requested': 1, 'valid': 1, 'temperature': 0.7}
+
+
+# --- invalid-vote attribution (adapter's last_finish_reasons side channel) ------------------
+
+
+def test_invalid_votes_classified_truncated_empty_not_verbatim():
+    # finish_reason='length' -> truncated (even when the mirrored CoT text is non-empty);
+    # falsy generation -> empty; anything else -> not_verbatim. Valid echoes are never counted.
+    gens = ['a[SPAN]bc[/SPAN]d', 'Okay, the user asks', None, 'a paraphrase']
+    judge = _make_judge([gens], n=4)
+    judge.model_adapter.last_finish_reasons = [['stop', 'length', 'stop', 'stop']]
+
+    probs, _, _ = judge.detect([_sample('abcd')])
+
+    assert probs[0] == [0.0, 1.0, 1.0, 0.0]
+    assert judge.last_consensus[0] == {
+        'requested': 4,
+        'valid': 1,
+        'temperature': 0.7,
+        'invalid': {'truncated': 1, 'empty': 1, 'not_verbatim': 1},
+    }
+
+
+def test_all_valid_consensus_has_no_invalid_key():
+    judge = _make_judge([['abcd', 'abcd']], n=2)
+    judge.model_adapter.last_finish_reasons = [['stop', 'stop']]
+
+    judge.detect([_sample('abcd')])
+
+    assert 'invalid' not in judge.last_consensus[0]
+
+
+def test_missing_finish_reasons_default_to_not_verbatim():
+    # An adapter without the side channel (or a monkeypatched sample) still attributes: no
+    # reason + non-empty text -> not_verbatim, never a crash.
+    judge = _make_judge([['abcd', 'a paraphrase']], n=2)
+    assert not hasattr(judge.model_adapter, 'last_finish_reasons')
+
+    judge.detect([_sample('abcd')])
+
+    assert judge.last_consensus[0]['invalid'] == {'not_verbatim': 1}
+
+
+def test_ui_warning_splits_truncated_from_not_verbatim():
+    from sirin.ui.streamlit_app import detection_view_model
+
+    gens = ['a[SPAN]bc[/SPAN]d', 'abcd', 'Okay, the user asks', 'a paraphrase', 'ab']
+    judge = _make_judge([gens], n=5)
+    judge.model_adapter.last_finish_reasons = [['stop', 'stop', 'length', 'stop', 'stop']]
+
+    result = judge.detect([_sample('abcd')])
+    view = detection_view_model(result, 'abcd', judge)
+
+    assert view['run_warnings'] == [
+        '1 of 5 judge samples hit the token limit mid-reasoning and was excluded.',
+        '2 of 5 judge samples were not verbatim and were excluded.',
+    ]

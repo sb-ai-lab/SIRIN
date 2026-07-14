@@ -12,9 +12,11 @@ from sirin.inference.adapters.openai_adapter import OpenAIModelAdapter
 from sirin.models.inference import OpenAIConfig
 
 
-def _choice(content, logprobs=None):
+def _choice(content, logprobs=None, finish_reason='stop'):
     return types.SimpleNamespace(
-        message=types.SimpleNamespace(content=content), logprobs=logprobs
+        message=types.SimpleNamespace(content=content),
+        logprobs=logprobs,
+        finish_reason=finish_reason,
     )
 
 
@@ -112,3 +114,40 @@ def test_n1_logprobs_return_shape_unchanged():
 
     assert texts == ['only']
     assert lps == [[[-0.25]]]
+
+
+def test_finish_reasons_align_with_generations_across_top_up():
+    # The 2nd of 3 topped-up generations overruns the budget: its slot (and only its slot)
+    # must read 'length' in the side channel, 1:1 with the returned texts.
+    reasons = ['stop', 'length', 'stop']
+    responder = lambda idx, kw: types.SimpleNamespace(
+        choices=[_choice(f't{idx}', finish_reason=reasons[idx])]
+    )
+    adapter = _adapter(responder)
+
+    out = adapter.sample([[{'role': 'user', 'content': 'x'}]], n=3)
+
+    assert out == [['t0', 't1', 't2']]  # public return shape unchanged
+    assert adapter.last_finish_reasons == [['stop', 'length', 'stop']]
+
+
+def test_finish_reasons_reset_to_none_on_n1_call():
+    responder = lambda idx, kw: types.SimpleNamespace(choices=[_choice('t')])
+    adapter = _adapter(responder)
+
+    adapter.sample([[{'role': 'user', 'content': 'x'}]], n=2)
+    assert adapter.last_finish_reasons == [['stop', 'stop']]
+
+    adapter.sample([[{'role': 'user', 'content': 'x'}]])  # n==1 resets the side channel
+    assert adapter.last_finish_reasons is None
+
+
+def test_finish_reasons_missing_on_choice_become_none():
+    # Providers/fakes without finish_reason must not crash the top-up path.
+    choice = types.SimpleNamespace(message=types.SimpleNamespace(content='t'), logprobs=None)
+    responder = lambda idx, kw: types.SimpleNamespace(choices=[choice])
+    adapter = _adapter(responder)
+
+    adapter.sample([[{'role': 'user', 'content': 'x'}]], n=2)
+
+    assert adapter.last_finish_reasons == [[None, None]]

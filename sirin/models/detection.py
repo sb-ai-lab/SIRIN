@@ -231,6 +231,10 @@ class JudgeBaseConfig(DetectorBaseConfig):
         "Respond with 1 if the assistant's answer contains hallucination, 0 otherwise: "
     )
     max_new_tokens: int = 2048
+    # Completion budget for single-verdict judges: >1 lets reasoning models think before
+    # the digit; default 1 preserves the strict one-token protocol (campaign scripts,
+    # local vLLM).
+    verdict_max_tokens: int = 1
     temperature: float = 1.0
     top_p: float = 1.0
     diversity_penalty: float = 1.0

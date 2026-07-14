@@ -106,7 +106,7 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
             sample_preds = [preds[i] for i in sample_mask]
             facts = [
                 {"fact": split[1]["content"], "pred": pred, "prob": prob}
-                for split, pred, prob in zip(splitted_samples, sample_probs, sample_preds)
+                for split, pred, prob in zip(splitted_samples, sample_preds, sample_probs)
             ]
             results.append(
                 {
