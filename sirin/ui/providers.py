@@ -5,7 +5,7 @@ import os
 import urllib.request
 from dataclasses import dataclass
 
-from sirin.ui.path_policy import is_trusted_local
+from sirin.ui.path_policy import is_hosted, is_trusted_local
 
 
 OPENAI_PROVIDER = 'OpenAI'
@@ -103,3 +103,20 @@ def resolve_api_provider(
         base_url=API_PROVIDER_BASE_URLS[provider],
         api_key=resolved_key,
     )
+
+
+def require_shared_key_model(provider: str, model: str, pasted_key: str | None) -> None:
+    """On the hosted profile, the server's shared env key covers free models only.
+
+    The model field is visitor-editable, so without this gate a public Space carrying a
+    funded OPENROUTER_API_KEY secret would let any visitor bill paid models to it. A
+    pasted key is the visitor's own — no restriction. Non-hosted deployments (local
+    dev, campaign scripts) keep full env-key freedom.
+    """
+    if pasted_key or not is_hosted():
+        return
+    if provider == OPENROUTER_PROVIDER and not model.endswith(':free'):
+        raise ValueError(
+            f'The shared demo key covers free OpenRouter models only — paste your own '
+            f'API key in the sidebar to use {model}.'
+        )

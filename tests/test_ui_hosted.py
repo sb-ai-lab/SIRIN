@@ -65,3 +65,28 @@ def test_non_hosted_seed_runs_keep_the_census_hero(not_hosted):
 
     assert runs[-1].setup_snapshot.detector_preset == CENSUS_PRESET
     assert any(r.setup_snapshot.detector_preset == QWEN35_PRESET for r in runs)
+
+
+def test_shared_env_key_is_limited_to_free_models_on_hosted(monkeypatch):
+    import pytest
+
+    from sirin.ui.providers import OPENROUTER_PROVIDER, require_shared_key_model
+
+    monkeypatch.setenv('SIRIN_UI_HOSTED', '1')
+    # Shared env key + free model: allowed (the demo default path).
+    require_shared_key_model(
+        OPENROUTER_PROVIDER, 'nvidia/nemotron-3-super-120b-a12b:free', None
+    )
+    # Shared env key + paid model: blocked with actionable copy.
+    with pytest.raises(ValueError, match='paste your own'):
+        require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', None)
+    # A pasted key is the visitor's own: no restriction.
+    require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', 'sk-user')
+
+
+def test_shared_key_guard_is_hosted_only(monkeypatch):
+    from sirin.ui.providers import OPENROUTER_PROVIDER, require_shared_key_model
+
+    monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
+    # Local/campaign use keeps full env-key freedom.
+    require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', None)

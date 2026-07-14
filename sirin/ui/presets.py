@@ -21,6 +21,7 @@ from sirin.ui.providers import (
     OPENROUTER_PROVIDER,
     custom_openai_base_url,
     provider_models,
+    require_shared_key_model,
     resolve_api_provider,
 )
 
@@ -172,6 +173,7 @@ def _resolve_judge(
         api_provider, custom_base_url, api_key=judge_api_key
     )
     model_path = judge_model or provider_models(api_provider)[0]
+    require_shared_key_model(api_provider, model_path, judge_api_key)
     return model_path, provider.api_key, provider.base_url
 
 

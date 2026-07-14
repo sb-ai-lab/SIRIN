@@ -28,6 +28,7 @@ from sirin.ui.providers import (
     custom_openai_base_url,
     local_openai_models,
     provider_models,
+    require_shared_key_model,
     resolve_api_provider,
 )
 from sirin.ui.styles import risk_color
@@ -784,6 +785,7 @@ def _new_generator_adapter(
 
         # An explicit pasted key wins; '' falls back to the provider env var inside resolve.
         provider = resolve_api_provider(backend, custom_base_url, api_key=api_key or None)
+        require_shared_key_model(backend, model_path, api_key or None)
         return OpenAIModelAdapter(
             OpenAIConfig(
                 model_path=model_path,
