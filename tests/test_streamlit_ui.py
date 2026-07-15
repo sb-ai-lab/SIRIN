@@ -980,7 +980,7 @@ def test_sidebar_renders_census_headings_and_meta_for_default_preset(monkeypatch
     headings = ' '.join(st.html_calls)
     assert 'sirin-side-heading' in headings
     assert 'Detector' in headings and 'Generator' in headings
-    assert 'layer 24 · τ = 0.38 · SHA-256-verified checkpoint' in st.caption_calls
+    assert 'layer 24 · τ = 0.38 · SHA-256-pinned checkpoint' in st.caption_calls
     assert (
         'Device: cuda · bf16 · one shared model for generation and probing'
         in st.caption_calls

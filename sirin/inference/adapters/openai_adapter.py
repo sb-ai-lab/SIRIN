@@ -444,7 +444,8 @@ class OpenAIModelAdapter(ModelAdapterBase):
         if capture_token_uncertainty:
             request.update(logprobs=True, top_logprobs=top_logprobs)
             self.last_generation_trace = None
-        extra_body = dict(self.config.extra_body) if self.config.extra_body else {}
+        config_extra_body = getattr(self.config, 'extra_body', None)
+        extra_body = dict(config_extra_body) if config_extra_body else {}
         if 'qwen3.5' in self.config.model_path.lower():
             chat_template_kwargs = dict(extra_body.get('chat_template_kwargs') or {})
             chat_template_kwargs['enable_thinking'] = False

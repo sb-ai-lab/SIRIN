@@ -131,7 +131,7 @@ def test_psiloqa_qwen35_census_caption_reports_layer_threshold_and_sha():
     # Real bundled checkpoint: layer 16, τ = 0.39 (0.385…), SHA-256 provenance.
     assert 'layer 16' in caption
     assert 'τ = 0.39' in caption
-    assert 'SHA-256-verified checkpoint' in caption
+    assert 'SHA-256-pinned checkpoint' in caption
 
 
 def test_psiloqa_qwen35_manifest_rejects_a_wrong_model_checkpoint():

@@ -1106,7 +1106,7 @@ def detector_census_caption(preset: Preset, checkpoint_dir: str | None = None) -
     if threshold is not None:
         parts.append(f'τ = {threshold:.2f}')
     if preset.builtin_checkpoint:
-        parts.append('bundled checkpoint')
+        parts.append('SHA-256-pinned checkpoint')
     # Presets with no dynamic checkpoint meta (uncertainty/judge) carry a static one-line method truth.
     return ' · '.join(parts) or (getattr(preset, 'census_caption', None) or '')
 
