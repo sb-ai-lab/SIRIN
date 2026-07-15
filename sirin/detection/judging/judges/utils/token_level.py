@@ -112,19 +112,24 @@ def calculate_character_probabilities(
 
     if reference is not None:
         max_len = len(reference)
+        # Vote vectors come from whitespace-stripped generations, which the echo gate
+        # validated against reference.strip(); they therefore correspond to
+        # reference[lead:]. Offset by the reference's leading whitespace instead of
+        # left-anchoring at 0 (which would shift every char score off its true position).
+        lead = len(reference) - len(reference.lstrip())
     elif all_char_vectors:
         max_len = len(all_char_vectors[0])
+        lead = 0
     else:
         return [0.0] * len(generated_texts[0]) if generated_texts else []
 
     padded_vectors = []
     for vec in all_char_vectors:
-        if len(vec) < max_len:
-            padded_vec = vec + [0.0] * (max_len - len(vec))
-        elif len(vec) > max_len:
-            padded_vec = vec[:max_len]
-        else:
-            padded_vec = vec
+        padded_vec = [0.0] * max_len
+        for j, value in enumerate(vec):
+            pos = lead + j
+            if 0 <= pos < max_len:
+                padded_vec[pos] = value
         padded_vectors.append(padded_vec)
 
     mean_vector = []

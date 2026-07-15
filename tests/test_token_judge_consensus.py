@@ -207,3 +207,16 @@ def test_ui_warning_splits_truncated_from_not_verbatim():
         '1 of 5 judge samples hit the token limit mid-reasoning and was excluded.',
         '2 of 5 judge samples were not verbatim and were excluded.',
     ]
+
+
+def test_char_probabilities_offset_by_reference_leading_whitespace():
+    """A vote vector comes from the whitespace-stripped generation; a leading-whitespace
+    reference must push every char score right by the stripped offset, not anchor at 0."""
+    from sirin.detection.judging.judges.utils.token_level import (
+        calculate_character_probabilities,
+    )
+
+    gen = '[SPAN]Paris[/SPAN].'
+    base = calculate_character_probabilities([gen], reference='Paris.')
+    shifted = calculate_character_probabilities([gen], reference=' Paris.')
+    assert shifted == [0.0] + base

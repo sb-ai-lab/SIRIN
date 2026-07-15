@@ -4,6 +4,7 @@ from sirin.detection.judging.judges.utils.decoder import (
 from sirin.detection.judging.judges.utils.logprobs import (
     parse_binary_prediction,
     probability_of_positive_class,
+    sample_with_logprobs_fallback,
 )
 from sirin.detection.judging.judges.utils.metrics import (
     calibrate_and_compute_metrics,

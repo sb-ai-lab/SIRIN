@@ -10,6 +10,7 @@ from sirin.detection.judging.judges.base import OpenAIJudgeBase
 from sirin.detection.judging.judges.utils import (
     build_prompt_messages,
     probability_of_positive_class,
+    sample_with_logprobs_fallback,
 )
 from sirin.detection.splitters import SplitManager
 from sirin.inference.adapters import ModelAdapterBase
@@ -65,16 +66,19 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
 
         formatted_input = build_prompt_messages(self.config, samples)
 
-        results, logprobs_results = self.model_adapter.sample(
-            inputs=formatted_input,
-            max_tokens=self.config.verdict_max_tokens,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            return_logprobs=True,
-            top_logprobs=self.config.top_logprobs,
-            max_concurrent=self.config.max_concurrent,
-            **kwargs,
-        )
+        def _sample(return_logprobs: bool):
+            return self.model_adapter.sample(
+                inputs=formatted_input,
+                max_tokens=self.config.verdict_max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                return_logprobs=return_logprobs,
+                top_logprobs=self.config.top_logprobs,
+                max_concurrent=self.config.max_concurrent,
+                **kwargs,
+            )
+
+        results, logprobs_results = sample_with_logprobs_fallback(_sample)
 
         probs = []
         preds = []

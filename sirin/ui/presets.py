@@ -120,7 +120,7 @@ class Preset:
     task: str = DetectionTaskType.HALLUCINATION_DETECTION.value
     display_mode: str = 'gauge'
     is_judge: bool = False
-    builtin_checkpoint: str | None = None  # bundled, SHA-256-verified; no path input needed.
+    builtin_checkpoint: str | None = None  # bundled checkpoint (hash-pinned in its manifest); no path input needed.
     # One-line census-sidebar truth about the method (names it + its honest score scale). Used only when
     # the preset exposes no dynamic checkpoint meta (layer/τ/SHA); '' falls back to the description.
     census_caption: str | None = None
@@ -1106,7 +1106,7 @@ def detector_census_caption(preset: Preset, checkpoint_dir: str | None = None) -
     if threshold is not None:
         parts.append(f'τ = {threshold:.2f}')
     if preset.builtin_checkpoint:
-        parts.append('SHA-256-verified checkpoint')
+        parts.append('bundled checkpoint')
     # Presets with no dynamic checkpoint meta (uncertainty/judge) carry a static one-line method truth.
     return ' · '.join(parts) or (getattr(preset, 'census_caption', None) or '')
 

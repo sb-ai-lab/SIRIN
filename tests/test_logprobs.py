@@ -5,6 +5,7 @@ import pytest
 from sirin.detection.judging.judges.utils.logprobs import (
     parse_binary_prediction,
     probability_of_positive_class,
+    sample_with_logprobs_fallback,
 )
 
 LN = math.log
@@ -71,6 +72,16 @@ def test_duplicate_token_keeps_highest_probability_entry():
     assert probability_of_positive_class(seq) == pytest.approx(0.6)
 
 
+def test_skips_a_preamble_position_where_a_class_token_is_only_an_alternative():
+    """A reasoning preamble can carry a bare '0'/'1' as a low-rank alternative; the score
+    must come from the position the model actually emitted the digit, not the preamble."""
+    seq = [
+        [('Because', LN(0.6)), ('1', LN(0.05))],  # emitted 'Because'; '1' only an alt
+        [('0', LN(0.9)), ('1', LN(0.1))],  # the real verdict position
+    ]
+    assert probability_of_positive_class(seq) == pytest.approx(0.1)
+
+
 @pytest.mark.parametrize(
     'text,expected',
     [('1', 1), ('0', 0), (' 1 ', 1), ('1.', 1), ('**0**', 0), ('', 0), (None, 0),
@@ -87,3 +98,36 @@ def test_probability_is_monotone_in_confidence():
         for p in (0.51, 0.7, 0.9, 0.99)
     ]
     assert scores == sorted(scores)
+
+
+def test_sample_with_logprobs_fallback_retries_without_logprobs_on_400():
+    """A provider that rejects logprobs (400) must degrade to a no-score (None) verdict,
+    not crash -- the same fallback the sequence and claim judges both rely on."""
+    import httpx
+    import openai
+
+    response = httpx.Response(
+        400, request=httpx.Request('POST', 'http://test/v1/chat/completions')
+    )
+    calls = []
+
+    def sample_fn(return_logprobs):
+        calls.append(return_logprobs)
+        if return_logprobs:
+            raise openai.BadRequestError(
+                'logprobs is not supported on this route', response=response, body=None
+            )
+        return ['0', '1']
+
+    results, logprobs_results = sample_with_logprobs_fallback(sample_fn)
+    assert results == ['0', '1']
+    assert logprobs_results == [None, None]
+    assert calls == [True, False]  # tried with logprobs, then fell back once
+
+
+def test_sample_with_logprobs_fallback_propagates_non_logprob_errors():
+    def sample_fn(return_logprobs):
+        raise RuntimeError('network down')
+
+    with pytest.raises(RuntimeError, match='network down'):
+        sample_with_logprobs_fallback(sample_fn)

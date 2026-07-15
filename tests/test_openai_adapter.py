@@ -83,3 +83,19 @@ def test_sequential_batch_with_logprobs_yields_texts_and_logprobs():
     texts, logprobs = adapter._make_request([[], []], return_logprobs=True, use_async=False)
     assert texts == ['1', '1']
     assert len(logprobs) == 2 and logprobs[0] == [[('0', -0.1), ('1', -2.3)]]
+
+
+def test_is_non_retryable_only_fires_on_4xx_except_429():
+    """A 400/404/422 client error should fail fast (so the judge's logprobs fallback
+    fires without burning the backoff); 429 rate-limit and 5xx/network still retry."""
+
+    class _Status(Exception):
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    assert OpenAIModelAdapter._is_non_retryable(_Status(400)) is True
+    assert OpenAIModelAdapter._is_non_retryable(_Status(404)) is True
+    assert OpenAIModelAdapter._is_non_retryable(_Status(422)) is True
+    assert OpenAIModelAdapter._is_non_retryable(_Status(429)) is False
+    assert OpenAIModelAdapter._is_non_retryable(_Status(500)) is False
+    assert OpenAIModelAdapter._is_non_retryable(Exception()) is False

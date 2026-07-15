@@ -235,6 +235,37 @@ def test_shared_env_key_serves_only_the_configured_default_model(monkeypatch):
     require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', 'sk-user')
 
 
+def test_shared_env_key_fails_closed_on_paid_or_unset_default(monkeypatch):
+    """H1: the shared key must fund a :free route only. A misconfigured (paid) or unset
+    default disables the shared key entirely rather than silently billing a paid model,
+    and OpenAI/Anthropic env keys never ride the shared key without a pasted key."""
+    import pytest
+
+    from sirin.ui.providers import (
+        ANTHROPIC_PROVIDER,
+        OPENAI_PROVIDER,
+        OPENROUTER_PROVIDER,
+        require_shared_key_model,
+    )
+
+    monkeypatch.setenv('SIRIN_UI_HOSTED', '1')
+
+    # Paid default → even that exact model is refused (fail closed, no billing).
+    monkeypatch.setenv('SIRIN_OPENROUTER_MODEL', 'openai/gpt-4.1-mini')
+    with pytest.raises(ValueError, match='free OpenRouter'):
+        require_shared_key_model(OPENROUTER_PROVIDER, 'openai/gpt-4.1-mini', None)
+
+    # A funded OpenAI/Anthropic env key (if ever present) is never spent by a visitor
+    # without a pasted key, whatever the model.
+    monkeypatch.setenv('SIRIN_OPENROUTER_MODEL', 'qwen/qwen3-8b:free')
+    with pytest.raises(ValueError, match='paste your own'):
+        require_shared_key_model(OPENAI_PROVIDER, 'gpt-4.1-mini', None)
+    with pytest.raises(ValueError, match='paste your own'):
+        require_shared_key_model(ANTHROPIC_PROVIDER, 'claude-sonnet-4-6', None)
+    # ...but their own pasted key is unrestricted.
+    require_shared_key_model(OPENAI_PROVIDER, 'gpt-4.1-mini', 'sk-user')
+
+
 def test_generator_adapter_applies_openrouter_reasoning_policy(monkeypatch):
     # Without this the demo generator lets a reasoning model overrun the budget and
     # OpenRouter mirrors the truncated chain-of-thought into content — the "answer" the

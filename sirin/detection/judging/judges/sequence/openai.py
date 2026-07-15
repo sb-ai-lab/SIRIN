@@ -10,6 +10,7 @@ from sirin.detection.judging.judges.utils import (
     format_dialogue_samples,
     parse_binary_prediction,
     probability_of_positive_class,
+    sample_with_logprobs_fallback,
 )
 from sirin.inference.adapters import ModelAdapterBase
 from sirin.models.detection import OpenAIJudgeConfig
@@ -53,23 +54,7 @@ class SequenceOpenAIJudge(OpenAIJudgeBase):
                 **kwargs
             )
 
-        try:
-            results, logprobs_results = _sample(return_logprobs=True)
-        except Exception as exc:
-            # Some providers reject logprobs outright (400): retry once without them and
-            # keep the honest no-score verdict (nan). Anything else propagates unchanged.
-            try:
-                import openai
-                logprobs_rejected = (
-                    isinstance(exc, openai.BadRequestError)
-                    and 'logprob' in str(exc).lower()
-                )
-            except ImportError:
-                logprobs_rejected = False
-            if not logprobs_rejected:
-                raise
-            results = _sample(return_logprobs=False)
-            logprobs_results = [None] * len(results)
+        results, logprobs_results = sample_with_logprobs_fallback(_sample)
         self.last_generations = list(results)
 
         probs = []

@@ -121,19 +121,27 @@ def openrouter_reasoning_extra_body(model: str) -> dict:
 
 
 def require_shared_key_model(provider: str, model: str, pasted_key: str | None) -> None:
-    """On the hosted profile, the server's shared env key serves ONLY the configured
-    default model (``SIRIN_OPENROUTER_MODEL``).
+    """On the hosted profile, the server's shared env key funds ONLY the configured
+    **free** OpenRouter demo model (``SIRIN_OPENROUTER_MODEL``, which must be a ``:free``
+    route). Any paid model — a non-default or non-free OpenRouter model, or any
+    OpenAI/Anthropic model — requires the visitor's own pasted key.
 
     The model field is visitor-editable, so without this gate a public Space carrying a
-    funded OPENROUTER_API_KEY secret would let any visitor bill arbitrary models to it.
-    A pasted key is the visitor's own — no restriction. Non-hosted deployments (local
-    dev, campaign scripts) keep full env-key freedom.
+    funded key secret would let any visitor bill arbitrary models to it. This fails closed:
+    if the deploy env leaves ``SIRIN_OPENROUTER_MODEL`` unset or set to a paid route, the
+    shared key serves nothing rather than silently billing a paid model. A pasted key is
+    the visitor's own — no restriction. Non-hosted deployments keep full env-key freedom.
     """
     if pasted_key or not is_hosted():
         return
-    if provider == OPENROUTER_PROVIDER and model != provider_models(provider)[0]:
+    free_default = provider_models(OPENROUTER_PROVIDER)[0]
+    serves_shared_model = (
+        provider == OPENROUTER_PROVIDER
+        and model == free_default
+        and free_default.endswith(':free')
+    )
+    if not serves_shared_model:
         raise ValueError(
-            f'The shared demo key serves only the default model '
-            f'({provider_models(provider)[0]}) — paste your own API key in the '
-            f'sidebar to use {model}.'
+            f'The shared demo key serves only the free OpenRouter demo model '
+            f'({free_default}) — paste your own API key in the sidebar to use {model}.'
         )

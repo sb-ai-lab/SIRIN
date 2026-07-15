@@ -79,6 +79,7 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
             top_p=self.config.top_p,
             n=n,
             max_concurrent=self.config.max_concurrent,
+            **kwargs,
         )
         # Adapter contract: n==1 -> list[str] (one per sample); n>1 -> list[list[str]] (n per sample).
         per_sample_gens = [[g] for g in generated] if n == 1 else generated
@@ -92,10 +93,15 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         for i, (reference, gens) in enumerate(zip(references, per_sample_gens)):
             reasons = list(per_sample_reasons[i]) if i < len(per_sample_reasons) else []
             reasons += [None] * (len(gens) - len(reasons))
+            # Compare echoes with span tags stripped from BOTH sides: an answer that
+            # legitimately contains the literal '[SPAN]' text must still validate.
+            reference_echo = (
+                str(reference).replace('[SPAN]', '').replace('[/SPAN]', '').strip()
+            )
             valid = []
             invalid = {'truncated': 0, 'empty': 0, 'not_verbatim': 0}
             for gen, reason in zip(gens, reasons):
-                if self._echo_of(gen) == str(reference).strip():
+                if self._echo_of(gen) == reference_echo:
                     valid.append(gen)
                 elif reason == 'length':
                     invalid['truncated'] += 1

@@ -71,7 +71,10 @@ class OpenAIModelAdapter(ModelAdapterBase):
             # Async client will be created on demand
         else:
             client_kwargs = {
-                'http_client': httpx.Client(proxy=self.config.proxy_url),
+                'http_client': httpx.Client(
+                    proxy=self.config.proxy_url, timeout=self.config.timeout
+                ),
+                'timeout': self.config.timeout,
             }
             # honor an explicit api_key (e.g. an OpenRouter key) but keep the
             # SDK's OPENAI_API_KEY env fallback when config.api_key is None.
@@ -85,7 +88,9 @@ class OpenAIModelAdapter(ModelAdapterBase):
             
             # Create async client for parallel processing
             async_client_kwargs = client_kwargs.copy()
-            async_client_kwargs['http_client'] = httpx.AsyncClient(proxy=self.config.proxy_url)
+            async_client_kwargs['http_client'] = httpx.AsyncClient(
+                proxy=self.config.proxy_url, timeout=self.config.timeout
+            )
             self._async_client = self.openai.AsyncOpenAI(**async_client_kwargs)
 
         self._model_name = self.config.model_path
@@ -100,6 +105,14 @@ class OpenAIModelAdapter(ModelAdapterBase):
             raise ValueError('OpenAI-compatible response returned no choices.')
         return response
 
+    @staticmethod
+    def _is_non_retryable(error: Exception) -> bool:
+        """A 4xx (except 429 rate-limit) is a client error retrying can't fix -- fail fast
+        so callers (e.g. the logprobs-unsupported judge fallback) react without burning the
+        full backoff schedule."""
+        status = getattr(error, 'status_code', None)
+        return isinstance(status, int) and 400 <= status < 500 and status != 429
+
     async def _create_with_retry_async(self, messages: List[Dict], **create_kwargs):
         """One async chat completion with exponential-backoff retry."""
         if self.config.extra_body:
@@ -113,7 +126,7 @@ class OpenAIModelAdapter(ModelAdapterBase):
                 )
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
-                if attempt == self.config.max_retries - 1:
+                if self._is_non_retryable(e) or attempt == self.config.max_retries - 1:
                     raise e
                 await asyncio.sleep(2**attempt)
 
@@ -130,7 +143,7 @@ class OpenAIModelAdapter(ModelAdapterBase):
                 )
             except Exception as e:
                 lg.warning(f'Attempt {attempt + 1} failed: {e}')
-                if attempt == self.config.max_retries - 1:
+                if self._is_non_retryable(e) or attempt == self.config.max_retries - 1:
                     raise e
                 time.sleep(2**attempt)
 
@@ -431,10 +444,13 @@ class OpenAIModelAdapter(ModelAdapterBase):
         if capture_token_uncertainty:
             request.update(logprobs=True, top_logprobs=top_logprobs)
             self.last_generation_trace = None
+        extra_body = dict(self.config.extra_body) if self.config.extra_body else {}
         if 'qwen3.5' in self.config.model_path.lower():
-            request['extra_body'] = {
-                'chat_template_kwargs': {'enable_thinking': False}
-            }
+            chat_template_kwargs = dict(extra_body.get('chat_template_kwargs') or {})
+            chat_template_kwargs['enable_thinking'] = False
+            extra_body['chat_template_kwargs'] = chat_template_kwargs
+        if extra_body:
+            request['extra_body'] = extra_body
         for key in ('seed', 'frequency_penalty', 'presence_penalty'):
             if key in kwargs:
                 request[key] = kwargs[key]

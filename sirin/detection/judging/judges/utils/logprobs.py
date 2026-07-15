@@ -12,14 +12,19 @@ TokenLogprobs = Sequence[PositionLogprobs]
 def _first_class_position(
     sequence_logprobs: TokenLogprobs, positive: str, negative: str
 ) -> Optional[PositionLogprobs]:
-    """The first generated position whose alternatives mention a class token.
+    """The first generated position whose CHOSEN (argmax) token is a class token.
 
-    Scanning rather than assuming position 0: a model may open with whitespace or a
-    newline before committing to the digit, and reasoning models can emit a preamble.
+    Match the emitted token, not merely any top-k alternative: a reasoning preamble can
+    carry a bare '0'/'1' as a low-rank alternative at a prose position, and scoring there
+    would let the preamble decide the verdict. Alternatives arrive in descending
+    probability, so ``alternatives[0]`` is the emitted token. Scanning (rather than
+    assuming position 0) still skips a leading whitespace/newline before the digit.
     """
     for alternatives in sequence_logprobs:
-        tokens = {token.strip() for token, _ in alternatives}
-        if positive in tokens or negative in tokens:
+        if not alternatives:
+            continue
+        chosen = alternatives[0][0].strip()
+        if chosen == positive or chosen == negative:
             return alternatives
     return None
 
@@ -86,3 +91,29 @@ def parse_binary_prediction(text: Optional[str], positive: str = '1') -> int:
         if char in ('0', '1'):
             return int(char == positive)
     return 0
+
+
+def sample_with_logprobs_fallback(sample_fn):
+    """Call ``sample_fn(return_logprobs=True)`` -> ``(results, logprobs_results)``.
+
+    Some OpenAI-compatible providers (e.g. free reasoning routes) reject a logprobs
+    request with a 400. When that specific error fires, retry once WITHOUT logprobs and
+    return ``(results, [None, ...])`` so the judge keeps an honest no-score verdict (nan)
+    instead of crashing. Every other error propagates unchanged.
+    """
+    try:
+        return sample_fn(return_logprobs=True)
+    except Exception as exc:
+        try:
+            import openai
+
+            logprobs_rejected = (
+                isinstance(exc, openai.BadRequestError)
+                and 'logprob' in str(exc).lower()
+            )
+        except ImportError:
+            logprobs_rejected = False
+        if not logprobs_rejected:
+            raise
+        results = sample_fn(return_logprobs=False)
+        return results, [None] * len(results)
