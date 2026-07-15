@@ -1,7 +1,7 @@
 """Turn OpenAI-style top-k logprobs into a calibrated positive-class probability."""
 
 import math
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 # One generated position: its top-k alternatives as (token, logprob).
 PositionLogprobs = Sequence[Tuple[str, float]]
@@ -86,25 +86,3 @@ def parse_binary_prediction(text: Optional[str], positive: str = '1') -> int:
         if char in ('0', '1'):
             return int(char == positive)
     return 0
-
-
-def probabilities_and_predictions(
-    texts: Sequence[Optional[str]],
-    logprobs_results: Sequence[TokenLogprobs],
-    positive: str = '1',
-    negative: str = '0',
-) -> Tuple[List[float], List[int]]:
-    """Zip raw API answers into (probs, preds), positionally and without `.index()`.
-
-    Positional zip is deliberate. Looking a result up with ``logprobs_results.index(...)``
-    is O(n^2) and, worse, returns the FIRST structurally-equal element -- so two samples
-    that happen to share a logprob payload get each other's prediction.
-    """
-    probs, preds = [], []
-    for text, sequence_logprobs in zip(texts, logprobs_results):
-        pred = parse_binary_prediction(text, positive=positive)
-        prob = probability_of_positive_class(sequence_logprobs, positive, negative)
-        # No class token in the top-k: the text is all we have, so let it speak.
-        probs.append(float(pred) if prob is None else prob)
-        preds.append(pred)
-    return probs, preds

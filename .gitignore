@@ -3,7 +3,8 @@ trace.json
 _private_*.yaml
 .vscode
 output
-demo
+demo/*
+!demo/*.py
 outputs
 outputs_debug
 __pycache__

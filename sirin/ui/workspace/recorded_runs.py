@@ -1,7 +1,7 @@
 """Bundled recorded detector runs for the hosted demo (assets/recorded_runs/*.json).
 
 Each asset is a strict portable ``sirin.run`` document (SHA-256 integrity verified by
-``import_portable_json``) exported by ``scripts/dev/record_replay_runs.py`` from a REAL
+``import_portable_json``) exported by ``record_replay_runs.py`` (in the ``sirin_deploy`` repo) from a REAL
 local run of that preset. The hosted Space ships no GPU and no model weights, so these
 presets serve their recorded results: loaded records get a fresh id/timestamps and the
 honest ``RECORDED_RESULT`` origin, exactly like the landing span seeds. A broken asset

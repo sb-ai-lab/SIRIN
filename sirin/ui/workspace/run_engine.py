@@ -190,7 +190,13 @@ class RunEngine:
                         threshold=threshold,
                     )
                     raw_layer = detected.get('layer')
-                    layer = raw_layer if isinstance(raw_layer, int) and raw_layer >= 0 else effective_setup.layer
+                    layer = (
+                        raw_layer
+                        if isinstance(raw_layer, int)
+                        and not isinstance(raw_layer, bool)
+                        and raw_layer >= 0
+                        else effective_setup.layer
+                    )
                     effective_setup = effective_setup.model_copy(update={
                         'detector_family': family,
                         'detector_level': level,

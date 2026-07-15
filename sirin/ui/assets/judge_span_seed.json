@@ -128,7 +128,7 @@
       ],
       "generations_sha256": "8dc671e8890791702d078777c3a407b5659d23b563983a537dbaa72fd6eb279f"
     },
-    "experiment_source": "live OpenRouter token-judge run (scripts/dev/make_judge_span_seed.py, 2026-07-15)"
+    "experiment_source": "live OpenRouter token-judge run (make_judge_span_seed.py in the sirin_deploy repo, 2026-07-15)"
   },
   "integrity": {
     "algorithm": "sha256",

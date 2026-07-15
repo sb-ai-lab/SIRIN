@@ -4,7 +4,6 @@ import pytest
 
 from sirin.detection.judging.judges.utils.logprobs import (
     parse_binary_prediction,
-    probabilities_and_predictions,
     probability_of_positive_class,
 )
 
@@ -79,28 +78,6 @@ def test_duplicate_token_keeps_highest_probability_entry():
 )
 def test_parse_binary_prediction_tolerates_decoration(text, expected):
     assert parse_binary_prediction(text) == expected
-
-
-def test_probabilities_and_predictions_zips_positionally():
-    """Two samples with IDENTICAL logprob payloads must not swap predictions.
-
-    The old code used `logprobs_results.index(payload)`, which returns the first
-    structurally-equal element, so duplicates aliased onto one another.
-    """
-    payload = [[('1', LN(0.8)), ('0', LN(0.2))]]
-    texts = ['1', '1']
-    probs, preds = probabilities_and_predictions(texts, [payload, payload])
-    assert preds == [1, 1]
-    assert probs == pytest.approx([0.8, 0.8])
-
-
-def test_probabilities_and_predictions_falls_back_to_pred_when_off_format():
-    texts = ['1', 'I refuse']
-    logprobs = [[[('1', LN(0.9)), ('0', LN(0.1))]], [[('I', LN(0.5))]]]
-    probs, preds = probabilities_and_predictions(texts, logprobs)
-    assert preds == [1, 0]
-    assert probs[0] == pytest.approx(0.9)
-    assert probs[1] == 0.0  # no class token -> fall back to the parsed prediction
 
 
 def test_probability_is_monotone_in_confidence():

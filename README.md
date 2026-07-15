@@ -235,7 +235,7 @@ The token indices refer to positions in the tokenized sequence, allowing precise
 
 ## 📚 Usage Examples
 
-Below are Python examples demonstrating how to use different detector types. You can also instantiate the entire pipeline using Hydra (see [Configuration with Hydra](#⚙️-configuration-with-hydra)).
+Below are Python examples demonstrating how to use different detector types. You can also instantiate the entire pipeline using Hydra (see [Configuration with Hydra](#️-configuration-with-hydra)).
 
 ### Example 1: Sequence-Level Probing with Ensemble Features and Context Splitter
 

@@ -154,6 +154,17 @@ def estimate_uncertainty(
     return ue, texts, tokens
 
 
+def _mean_method_scores(methods, uncertainty) -> Optional[Dict[str, float]]:
+    """Per-method mean uncertainty for UI display, keyed by method name (None if empty)."""
+    if not uncertainty:
+        return None
+    return {
+        str(method): float(np.asarray(scores[0], dtype=float).mean())
+        for method, scores in zip(methods, uncertainty)
+        if scores is not None and len(scores)
+    }
+
+
 class TokenUncertaintyFeatureProcessor(HiddensProcessor):
     _feature_type: str = FeatureType.TOKEN_UNCERTAINTY.value
 
@@ -247,7 +258,7 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
             chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
         self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
-        self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.
+        self.last_method_scores = _mean_method_scores(self.uncertainty_methods, uncertainty)
 
         token_features = [
             np.stack([ue[i] for ue in uncertainty]).astype(float)
@@ -446,7 +457,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
         self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
-        self.last_method_scores = {str(method): float(np.asarray(scores[0], dtype=float).mean()) for method, scores in zip(self.uncertainty_methods, uncertainty) if scores is not None and len(scores)} if uncertainty else None  # expose per-method means without changing outputs.
+        self.last_method_scores = _mean_method_scores(self.uncertainty_methods, uncertainty)
 
         sequence_features = torch.tensor(
             np.array(uncertainty).astype(float),

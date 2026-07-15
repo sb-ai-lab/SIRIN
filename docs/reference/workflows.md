@@ -205,7 +205,7 @@ sample = [
     {'role': 'user', 'content': 'What is H2O?'},
     {'role': 'assistant', 'content': 'Water.'}
 ]
-result = judge.detect(sample)
+result = judge.detect([sample])
 ```
 
 ---

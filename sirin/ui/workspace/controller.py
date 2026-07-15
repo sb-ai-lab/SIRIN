@@ -141,7 +141,6 @@ class WorkspaceController:
         try/except, so any failure degrades to None rather than 500-ing the page.
         """
         from sirin.ui.presets import hosted_replay_only
-        from .seed import replay_record_for_preset
 
         if not hosted_replay_only(setup.detector_family):
             return None

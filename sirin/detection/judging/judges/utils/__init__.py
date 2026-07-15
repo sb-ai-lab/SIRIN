@@ -3,7 +3,6 @@ from sirin.detection.judging.judges.utils.decoder import (
 )
 from sirin.detection.judging.judges.utils.logprobs import (
     parse_binary_prediction,
-    probabilities_and_predictions,
     probability_of_positive_class,
 )
 from sirin.detection.judging.judges.utils.metrics import (

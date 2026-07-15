@@ -6,8 +6,6 @@ import math
 import os
 import re
 import shlex
-import traceback
-from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -74,9 +72,6 @@ def longmemeval_profiles() -> list[tuple[str, dict[str, Any]]]:
         discovered.append((path.name != LONGMEMEVAL_DEFAULT_PROFILE, label, profile))
     discovered.sort(key=lambda item: (item[0], item[1]))
     return [(label, profile) for _, label, profile in discovered]
-
-
-LIVE_CAPTURE_DIR = REPO_ROOT / 'output' / 'sirin_a_star_demo' / 'provenance' / 'live'
 
 
 def _cache_resource(func):

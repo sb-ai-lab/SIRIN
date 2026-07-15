@@ -82,7 +82,7 @@ _SEQUENCE_TABPFN_LAYERS = [20, 35, 36, 37, 38, 39]
 # so it MUST carry the {sample} slot — without it the dialogue is never inserted and the judge scores
 # an empty conversation. The trailing single-digit clause forces token 0 to be a bare '0'/'1': on long
 # structured prompts the model otherwise opens a JSON object ('{' as token 0) and the max_tokens=1
-# logprob verdict collapses. Mirrors demo/psiloqa_span_judge_eval.py::SEQUENCE_VERDICT_PROMPT (verified
+# logprob verdict collapses. Mirrors psiloqa_span_judge_eval.py::SEQUENCE_VERDICT_PROMPT in sirin_deploy (verified
 # live to yield clean 0/1 top-2 logprobs). System prompt stays the JudgeBaseConfig default.
 _JUDGE_PROMPT = (
     "You verify whether the assistant response is faithful to the provided context. "

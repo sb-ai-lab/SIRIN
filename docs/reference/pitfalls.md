@@ -204,7 +204,7 @@ When using multiple probe layers (`PROBE_LAYERS = [layer_a, layer_b]`), `Probing
 
 With 2 layers and 2560 hidden dim: cold_run gets `n_features=2560`, preprocessor gets `5120`. This produces query dim=256 but PCA output=128, causing `RuntimeError: mat1 and mat2 shapes cannot be multiplied`.
 
-**Fix applied**: Changed `base.py:75` from `.shape[-1]` to `.numel()` to match the preprocessor's calculation.
+**Fix applied**: `_cold_run` now derives `embedding_dim` (`.shape[-1]`) and `num_features` (`.shape[0]`) as separate per-layer lists in `base.py`, matching the preprocessor's per-layer feature accounting.
 
 Additionally: set `max_length=1` in `ProbingDetectorConfig` when using `pooling_type='last'` to avoid padding pooled features to 128 positions.
 
