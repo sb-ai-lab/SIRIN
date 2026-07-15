@@ -82,7 +82,10 @@ def _token_uncertainty_trace(
         pieces.append(current[len(previous) :])
         offsets.append([len(previous), len(current)])
         maximum_token_probability.append(float(-log_probs[token_id].item()))
-        token_entropy.append(float(-(probs * log_probs).sum().item()))
+        # 0 * -inf -> NaN when top-p/top-k warping puts -inf in the logits; treat those
+        # zero-probability terms as 0 (the x·log(x) limit) so entropy stays finite.
+        entropy_terms = torch.nan_to_num(probs * log_probs, nan=0.0)
+        token_entropy.append(float(-entropy_terms.sum().item()))
         previous = current
 
     if previous != text:

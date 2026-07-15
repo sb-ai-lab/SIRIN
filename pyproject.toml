@@ -62,7 +62,7 @@ name = "sirin_workspace"
 asset_dir = "ui/workspace/frontend/build"
 
 [tool.setuptools.package-data]
-"sirin.ui" = ["assets/*.json", "assets/*.png", "assets/*.jpg", "static/*.jpg"]
+"sirin.ui" = ["assets/*.json", "assets/*.png", "assets/*.jpg", "tokens.json", "static/*.jpg", "static/fonts/*"]
 "sirin.ui.workspace" = [
     "pyproject.toml",
     "frontend/package.json",

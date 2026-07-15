@@ -101,3 +101,23 @@ def test_focus_estimator_requires_method_kwargs():
 
     with pytest.raises(TypeError):
         processor._initialize_uncertainty_methods()
+
+
+def test_nan_aware_aggregation_ignores_an_undefined_estimator():
+    """V1#4: a NaN from one estimator (e.g. Focus on a keyword-less response) must not
+    poison the fused score under the default 'none' normalization."""
+    detector = _detector(UncertaintyDetectorConfig(aggregation_method='mean'))
+    scores = np.array([[0.2, np.nan], [np.nan, 0.8], [0.4, 0.6]])
+    assert detector._aggregate_uncertainties(scores) == pytest.approx([0.2, 0.8, 0.5])
+
+
+def test_weighted_aggregation_zero_sum_weights_fall_back_to_uniform():
+    """V1#5: zero/cancelling weights must not divide by zero into NaN scores."""
+    detector = _detector(
+        UncertaintyDetectorConfig(
+            aggregation_method='weighted',
+            method_weights={'MethodA': 0.0, 'MethodB': 0.0},
+        )
+    )
+    scores = np.array([[0.2, 0.8]])
+    assert detector._aggregate_uncertainties(scores) == pytest.approx([0.5])

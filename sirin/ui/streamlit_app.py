@@ -1682,6 +1682,11 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
             # B always scores the answer A produced/received; an uncertainty detector needs to generate
             # to measure token uncertainty and cannot score a supplied answer (mirrors _submit's guard).
             raise ValueError('An uncertainty detector cannot score a supplied answer, so it cannot be side B.')
+        if presets.hosted_replay_only(preset_b.family):
+            # The picker already hides these, but a hand-crafted runCompare must not slip a
+            # replay-only preset (no live checkpoint on the Space) into side B and then fail
+            # opaquely at detect time (mirrors the uncertainty guard above).
+            raise ValueError('That detector is replay-only on the hosted demo and cannot run as side B.')
         return _dto(SetupSnapshot, {
             'task': _preset_task(preset_b_name),
             'detector_preset': preset_b.name,

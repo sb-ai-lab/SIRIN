@@ -75,7 +75,17 @@ class TokenTabPFNProbingDetector(ProbingDetectorBase):
 
         features = np.concatenate(processed_features, axis=-1)
 
-        token_probs = self.model.predict_proba(features)
+        # Chunk inference to stay under TabPFN's CUDA grid/sample limit on large inputs
+        # (the training loop batches the same way); predict_proba is per-row independent.
+        chunk = 1000
+        if len(features) > chunk:
+            token_probs = np.concatenate(
+                [self.model.predict_proba(features[i:i + chunk])
+                 for i in range(0, len(features), chunk)],
+                axis=0,
+            )
+        else:
+            token_probs = self.model.predict_proba(features)
         token_probs, token_preds = handle_binary_multiclass_probs(
             token_probs, self.threshold,
             is_binary=(self.config.num_classification_heads <= 2)

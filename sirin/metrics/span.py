@@ -98,18 +98,24 @@ def span_classification_metrics(
     label / score arrays (from ``character_scores`` / ``span_labels``); output
     matches the recorded ``metrics.json`` schema.
     """
+    if not per_answer_scores or sum(len(s) for s in per_answer_scores) == 0:
+        raise ValueError('span metrics need at least one scored character')
     flat_scores = np.concatenate(per_answer_scores)
     flat_labels = np.concatenate(per_answer_labels)
     flat_predictions = (flat_scores > threshold).astype(np.uint8)
     per_predictions = [(score > threshold).astype(np.uint8) for score in per_answer_scores]
     precision, recall, _ = precision_recall_curve(flat_labels, flat_scores)
+    both_classes = len(np.unique(flat_labels)) > 1
+    trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz  # np.trapz removed in NumPy 2.x
     return {
         "n_rows": len(per_answer_labels),
         "n_characters": int(len(flat_labels)),
         "positive_rate": float(flat_labels.mean()),
-        "roc_auc": float(roc_auc_score(flat_labels, flat_scores)),
-        "average_precision": float(average_precision_score(flat_labels, flat_scores)),
-        "pr_auc": float(np.trapz(precision[::-1], recall[::-1])),
+        # ROC-AUC / AP are undefined on a single-class batch (e.g. no hallucinated
+        # characters at all) -- report nan rather than crashing the whole metric set.
+        "roc_auc": float(roc_auc_score(flat_labels, flat_scores)) if both_classes else float('nan'),
+        "average_precision": float(average_precision_score(flat_labels, flat_scores)) if both_classes else float('nan'),
+        "pr_auc": float(trapz(precision[::-1], recall[::-1])),
         "f1": float(f1_score(flat_labels, flat_predictions)),
         "accuracy": float(accuracy_score(flat_labels, flat_predictions)),
         "precision": float(precision_score(flat_labels, flat_predictions, zero_division=0)),

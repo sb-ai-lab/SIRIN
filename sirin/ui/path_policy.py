@@ -5,7 +5,10 @@ from pathlib import Path
 
 
 def is_trusted_local() -> bool:
-    return os.getenv('SIRIN_UI_TRUSTED_LOCAL') == '1'
+    # Never honor trusted-local on a hosted deployment: a stray SIRIN_UI_TRUSTED_LOCAL=1
+    # there would drop the path-traversal boundary and unlock Custom endpoints on a
+    # public host. Hosted always wins.
+    return os.getenv('SIRIN_UI_TRUSTED_LOCAL') == '1' and not is_hosted()
 
 
 def is_hosted() -> bool:

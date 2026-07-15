@@ -105,12 +105,14 @@ class UncertaintyDetectorBase(DetectorBase):
             )
         raise ValueError(f'Unknown score_normalization: {method}')
 
-    # Aggregations searched by `aggregation_method="auto"`.
+    # Aggregations searched by `aggregation_method="auto"`. nan-aware: a NaN from one
+    # estimator (e.g. Focus on a keyword-less response) must not poison the fused score;
+    # an all-NaN row still collapses to NaN, which is the correct "undefined" signal.
     _AUTO_AGGREGATIONS = {
-        'mean': lambda a: np.mean(a, axis=-1),
-        'max': lambda a: np.max(a, axis=-1),
-        'min': lambda a: np.min(a, axis=-1),
-        'median': lambda a: np.median(a, axis=-1),
+        'mean': lambda a: np.nanmean(a, axis=-1),
+        'max': lambda a: np.nanmax(a, axis=-1),
+        'min': lambda a: np.nanmin(a, axis=-1),
+        'median': lambda a: np.nanmedian(a, axis=-1),
     }
 
     def fit_score_selection(self, uncertainties: np.ndarray, targets) -> None:
@@ -159,21 +161,21 @@ class UncertaintyDetectorBase(DetectorBase):
                     "aggregation_method='auto' but no selection fitted; using the mean. "
                     'Call fit_score_selection on the train split.'
                 )
-                return np.mean(uncertainties, axis=-1)
+                return np.nanmean(uncertainties, axis=-1)
             subset = self.feature_stats['selected_subset']
             agg = self._AUTO_AGGREGATIONS[self.feature_stats['selected_aggregation']]
             return agg(uncertainties[:, subset])
 
         if aggregation_method == 'mean':
-            return np.mean(uncertainties, axis=-1)
+            return np.nanmean(uncertainties, axis=-1)
         elif aggregation_method == 'max':
-            return np.max(uncertainties, axis=-1)
+            return np.nanmax(uncertainties, axis=-1)
         elif aggregation_method == 'min':
-            return np.min(uncertainties, axis=-1)
+            return np.nanmin(uncertainties, axis=-1)
         elif aggregation_method == 'weighted' and self._has_method_weights():
             return self._weighted_aggregation(uncertainties)
         else:
-            return np.mean(uncertainties, axis=-1)
+            return np.nanmean(uncertainties, axis=-1)
 
     def _has_method_weights(self) -> bool:
         """Check if method weights are configured"""
@@ -194,7 +196,12 @@ class UncertaintyDetectorBase(DetectorBase):
         if unknown:
             lg.warning(f'method_weights names not among the estimators, ignored: {sorted(unknown)}')
         weights = np.array([self.config.method_weights.get(name, 1.0) for name in method_names])
-        weights = weights / np.sum(weights)
+        total = np.sum(weights)
+        if total == 0:
+            lg.warning('method_weights sum to zero; falling back to a uniform mean.')
+            weights = np.ones_like(weights) / len(weights)
+        else:
+            weights = weights / total
         return np.average(uncertainties, axis=-1, weights=weights)
 
     def _get_classification_metrics_config(self):
@@ -308,6 +315,16 @@ class SequenceUncertaintyDetector(UncertaintyDetectorBase):
         metrics_config = self._get_classification_metrics_config()
 
         raw_scores, group_ids = self._raw_scores(inputs)
+        if group_ids is not None and len(raw_scores) != len(targets):
+            # ponytail: context splitting yields one score row per chunk, but the
+            # normalizer/selection/threshold are fit against per-sample targets. Rather
+            # than silently mis-calibrate ('mean' -> a 0.5 threshold) or crash in
+            # roc_auc_score ('auto'), refuse; splitting still applies at detect time.
+            raise NotImplementedError(
+                'Uncertainty-detector training does not support context splitting: '
+                'per-chunk scores cannot be calibrated against per-sample targets. Train '
+                'without a context_split_config (splitting still applies at detect time).'
+            )
         self.fit_score_normalizer(raw_scores)
         self.fit_score_selection(raw_scores, targets)
         probs = self._aggregate_uncertainties(raw_scores)
@@ -421,6 +438,16 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         feature_processor: TokenUncertaintyFeatureProcessor,
     ):
         super().__init__(config, feature_processor)
+        if getattr(config, 'aggregation_method', 'mean') == 'auto' or (
+            getattr(config, 'score_normalization', 'none') != 'none'
+        ):
+            lg.warning(
+                'TokenUncertaintyDetector.train fits only the threshold (never score '
+                "normalization or 'auto' selection), so aggregation_method="
+                f"{getattr(config, 'aggregation_method', 'mean')!r} / score_normalization="
+                f"{getattr(config, 'score_normalization', 'none')!r} falls back to a raw "
+                'mean at detect time.'
+            )
 
     def train(
         self,
@@ -435,7 +462,13 @@ class TokenUncertaintyDetector(UncertaintyDetectorBase):
         targets = val_data[TARGET_COL] if val_data is not None else train_data[TARGET_COL]
         metrics_config = self._get_classification_metrics_config()
 
-        probs, preds, _ = self.detect(inputs)
+        # Token uncertainty scores exactly one generated answer at a time (detect enforces
+        # a single sample), so score the calibration set one sample at a time and collect.
+        probs, preds = [], []
+        for sample in inputs:
+            sample_probs, sample_preds, _ = self.detect([sample])
+            probs.extend(sample_probs)
+            preds.extend(sample_preds)
         flat_probs, flat_preds, flat_labels = self._flatten_token_predictions(
             probs, preds, targets
         )

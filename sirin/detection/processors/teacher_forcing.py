@@ -40,15 +40,16 @@ class TeacherForcedProbsCalculator(StatCalculator):
         # `target_texts` is not declared as a dependency: the UEManager seeds it
         # into batch_stats before any calculator runs, and declaring it would send
         # order_calculators looking for a producer that does not exist.
+        # Declare exactly what __call__ returns. Do NOT list input_texts/embeddings:
+        # they are not produced here, and declaring them makes order_calculators skip
+        # scheduling a real producer -> a consuming estimator KeyErrors at run time.
         return [
-            'input_texts',
             'input_tokens',
             'greedy_log_probs',
             'greedy_tokens',
             'greedy_tokens_alternatives',
             'greedy_texts',
             'greedy_log_likelihoods',
-            'embeddings',
             'attention_all',
             'tokenizer',
         ], []
@@ -121,10 +122,12 @@ class TeacherForcedProbsCalculator(StatCalculator):
         k = min(self.n_alternatives, log_probs.shape[-1])
         for j in range(n_resp):
             row = log_probs[j]
-            best = np.argpartition(row, -k)[-k:]
-            alt = [(int(t), float(row[t])) for t in best]
-            # GreedyProbsCalculator puts the realized token first.
-            alt.sort(key=lambda x: x[0] == resp_ids[j], reverse=True)
+            realized = int(resp_ids[j])
+            best = {int(t) for t in np.argpartition(row, -k)[-k:]}
+            best.add(realized)  # the teacher-forced token can fall outside the top-k
+            alt = [(t, float(row[t])) for t in best]
+            # Realized token first (GreedyProbsCalculator's contract), then by log-prob.
+            alt.sort(key=lambda x: (x[0] == realized, x[1]), reverse=True)
             alternatives.append(alt)
 
         attention = None

@@ -79,3 +79,20 @@ def test_span_classification_metrics_mixed_scores_in_range():
     for key in ("roc_auc", "average_precision", "pr_auc", "f1",
                 "precision", "recall", "mean_per_answer_iou"):
         assert 0.0 <= result[key] <= 1.0
+
+
+def test_span_metrics_single_class_batch_returns_nan_not_crash():
+    """V2#8: an all-clean eval batch (no positive characters) must yield nan ROC-AUC/AP
+    rather than crashing the whole metric set in roc_auc_score."""
+    labels = [np.zeros(5, dtype=np.uint8), np.zeros(3, dtype=np.uint8)]
+    scores = [np.array([0.1, 0.2, 0.1, 0.0, 0.3]), np.array([0.2, 0.1, 0.0])]
+    result = span_classification_metrics(labels, scores, 0.5)
+    assert np.isnan(result["roc_auc"])
+    assert np.isnan(result["average_precision"])
+    assert result["positive_rate"] == 0.0
+    assert np.isfinite(result["pr_auc"])  # np.trapezoid path stays finite
+
+
+def test_span_metrics_empty_batch_raises_clearly():
+    with pytest.raises(ValueError, match="at least one scored character"):
+        span_classification_metrics([], [], 0.5)
