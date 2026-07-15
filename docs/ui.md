@@ -98,7 +98,7 @@ npm run build
 
 Commit the generated `build/` assets together with frontend source changes. The package-data configuration includes the component manifest, npm manifests, and recursive build assets. Global Streamlit CSS uses purposeful local font fallbacks; the component remains style-isolated.
 
-User-facing UI changes are recorded in the [development UI changelog](development/CHANGELOG.md).
+User-facing UI changes are recorded in the UI changelog tracked in the `sirin_deploy` repo (`docs/CHANGELOG.md`).
 
 ## Deferred paper features
 
