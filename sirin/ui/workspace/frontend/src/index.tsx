@@ -419,12 +419,12 @@ function SpanFooter({ result }: { result: AnalysisResult }) {
 function EvidenceDetails({ result }: { result: AnalysisResult }) {
   const spans = result.spans?.length ? result.spans : (result.segments ?? []).filter((segment) => segment.verdict === true).map((segment) => ({ text: segment.text, startCodePoint: segment.startCodePoint, endCodePoint: segment.endCodePoint, score: segment.score, scoreKind: result.scoreSemantics, verdict: "suspect" }))
   const classes = result.categories ?? (Array.isArray(result.classes) ? result.classes : Object.entries(result.classes ?? {}).map(([label, score]) => ({ label, score })))
-  const hasDetails = Boolean(spans.length || result.claims?.length || classes.length || result.rationale || result.values?.length)
+  const hasDetails = Boolean(spans.length || result.claims?.length || classes.length || result.rationale || result.note || result.values?.length)
   if (!hasDetails) return null
   return <details className="evidence-details"><summary>Evidence details</summary>
     {spans.length ? <div className="evidence-list" aria-label="Suspect spans">{spans.map((span, index) => <article key={`${span.startCodePoint}-${index}`}><div><b>{span.text}</b><small>{span.startCodePoint !== undefined ? `Characters ${span.startCodePoint}–${span.endCodePoint}` : "Span evidence"}</small></div><span>{finite(span.score) !== null ? formatSpanScore(finite(span.score) as number) : scoreText(span.score, span.scoreKind)} · {span.verdict ?? "scored"}</span></article>)}</div> : null}
     {result.claims?.length ? <div className="claim-list">{result.claims.map((claim, index) => <article key={index} className={riskClass(claim.verdict)}><StatusDot status={claim.supported === true ? "safe" : claim.supported === false ? "risk" : claim.verdict} /><div><b>{claim.text ?? claim.claim ?? `Claim ${index + 1}`}</b>{claim.rationale && <p>{claim.rationale}</p>}</div><span>{claim.verdict ?? scoreText(claim.score)}</span></article>)}</div> : null}
-    {classes.length ? <div className="class-list" aria-label="Class scores">{classes.map((item) => <div key={item.label}><span>{titleCase(item.label)}</span><i><b style={{ width: `${Math.max(0, Math.min(100, item.score * 100))}%` }} /></i><strong>{scoreText(item.score, "categorical_probabilities")}</strong></div>)}</div> : null}
+    {classes.length ? <div className="class-list" aria-label="Class scores">{classes.map((item, index) => <div key={`${item.label}-${index}`}><span>{titleCase(item.label)}</span><i><b style={{ width: `${Math.max(0, Math.min(100, item.score * 100))}%` }} /></i><strong>{scoreText(item.score, "categorical_probabilities")}</strong></div>)}</div> : null}
     {result.values?.length ? <><div className="mini-bars" aria-hidden="true">{result.values.map((value, index) => <i key={index} style={{ height: `${10 + Math.max(0, Math.min(1, value)) * 54}px` }} />)}</div><ol className="sr-only" aria-label="Relative token scores">{result.values.map((value, index) => <li key={index}>Item {index + 1}: {value.toFixed(3)}</li>)}</ol></> : null}
     {(result.rationale || result.note) && <p className="rationale">{result.rationale ?? result.note}</p>}
   </details>
@@ -733,7 +733,7 @@ function metricsOf(metrics?: DiagnosticMetric[] | Record<string, unknown>): Diag
 function AttentionTable({ diagnostics }: { diagnostics: WorkspacePayload["diagnostics"] }) {
   const attention = diagnostics?.attention
   if (!attention?.values?.length) return <div className="result-placeholder compact"><h2>No attention summary yet</h2><p>Attention summaries appear here when the active detector captures them.</p></div>
-  return <section className="attention-card"><div className="section-heading"><div><p className="eyebrow">Attention</p><h2>{attention.title ?? "Bounded attention summary"}</h2></div></div><div className="table-scroll"><table><thead><tr><th>Token</th>{(attention.columnLabels ?? []).map((label) => <th key={label}>{label}</th>)}</tr></thead><tbody>{attention.values.map((row, rowIndex) => <tr key={rowIndex}><th>{attention.rowLabels?.[rowIndex] ?? rowIndex + 1}</th>{row.map((value, columnIndex) => <td key={columnIndex} style={value === null ? undefined : ({ "--attention": String(Math.max(0, Math.min(1, value))) } as CSSProperties)}><span>{value === null ? "—" : value.toFixed(2)}</span></td>)}</tr>)}</tbody></table></div>{attention.note && <p className="caption">{attention.note}</p>}</section>
+  return <section className="attention-card"><div className="section-heading"><div><p className="eyebrow">Attention</p><h2>{attention.title ?? "Bounded attention summary"}</h2></div></div><div className="table-scroll"><table><thead><tr><th>Token</th>{(attention.columnLabels ?? []).map((label, index) => <th key={`${label}-${index}`}>{label}</th>)}</tr></thead><tbody>{attention.values.map((row, rowIndex) => <tr key={rowIndex}><th>{attention.rowLabels?.[rowIndex] ?? rowIndex + 1}</th>{row.map((value, columnIndex) => <td key={columnIndex} style={value === null ? undefined : ({ "--attention": String(Math.max(0, Math.min(1, value))) } as CSSProperties)}><span>{value === null ? "—" : value.toFixed(2)}</span></td>)}</tr>)}</tbody></table></div>{attention.note && <p className="caption">{attention.note}</p>}</section>
 }
 
 // "Add a detector" recipes (PR-12). Static, copy-paste starting points sourced from the payload
@@ -800,7 +800,9 @@ function saveDownload(download: DownloadTransfer): boolean {
     anchor.href = url
     anchor.download = download.fileName
     anchor.click()
-    URL.revokeObjectURL(url)
+    // Defer the revoke: revoking synchronously after click() races the download and
+    // aborts it in Firefox/Safari (Chromium usually survives).
+    setTimeout(() => URL.revokeObjectURL(url), 0)
     return true
   } catch {
     // The backend remains authoritative for transfer validity; malformed data is ignored.
@@ -862,7 +864,7 @@ function WorkspaceApp({ componentKey, payload, setStateValue, setTriggerValue }:
     setWorkspace("analyze")
   }
   const emit = (type: string, actionPayload: Record<string, unknown>) => {
-    if (busy) return
+    if (busy && type !== "selectRun") return  // selectRun is read-only: keep it live so the highlighted row can't desync mid-run
     remembered.sequence += 1
     const envelope: ActionEnvelope = { protocolVersion: payload.protocolVersion, clientInstanceId: clientId(), sequence: remembered.sequence, actionId: actionId(), type, expectedSetupRevision: payload.setupRevision, expectedRunsRevision: payload.runsRevision, payload: actionPayload }
     setOptimisticBusy(!["selectRun"].includes(type))
