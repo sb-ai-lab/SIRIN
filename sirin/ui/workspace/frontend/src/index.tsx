@@ -35,7 +35,7 @@ import type {
 type WorkspaceAnalyzeDraft = AnalyzeDraft & { prompt: string; sourceRunId: string | null }
 type WorkspaceClientDraft = Omit<ClientDraft, "analyze"> & { analyze: WorkspaceAnalyzeDraft }
 type WorkspaceExample = ExampleRecord & { prompt?: string }
-type WorkspaceViewState = { workspace?: WorkspaceName; appearance?: AppearanceState }
+type WorkspaceViewState = { workspace?: WorkspaceName; appearance?: AppearanceState; showExamples?: boolean }
 type WorkspacePayloadView = WorkspacePayload & { viewState?: WorkspaceViewState }
 
 let emojiFontsRegistered = false
@@ -530,6 +530,8 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
   // Hosted replay-only preset: the server sends the one recorded case this preset serves.
   // Its presence flips the editor read-only and makes Replay the only live action.
   const replayTarget = payload.replayTarget ?? null
+  // Sidebar "Show example gallery" toggle (defaults on when unset).
+  const showExamples = (payload as WorkspacePayloadView).viewState?.showExamples !== false
   const [compareOpen, setCompareOpen] = useState(false)
   const [presetB, setPresetB] = useState("")
   const runComparison = () => {
@@ -593,7 +595,7 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
     </main>
   }
   return <main className="workspace-content analyze-workspace">
-    <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} onSelect={chooseExample} />
+    {showExamples && <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} onSelect={chooseExample} />}
     <form className="analysis-form" onSubmit={submit}>
       <div className="form-row">
         <Field label="Task"><Select value={draft.task} onChange={(event) => { const task = event.target.value as TaskName; setDraft({ ...draft, task, mode: task === "answerability" ? "generate" : draft.mode }, true) }}><option value="faithfulness" disabled={setupTask !== "faithfulness"}>Hallucination</option><option value="answerability" disabled={!enabled(extendedCapabilities.canAnswerability ?? (setupTask === "answerability"))}>Answerability</option></Select></Field>

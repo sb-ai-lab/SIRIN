@@ -1486,6 +1486,12 @@ def _appearance_sidebar(st: Any, *, key_prefix: str = '') -> None:
             on_change=store_workspace_appearance,
             help='Silk backdrop animation. Static is lightest for low-power devices.',
         )
+        st.checkbox(
+            'Show example gallery',
+            value=True,
+            key=f'{key_prefix}show_examples',
+            help='Uncheck to hide the “Try an example” chips — e.g. for a clean screenshot.',
+        )
 
 
 _V2_COMPONENT_KEY = 'sirin.workspace.v2'
@@ -1849,6 +1855,9 @@ def _render_v2_workspace(st: Any, modules: tuple[Any, ...]) -> None:
                 st.session_state.get('sirin.workspace.v2.bg_motion', 'Subtle')
             ).lower(),
         },
+        'showExamples': bool(
+            st.session_state.get('sirin.workspace.v2.show_examples', True)
+        ),
     }
     st.session_state[_V2_VIEW_STATE_KEY] = view_state
     payload_model = controller.build_payload(
