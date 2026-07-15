@@ -527,6 +527,9 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
   const hasGroundingInput = draft.prompt.trim().length > 0 || (draft.context.trim().length > 0 && draft.question.trim().length > 0)
   const canSubmit = enabled(taskCapability) && enabled(generationCapability) && hasGroundingInput && (draft.task === "answerability" || draft.mode === "generate" || draft.answer.trim().length > 0)
   const availablePresets = payload.availablePresets ?? []
+  // Hosted replay-only preset: the server sends the one recorded case this preset serves.
+  // Its presence flips the editor read-only and makes Replay the only live action.
+  const replayTarget = payload.replayTarget ?? null
   const [compareOpen, setCompareOpen] = useState(false)
   const [presetB, setPresetB] = useState("")
   const runComparison = () => {
@@ -570,6 +573,25 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
     })
     if (draft.sourceRunId) setDraft({ ...draft, sourceRunId: null })
   }
+  if (replayTarget) {
+    // Replay-only preset (hosted): the case is fixed to this preset's recording, so the
+    // editor is read-only, "Generate & score" is disabled (non-clickable), and Replay —
+    // on the right — is the only live action. It always serves this preset's own result.
+    const replay = () => onAction("submit", { task: "faithfulness", mode: "recordedReplay", context: replayTarget.context, question: replayTarget.question, suppliedAnswer: replayTarget.answer, prompt: "", exampleId: replayTarget.exampleId })
+    return <main className="workspace-content analyze-workspace">
+      <form className="analysis-form" onSubmit={(event) => event.preventDefault()}>
+        <div className="inline-notice info"><b>Recorded result</b><span>This detector needs local model weights the hosted demo doesn't ship, so it replays a verified recorded case. For live scoring, pick a Judge — API preset.</span></div>
+        <Field label="Context" hint={`${replayTarget.context.length.toLocaleString()} characters`}><textarea rows={7} value={replayTarget.context} readOnly /></Field>
+        <Field label="Question"><textarea rows={2} value={replayTarget.question} readOnly /></Field>
+        <Field label="Recorded answer"><textarea rows={4} value={replayTarget.answer} readOnly /></Field>
+        <div className="form-actions">
+          <button type="button" className="primary" disabled title="Live scoring is unavailable for this preset on the hosted demo — use Replay recorded answer."><Icon name="spark" />Generate &amp; score</button>
+          <button type="button" className="primary" disabled={busy} onClick={replay}><Icon name="spark" />Replay recorded answer</button>
+        </div>
+      </form>
+      {busy ? <ActivityCard activity={payload.activity} runs={payload.runs ?? []} /> : payload.selectedRun ? <ResultCard key={payload.selectedRun.id} run={payload.selectedRun} motion={motion} onAction={onAction} onPrepareRerun={onPrepareRerun} /> : <section className="result-placeholder"><div><Icon name="spark" /></div><h2>Your evidence map will appear here.</h2><p>Replay the recorded answer to see this preset's graded result.</p></section>}
+    </main>
+  }
   return <main className="workspace-content analyze-workspace">
     <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} onSelect={chooseExample} />
     <form className="analysis-form" onSubmit={submit}>
@@ -585,10 +607,10 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
       {!enabled(generationCapability) && <p className="field-error">{disabledReason(generationCapability) ?? "Generation is not available with the active setup."}</p>}
       {draft.sourceRunId && <div className="inline-notice info"><b>Imported run prepared</b><span>Review these inputs, then submit explicitly with the current setup.</span></div>}
       <div className="form-actions">
-        {/* Scoring/generating is always the pink primary CTA, placed right of the replay button;
-            replaying a selected example's verified answer is the secondary path. */}
-        {recordedCta && <button type="button" className="secondary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
+        {/* Generate/score is the primary CTA on the left; replaying a selected example's
+            verified answer is the secondary path on its right. */}
         <button className="primary" type="submit" disabled={!canSubmit || busy}><Icon name="spark" />{draft.task === "answerability" ? "Check answerability" : draft.mode === "supplied" ? "Score answer" : "Generate & score"}</button>
+        {recordedCta && <button type="button" className="secondary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
         {/* Compare: side A is the sidebar detector, side B is a preset from the same catalog. Both score
             the SAME answer A produces/receives — the honest, apples-to-apples comparison. */}
         {availablePresets.length > 0 && <button type="button" className="quiet" disabled={busy} aria-expanded={compareOpen} onClick={() => setCompareOpen((value) => !value)}>Compare detectors…</button>}

@@ -451,6 +451,23 @@ class ExampleSummary(DTO):
     provenance: Provenance
 
 
+class ReplayTarget(DTO):
+    """The recorded case a replay-only preset serves (hosted profile).
+
+    Present only when the active preset cannot score live and must replay its bundled
+    recording. The client renders the read-only editor from these fields and submits
+    ``example_id`` for the replay, so the shown case always matches the served result.
+    All fields are non-null strings — ``exclude_none`` drops nulls, and a partial target
+    would desync editor and result.
+    """
+
+    example_id: str = Field(min_length=1, max_length=256)
+    preset: str = Field(min_length=1, max_length=200)
+    context: str = ''
+    question: str = ''
+    answer: str = ''
+
+
 class Activity(DTO):
     run_id: str
     status: RunStatus
@@ -553,6 +570,7 @@ class WorkspacePayload(DTO):
     compare: ComparePayload | None = None
     available_presets: list[str] = Field(default_factory=list)
     recipes: list[DetectorRecipe] = Field(default_factory=list)
+    replay_target: ReplayTarget | None = None
 
 
 class ActionEnvelope(DTO):

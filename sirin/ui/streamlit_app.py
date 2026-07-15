@@ -624,6 +624,24 @@ def detection_view_model(
     context_chunks = _detector_context_chunks(detector)
     if context_chunks:
         sequence_view['context_chunk_scores'] = context_chunks
+    # Hosted only: the class-token hallucination judge scores off the reply's logprobs, which
+    # the free route often omits -> an honest verdict with no probability (nan). Point the
+    # visitor at the verbalized judge, which states a 0-100 confidence and always scores.
+    # Answerability (task != faithfulness) has no verbalized variant, so it is not nudged.
+    prob_missing = probability is None or (
+        isinstance(probability, float) and not math.isfinite(probability)
+    )
+    if (
+        is_hosted()
+        and info['family'] == 'judge'
+        and info['task'] == 'hallucination'
+        and prob_missing
+    ):
+        sequence_view['run_warnings'] = [
+            'This route returned a verdict but no token probabilities, so there is no '
+            'numeric score. For a threshold-free score, switch to the '
+            '“Judge — API Sequence (verbalized confidence)” preset.'
+        ]
     return sequence_view
 
 

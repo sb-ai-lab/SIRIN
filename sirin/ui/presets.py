@@ -36,6 +36,8 @@ _DEFAULT_HF_MODEL = 'Qwen/Qwen3-4B'
 PSILOQA_TOKEN_LINEAR_PRESET = 'Probing — Token Linear · PsiloQA/Qwen3-4B'
 # The paste-a-key span judge is the demo headline: the sidebar pins it right under the hero probe.
 JUDGE_SPAN_PRESET = 'Judge — API Span (zero-shot)'
+JUDGE_SEQUENCE_PRESET = 'Judge — API Sequence (zero-shot)'
+JUDGE_SEQUENCE_VERBALIZED_PRESET = 'Judge — API Sequence (verbalized confidence)'
 PSILOQA_MODEL_ID = 'Qwen/Qwen3-4B'
 PSILOQA_MODEL_REVISION = '1cfa9a7208912126459214e8b04321603b3df60c'
 PSILOQA_CHECKPOINT_DIR = str(
@@ -1033,11 +1035,30 @@ def visible_presets() -> list[Preset]:
     serve the verified recorded result (the Space bundles neither weights nor a GPU).
     """
     if is_hosted():
-        return [
+        visible = [
             p for p in list_presets()
             if p.family == 'judge' or p.name in HOSTED_REPLAY_PRESETS
         ]
+        return _verbalized_sequence_first(visible)
     return list_presets()
+
+
+def _verbalized_sequence_first(visible: list[Preset]) -> list[Preset]:
+    """Lead the sequence-judge pair with the verbalized judge (hosted only).
+
+    The free OpenRouter route often returns no logprobs, so the plain (class-token)
+    sequence judge honestly shows a verdict with no score. The verbalized judge always
+    yields an autoregressive 0-100 confidence, so a visitor who reaches for a sequence
+    judge lands on one that scores. Only reorders within the judge group — the span judge
+    stays the sidebar default and the replay-only presets keep their order.
+    """
+    names = [p.name for p in visible]
+    if JUDGE_SEQUENCE_VERBALIZED_PRESET in names and JUDGE_SEQUENCE_PRESET in names:
+        verbal = names.index(JUDGE_SEQUENCE_VERBALIZED_PRESET)
+        plain = names.index(JUDGE_SEQUENCE_PRESET)
+        if verbal > plain:
+            visible.insert(plain, visible.pop(verbal))
+    return visible
 
 
 def hosted_replay_only(preset_family: str) -> bool:

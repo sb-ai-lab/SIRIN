@@ -302,15 +302,16 @@ def build_seed_runs(setup_revision: int = 0) -> list[RunRecord]:
 
 
 def build_recorded_replay(
-    example_id: str, setup_revision: int = 0, preset: str | None = None
+    example_id: str | None, setup_revision: int = 0, preset: str | None = None
 ) -> RunRecord | None:
-    """Fresh RECORDED_RESULT run matching the example (and, when given, the preset), or None.
+    """Fresh RECORDED_RESULT run matching the example and/or preset, or None.
 
     Serves "replay" for presets that cannot score live on the hosted CPU demo: the run is
     rebuilt from the verified bundled asset through the same derivation path as the landing
     seed (fresh id and timestamps, recorded provenance intact) — never from mutable session
     history, so a cleared run list cannot poison it. Several presets can record the same
-    example, so the active preset selects its own result.
+    example, so the active preset selects its own result. Pass ``example_id=None`` to match
+    by preset alone (each replay preset owns exactly one recording).
     """
     from .recorded_runs import load_recorded_runs
 
@@ -325,12 +326,17 @@ def build_recorded_replay(
                 yield record
 
     for record in (*seed_records(), *load_recorded_runs(setup_revision)):
-        if record.inputs.example_id != example_id:
+        if example_id is not None and record.inputs.example_id != example_id:
             continue
         if preset is not None and record.setup_snapshot.detector_preset != preset:
             continue
         return record
     return None
+
+
+def replay_record_for_preset(preset: str, setup_revision: int = 0) -> RunRecord | None:
+    """The one recording a replay-only preset serves, resolved by preset alone."""
+    return build_recorded_replay(None, setup_revision, preset=preset)
 
 
 def seed_draft() -> dict[str, Any]:

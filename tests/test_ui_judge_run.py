@@ -295,6 +295,49 @@ def test_sequence_judge_confident_zero_and_one_score_on_opposite_sides(monkeypat
     assert probs_one[0] > 0.5 > probs_zero[0]
 
 
+def _sequence_judge_view(monkeypatch, generation, logprob_result):
+    from sirin.ui.presets import _build_openai_judge
+
+    judge = _build_openai_judge(
+        judge_api_key=SENTINEL, api_provider='OpenRouter', judge_model='demo/judge'
+    )
+    monkeypatch.setattr(
+        judge.model_adapter,
+        'sample',
+        lambda inputs, **_kw: ([generation], [logprob_result]),
+    )
+    result = judge.detect([build_sample('the prompt', ANSWER)])
+    return detection_view_model(result, ANSWER, judge)
+
+
+def test_hosted_sequence_judge_without_logprobs_nudges_verbalized(monkeypatch):
+    # The free route omits logprobs -> honest nan score. Hosted adds a nudge pointing at
+    # the verbalized judge, which always states a numeric confidence.
+    monkeypatch.setenv('SIRIN_UI_HOSTED', '1')
+    view = _sequence_judge_view(monkeypatch, '1', None)
+
+    assert view['probability'] != view['probability']  # nan
+    warnings = view.get('run_warnings') or []
+    assert warnings and 'verbalized confidence' in warnings[0].lower()
+
+
+def test_non_hosted_sequence_judge_without_logprobs_has_no_nudge(monkeypatch):
+    # The nudge is a hosted-demo affordance; trusted-local runs must not gain a warning.
+    monkeypatch.delenv('SIRIN_UI_HOSTED', raising=False)
+    view = _sequence_judge_view(monkeypatch, '1', None)
+
+    assert not view.get('run_warnings')
+
+
+def test_hosted_sequence_judge_with_logprobs_has_no_nudge(monkeypatch):
+    # When the route DOES return class-token logprobs the score is real -> no nudge.
+    monkeypatch.setenv('SIRIN_UI_HOSTED', '1')
+    view = _sequence_judge_view(monkeypatch, '1', [[('1', -0.1), ('0', -2.0)]])
+
+    assert view['probability'] == view['probability']  # finite
+    assert not view.get('run_warnings')
+
+
 def test_sequence_judge_one_token_protocol_is_unchanged(monkeypatch):
     captured = {}
     _judge, (probs, preds, _) = _run_sequence_judge(

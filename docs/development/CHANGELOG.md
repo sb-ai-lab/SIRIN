@@ -2,6 +2,22 @@
 
 This changelog records user-facing and runtime changes to the canonical Streamlit UI. The static Hugging Face replay deployment is maintained separately.
 
+## 2026-07-15 — hosted round 4: replay-only editor, button order, guaranteed judge score
+
+### Fixed
+
+- **Hosted "Generate & score" on a replay-only preset rejected the click** (user-reported): non-judge presets can't score live on the CPU Space, but the primary button stayed enabled and only failed on submit. The editor now recognises a replay-only preset (the server sends the one recorded case it serves) and renders it read-only with **"Generate & score" disabled** (greyed, non-clickable) and **"Replay recorded answer"** as the only live action.
+- **Replay was silently unreplayable from the editor for the Sequence TabPFN and PsiloQA/Qwen3-4B presets**: their recordings target a different example than the editor's default, so a replay matched on both example and preset returned nothing. Replay now resolves the active preset's own recording (preset-only fallback), so every replay preset replays regardless of which example is loaded.
+- **Button order**: the primary "Generate & score" is now on the **left** and "Replay recorded answer" on its **right** (was reversed).
+
+### Added
+
+- **Guaranteed sequence-level judge score on the free route**: the class-token judge needs reply logprobs the free route often omits, leaving an honest but scoreless verdict. Hosted now (1) orders the **verbalized-confidence** sequence judge — which states a 0-100 confidence autoregressively, no logprobs needed — ahead of the plain sequence judge, and (2) shows a nudge on any hallucination sequence/answerability judge card that lands a verdict with no probability, pointing to the verbalized judge. The Span judge (spans + k/n agreement, also logprob-free) stays the hosted default.
+
+### Housekeeping
+
+- Corrected the `make_judge_span_seed.py` docstring to describe the shipped case honestly (one merged span, character IoU ≈ 0.49 against two gold fragments — a disclosed partial hit, not a staged perfect match).
+
 ## 2026-07-15 — hosted round 3: clean generation + every detector replayable
 
 ### Fixed

@@ -7,8 +7,9 @@ generations hash come from an actual judge run; nothing is invented and the judg
 saw the gold spans.
 
 Chosen case: the Hartmuth Pfeil date case (``psiloqa_togethercomputer/…_13194``). The
-answer invents two dates; the judge tagged exactly those two fragments and its two spans
-coincide exactly with the (hidden) gold annotation — a clean, disclosed narrative.
+answer invents two dates; the judge flags the fabricated stretch as a single merged span
+that overlaps both gold fragments — a real, honestly disclosed partial hit (character
+IoU ≈ 0.49 against the two hidden gold spans), not a staged perfect match.
 
 Two sources, same asset schema:
 

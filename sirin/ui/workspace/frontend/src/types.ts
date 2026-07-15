@@ -303,6 +303,14 @@ export interface ComparePayload {
   deltaNote?: string
 }
 
+export interface ReplayTarget {
+  exampleId: string
+  preset: string
+  context: string
+  question: string
+  answer: string
+}
+
 export interface WorkspacePayload {
   protocolVersion: string | number
   serverInstanceId?: string
@@ -322,5 +330,6 @@ export interface WorkspacePayload {
   compare?: ComparePayload | null
   availablePresets?: string[]
   recipes?: DetectorRecipe[]
+  replayTarget?: ReplayTarget | null
   ui?: { title?: string; subtitle?: string }
 }

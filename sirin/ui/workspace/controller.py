@@ -22,6 +22,7 @@ from .contracts import (
     Provenance,
     PublicError,
     ReceiptStatus,
+    ReplayTarget,
     RunMode,
     RunOrigin,
     RunRequest,
@@ -36,7 +37,7 @@ from .contracts import (
 from .examples import ExampleRegistry, cached_example_registry
 from .recipes import detector_recipes
 from .run_engine import RunEngine
-from .seed import build_recorded_replay, build_seed_runs, seed_draft
+from .seed import build_recorded_replay, build_seed_runs, replay_record_for_preset, seed_draft
 from .session import PortableFormatError, WorkspaceSession, export_bundle, export_run, import_portable_json
 
 
@@ -126,7 +127,40 @@ class WorkspaceController:
             compare=self._compare_payload(),
             available_presets=available_presets or [],
             recipes=detector_recipes(),
+            replay_target=self._replay_target(setup),
         )
+
+    def _replay_target(self, setup: SetupSnapshot) -> ReplayTarget | None:
+        """The recorded case a hosted replay-only preset serves, or None.
+
+        Present only when the active preset cannot score live. Its presence is the
+        client's replay-only signal: the editor renders read-only from it and Replay
+        submits its example_id, so the shown case always matches the served result.
+        Reading + SHA-verifying the bundled asset can raise (span drift, hash mismatch,
+        a re-serialized asset); this runs at payload-build time, which has no outer
+        try/except, so any failure degrades to None rather than 500-ing the page.
+        """
+        from sirin.ui.presets import hosted_replay_only
+        from .seed import replay_record_for_preset
+
+        if not hosted_replay_only(setup.detector_family):
+            return None
+        try:
+            record = replay_record_for_preset(
+                setup.detector_preset, self.session.state.setup_revision
+            )
+            if record is None or not record.inputs.example_id:
+                return None
+            return ReplayTarget(
+                example_id=record.inputs.example_id,
+                preset=setup.detector_preset,
+                context=record.inputs.context,
+                question=record.inputs.question,
+                answer=record.answer,
+            )
+        except Exception:
+            lg.exception('replay target build failed for {}', setup.detector_preset)
+            return None
 
     def _compare_payload(self):
         compare = self.session.state.compare
@@ -260,10 +294,15 @@ class WorkspaceController:
                 # The hosted Space ships no probe checkpoints and no GPU: replays under a
                 # non-judge preset serve the verified recorded result for THIS preset,
                 # rebuilt from the bundled asset (never live scoring, never mutable history).
+                # Prefer the exact (example, preset) match; fall back to the preset's own
+                # recording when the client submits a stale example id (e.g. a preset switch
+                # left the previous example selected) — each replay preset owns one recording.
                 record = build_recorded_replay(
                     example_id,
                     self.session.state.setup_revision,
                     preset=setup.detector_preset,
+                ) or replay_record_for_preset(
+                    setup.detector_preset, self.session.state.setup_revision
                 )
                 if record is None:
                     raise ValueError(

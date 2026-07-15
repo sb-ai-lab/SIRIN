@@ -289,3 +289,92 @@ def test_external_consent_defaults_to_checked():
     )
     assert captured['value'] is True
     assert confirmed is True
+
+
+def test_hosted_replay_target_resolves_every_replay_preset(hosted):
+    # The payload carries the one recorded case each replay-only preset serves; its presence
+    # is the client's replay-only signal. Judge presets score live -> no target.
+    from sirin.ui.workspace.contracts import SetupSnapshot
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.seed import replay_record_for_preset
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    controller = WorkspaceController(WorkspaceSession({}), engine=None)
+    for name in presets.HOSTED_REPLAY_PRESETS:
+        setup = SetupSnapshot(
+            detector_preset=name,
+            detector_family=presets.PRESETS[name].family,
+            detector_level='sequence',
+        )
+        target = controller._replay_target(setup)
+        assert target is not None, name
+        assert target.preset == name
+        assert target.answer
+        assert target.example_id == replay_record_for_preset(name).inputs.example_id
+
+    judge_setup = SetupSnapshot(
+        detector_preset=presets.JUDGE_SPAN_PRESET,
+        detector_family='judge',
+        detector_level='token',
+    )
+    assert controller._replay_target(judge_setup) is None
+
+
+def test_replay_target_is_none_when_not_hosted(not_hosted):
+    from sirin.ui.workspace.contracts import SetupSnapshot
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    controller = WorkspaceController(WorkspaceSession({}), engine=None)
+    setup = SetupSnapshot(
+        detector_preset='Uncertainty — Token (zero-shot)',
+        detector_family='uncertainty',
+        detector_level='token',
+    )
+    assert controller._replay_target(setup) is None
+
+
+@pytest.mark.parametrize(
+    'preset',
+    ['Probing — Sequence TabPFN (checkpoint)', CENSUS_PRESET],
+)
+def test_hosted_editor_replay_serves_preset_recording_even_with_stale_example(hosted, preset):
+    # The hosted editor defaults to the Qwen3.5-4B example; TabPFN and Qwen3-4B record a
+    # DIFFERENT case. A replay submitted under those presets with the stale default example
+    # must still serve the preset's own recording (preset-only fallback), never reject.
+    from sirin.ui.demo_cases import load_psiloqa_span_seed_qwen35
+    from sirin.ui.workspace.contracts import RunOrigin, SetupSnapshot
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.seed import replay_record_for_preset
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    stale_example = load_psiloqa_span_seed_qwen35()['example_id']
+    assert replay_record_for_preset(preset).inputs.example_id != stale_example  # genuinely stale
+
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = SetupSnapshot(
+        detector_preset=preset,
+        detector_family=presets.PRESETS[preset].family,
+        detector_level='sequence',
+    )
+
+    receipt = controller.handle(
+        _hosted_submit_envelope({'mode': 'recordedReplay', 'exampleId': stale_example}),
+        setup=setup,
+    )
+
+    assert receipt.status.value == 'accepted', receipt.message
+    run = session.state.runs[-1]
+    assert run.origin is RunOrigin.RECORDED_RESULT
+    assert run.setup_snapshot.detector_preset == preset
+    assert run.inputs.example_id == replay_record_for_preset(preset).inputs.example_id
+
+
+def test_hosted_verbalized_sequence_judge_precedes_plain(hosted):
+    # On the free route the plain sequence judge often shows no score; lead the pair with the
+    # verbalized judge so a visitor reaching for a sequence judge lands on one that scores.
+    names = [p.name for p in presets.visible_presets()]
+    assert names.index(presets.JUDGE_SEQUENCE_VERBALIZED_PRESET) < names.index(
+        presets.JUDGE_SEQUENCE_PRESET
+    )
