@@ -52,5 +52,7 @@ node_modules/
 # local screenshots and photos dropped at the repo root
 /photo_*.jpg
 /2026-*.jpg
-/Screenshot*.png
+/*.png
+/*.PNG
+/*.jpg
 /*.jpeg
