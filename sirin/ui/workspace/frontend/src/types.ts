@@ -331,5 +331,6 @@ export interface WorkspacePayload {
   availablePresets?: string[]
   recipes?: DetectorRecipe[]
   replayTarget?: ReplayTarget | null
+  hosted?: boolean
   ui?: { title?: string; subtitle?: string }
 }

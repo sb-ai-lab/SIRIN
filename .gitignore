@@ -50,6 +50,10 @@ sirin/detection/lm-polygraph/src/*.egg-info/
 # frontend dependencies (the committed Vite build/ under frontend is kept)
 node_modules/
 
+# owl animation sources: ~13MB of MP4 that scripts/dev/make_owl_live.py renders down to
+# the committed sirin/ui/assets/owl_live.webp. Keep them locally, out of the history.
+sirin/ui/assets/*.mp4
+
 # local screenshots and photos dropped at the repo root
 /photo_*.jpg
 /2026-*.jpg

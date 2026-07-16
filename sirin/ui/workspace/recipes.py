@@ -48,7 +48,7 @@ _TRAIN_TOKEN_PROBE = '''\
 # 1. Train a token linear probe on your own PsiloQA-style span dataset. The CLI extracts hidden
 #    states, sweeps the layer, and writes a checkpoint + manifest.json:
 #
-#    python demo/train_psiloqa_span_linear.py \\
+#    python scripts/train_psiloqa_span_linear.py \\
 #        --dataset /path/to/your_span_dataset \\
 #        --model-id Qwen/Qwen3-4B \\
 #        --layers auto \\
@@ -128,7 +128,7 @@ def detector_recipes() -> list[DetectorRecipe]:
                 'data via the training CLI, then score span metrics with sirin.metrics.span.'
             ),
             code=_TRAIN_TOKEN_PROBE,
-            reference='demo/train_psiloqa_span_linear.py',
+            reference='scripts/train_psiloqa_span_linear.py',
         ),
         DetectorRecipe(
             id='register_preset',

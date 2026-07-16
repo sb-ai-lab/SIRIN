@@ -571,6 +571,9 @@ class WorkspacePayload(DTO):
     available_presets: list[str] = Field(default_factory=list)
     recipes: list[DetectorRecipe] = Field(default_factory=list)
     replay_target: ReplayTarget | None = None
+    # Hosted (public CPU Space) profile flag — the client gates its hosted-only UX (Custom-first
+    # gallery, Replay & score as the primary action, stream-while-judging) on this so local is unchanged.
+    hosted: bool = False
 
 
 class ActionEnvelope(DTO):

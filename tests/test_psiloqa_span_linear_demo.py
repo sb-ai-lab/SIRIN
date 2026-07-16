@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from datasets import load_from_disk
 
-from demo.train_psiloqa_span_linear import (
+from scripts.train_psiloqa_span_linear import (
     character_scores,
     CHECKPOINT_DIR,
     DATASET_PATH,

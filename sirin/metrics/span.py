@@ -1,6 +1,6 @@
 """Character-level span probe metrics.
 
-Pure numpy/sklearn helpers lifted from ``demo/train_psiloqa_span_linear.py`` so
+Pure numpy/sklearn helpers lifted from ``scripts/train_psiloqa_span_linear.py`` so
 the PsiloQA span pipeline and the wider campaign can share one implementation.
 No torch / GPU dependency: everything here operates on plain arrays.
 """

@@ -211,6 +211,81 @@ def test_non_hosted_seed_runs_keep_the_census_hero(not_hosted):
     assert any(r.setup_snapshot.detector_preset == QWEN35_PRESET for r in runs)
 
 
+def _judge_span_setup():
+    from sirin.ui.workspace.contracts import SetupSnapshot
+
+    return SetupSnapshot(
+        detector_preset=presets.JUDGE_SPAN_PRESET,
+        detector_family='judge',
+        detector_level='span',
+    )
+
+
+def test_hosted_payload_flags_hosted_and_keeps_recorded_seeding(hosted):
+    from sirin.ui.workspace.contracts import RunOrigin
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = _judge_span_setup()
+
+    assert controller.seed_landing(setup) is True
+    payload = controller.build_payload(setup=setup)
+
+    # The hosted profile is advertised to the client, which gates its Custom-first UX on it.
+    assert payload.hosted is True
+    # Recorded-run seeding is untouched — the Runs panel still lands with its verified cards.
+    assert session.state.runs
+    assert all(r.origin is RunOrigin.RECORDED_RESULT for r in session.state.runs)
+
+
+def test_hosted_lands_on_empty_custom_draft(hosted):
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = _judge_span_setup()
+    controller.seed_landing(setup)
+
+    payload = controller.build_payload(setup=setup)
+    # Hosted defaults to the Custom card: no prefilled example draft, so the client's empty DEFAULT_DRAFT
+    # (exampleId=None) takes over. Contrast test_seed_prefills_the_census_draft_only_while_pristine (local).
+    assert payload.draft is None
+
+
+def test_not_hosted_still_prefills_the_example_draft(not_hosted):
+    from sirin.ui.workspace.contracts import SetupSnapshot, TaskType
+    from sirin.ui.workspace.controller import WorkspaceController
+    from sirin.ui.workspace.session import WorkspaceSession
+
+    session = WorkspaceSession({})
+    controller = WorkspaceController(session, engine=None)
+    setup = SetupSnapshot(
+        detector_preset=CENSUS_PRESET,
+        detector_family='probing',
+        detector_level='token',
+        task=TaskType.FAITHFULNESS,
+    )
+    controller.seed_landing(setup)
+
+    payload = controller.build_payload(setup=setup)
+    # Local landing is unchanged: the census example is still prefilled while pristine.
+    assert payload.draft is not None
+    assert payload.hosted is False
+
+
+def test_curated_examples_name_the_answer_source_model(hosted):
+    from sirin.ui.workspace.examples import cached_example_registry
+
+    summaries = cached_example_registry().summaries()
+    # Each curated example replays its ORIGINAL recorded answer, so provenance must name the model that
+    # produced it — the honest note the gallery card and result provenance surface.
+    assert summaries
+    assert all(s.provenance.source_model for s in summaries)
+
+
 def test_shared_env_key_serves_only_the_configured_default_model(monkeypatch):
     import pytest
 

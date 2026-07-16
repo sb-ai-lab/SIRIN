@@ -364,6 +364,20 @@ def test_component_build_emits_hashed_woff2_files_not_base64():
     assert fonts[0].read_bytes()[:4] == b'wOF2'
 
 
+def test_live_owl_emits_a_looping_transparent_webp_file_not_base64():
+    # The header owl animates on Lively while a run is in flight. It must stay a hashed FILE: dropping
+    # the ?url&no-inline suffix re-inlines ~350KB of base64 into the bundle, the same regression the
+    # font imports carry that suffix to prevent. Transparency is what lets one owl serve both themes.
+    owls = list(_FRONTEND_BUILD.glob('owl_live-*.webp'))
+    assert owls, 'owl_live webp was not emitted as a hashed file; run scripts/dev/make_owl_live.py + npm run build'
+    data = owls[0].read_bytes()
+    assert 'data:image/webp' not in _component_build_text()
+    assert data[:4] == b'RIFF' and data[8:12] == b'WEBP'
+    assert b'ANIM' in data[:64], 'owl_live is not animated'
+    assert data[data.index(b'VP8X') + 8] & 0x10, 'owl_live has no alpha channel; it would box on one theme'
+    assert len(data) <= 400 * 1024, 'owl_live exceeds its 400KB budget'
+
+
 # --- S11: dark environment (theme-conditional silk background, tuned dark scrim, dark asset) --------
 _STATIC_DIR = _REPO_ROOT / 'sirin' / 'ui' / 'static'
 _ASSETS_DIR = _REPO_ROOT / 'sirin' / 'ui' / 'assets'

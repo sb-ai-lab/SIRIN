@@ -1051,6 +1051,13 @@ def _sidebar(st: Any) -> dict[str, Any]:
     consent_slot = None
 
     with st.sidebar:
+        if is_hosted():
+            st.caption(
+                '⚠️ CPU-only demo — scoring runs live through API judges. Paste your own API key '
+                'below, or use the default free OpenRouter model while it remains available. '
+                'For local-model detectors and the full UI, run the SIRIN project from source on '
+                '[GitHub](https://github.com/sb-ai-lab/SIRIN).'
+            )
         st.html('<p class="sirin-side-heading">Detector</p>')
         preset_objs = presets.visible_presets()
         local_profile = None

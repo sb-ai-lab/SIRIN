@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import type { FrontendRenderer } from "@streamlit/component-v2-lib"
 import logoUrl from "../../../assets/logo_demo.png"
+import owlLiveUrl from "../../../assets/owl_live.webp?url&no-inline"
 import emojiNatureUrl from "./assets/fonts/NotoColorEmoji-nature.woff2?url&no-inline"
 import emojiObjectsUrl from "./assets/fonts/NotoColorEmoji-objects.woff2?url&no-inline"
 import { componentTokenCss } from "./theme"
@@ -34,7 +35,7 @@ import type {
 
 type WorkspaceAnalyzeDraft = AnalyzeDraft & { prompt: string; sourceRunId: string | null }
 type WorkspaceClientDraft = Omit<ClientDraft, "analyze"> & { analyze: WorkspaceAnalyzeDraft }
-type WorkspaceExample = ExampleRecord & { prompt?: string }
+type WorkspaceExample = ExampleRecord & { prompt?: string; provenance?: { sourceModel?: string | null; dataset?: string | null } }
 type WorkspaceViewState = { workspace?: WorkspaceName; appearance?: AppearanceState; showExamples?: boolean }
 type WorkspacePayloadView = WorkspacePayload & { viewState?: WorkspaceViewState }
 
@@ -61,6 +62,12 @@ function registerEmojiFonts(): void {
     document.fonts.add(face)
     void face.load().catch(() => document.fonts.delete(face))
   }
+}
+
+// The host CSS kill-switch (styles.py) only stops CSS animations. Motion driven from JS — the answer
+// type-out, the span reveal, the animated owl — has to consult the preference itself.
+function prefersReducedMotion(): boolean {
+  return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 }
 
 const DEFAULT_DRAFT: WorkspaceClientDraft = {
@@ -233,15 +240,21 @@ function ShellHeader({
   setup,
   title,
   subtitle,
+  busy,
+  motion,
 }: {
   workspace: WorkspaceName
   onWorkspace: (value: WorkspaceName) => void
   setup?: SetupSummary
   title?: string
   subtitle?: string
+  busy: boolean
+  motion: MotionName
 }) {
   const [open, setOpen] = useState(false)
   const popoverId = useId()
+  // Lively only: the mascot animating IS the "work is running" signal, alongside the activity card.
+  const owlLive = motion === "lively" && busy && !prefersReducedMotion()
   useEffect(() => {
     if (!open) return
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false) }
@@ -251,7 +264,7 @@ function ShellHeader({
   return <>
     <header className="shell-header">
       <button className="brand" type="button" onClick={() => onWorkspace("analyze")} aria-label="SIRIN Analyze home">
-        <img src={logoUrl} alt="" />
+        <img src={owlLive ? owlLiveUrl : logoUrl} alt="" />
         <span><b>SIRIN</b><small>Honesty, made visible.</small></span>
       </button>
       <nav className="workspace-tabs" aria-label="Workspace">
@@ -290,9 +303,18 @@ function Select({ value, onChange, ariaLabel, children }: { value: string; onCha
   return <span className="select-wrap"><select value={value} aria-label={ariaLabel} onChange={onChange}>{children}</select><svg className="select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span>
 }
 
-function ExampleGallery({ examples, selected, onSelect }: { examples: WorkspaceExample[]; selected: string | null; onSelect: (example: WorkspaceExample) => void }) {
+function ExampleGallery({ examples, selected, hosted, onSelect, onCustom }: { examples: WorkspaceExample[]; selected: string | null; hosted: boolean; onSelect: (example: WorkspaceExample) => void; onCustom: () => void }) {
   if (!examples.length) return null
-  return <div className="examples"><span>Try an example</span><div className="example-list">{examples.map((example) => <button type="button" key={example.id} disabled={Boolean(example.disabledReason)} title={example.disabledReason ?? example.description} className={selected === example.id ? "selected" : ""} onClick={() => onSelect(example)}>{example.label}</button>)}</div></div>
+  // Each example replays its ORIGINAL recorded answer (not a freshly generated one), so name the model
+  // that produced it — the honest provenance the visitor is scoring. Hosted also leads with a Custom card
+  // (default-selected when no example is chosen) for entering your own context + question.
+  return <div className="examples"><span>Try an example</span><div className="example-list">
+    {hosted && <button type="button" key="__custom__" className={selected === null ? "selected" : ""} title="Enter your own context and question, then generate and score a live answer." onClick={onCustom}><span className="example-label">Custom</span><span className="example-source">your own input</span></button>}
+    {examples.map((example) => {
+      const model = example.provenance?.sourceModel?.split("/").pop()
+      return <button type="button" key={example.id} disabled={Boolean(example.disabledReason)} title={example.disabledReason ?? example.description} className={selected === example.id ? "selected" : ""} onClick={() => onSelect(example)}><span className="example-label">{example.label}</span>{model && <span className="example-source">answer by {model}</span>}</button>
+    })}
+  </div></div>
 }
 
 // Honest busy-state staging. The backend Activity DTO (sirin/ui/workspace/contracts.py::Activity) exposes
@@ -318,6 +340,19 @@ function ActivityCard({ activity, runs = [] }: { activity?: ActivityState | null
   return <section className="result-card activity-card" aria-live="polite" aria-busy="true">
     <div className="activity-status"><p className="eyebrow">Working</p><h2>{label}</h2><p>{detail}</p></div>
     <div className="skeleton-lines" aria-hidden="true"><i /><i /><i /><i /></div>
+  </section>
+}
+
+// Hosted "Replay & score" busy state: the recorded answer streams into the result area WHILE the judge
+// scores it. Scoring resolves the canonical answer server-side by example id, so this preview never
+// affects the verdict. On the judge's return, ResultCard's graded evidence replaces this card;
+// answerAlreadyStreamed suppresses a second type-out. Reduced-motion / Static reveal the answer at once.
+// onComplete is a no-op — the no-double-replay handoff is driven by streamedRunId in AnalyzeWorkspace.
+function ReplayScoringCard({ answer, motion }: { answer: string; motion: MotionName }) {
+  const animate = motion !== "static" && !prefersReducedMotion()
+  return <section className="result-card activity-card" aria-live="polite" aria-busy="true">
+    <div className="activity-status"><p className="eyebrow">Scoring…</p><h2>Replaying the recorded answer</h2><p>The judge is scoring this answer against the context; graded evidence appears when it finishes.</p></div>
+    <div className="answer-block"><div className="answer-label"><span>Answer</span></div>{animate ? <ReplayAnswer answer={answer} onComplete={() => {}} /> : <p className="answer-copy">{answer}</p>}</div>
   </section>
 }
 
@@ -433,6 +468,8 @@ function EvidenceDetails({ result }: { result: AnalysisResult }) {
 function Provenance({ run }: { run: RunRecord }) {
   const provenance = run.provenance ?? {}
   const recordedResult = run.origin === RECORDED_RESULT_ORIGIN
+  // A replayed answer (recorded answer + live judge) emphasizes WHICH model produced the answer.
+  const replay = !recordedResult && /replay|recorded/i.test(`${run.origin ?? ""} ${run.mode ?? ""}`)
   // The recorded-result seed carries the trained-probe checkpoint hash; surface it as its own chip so
   // it is always visible, not truncated away behind the three generic provenance entries below.
   const checkpoint = recordedResult && typeof provenance.integritySha256 === "string" ? provenance.integritySha256 : null
@@ -443,7 +480,10 @@ function Provenance({ run }: { run: RunRecord }) {
     {run.staleSetup && <span className="warning">Different setup</span>}
     {run.sourceRunId && <span>Source {run.sourceRunId}</span>}
     {checkpoint && <span title={checkpoint}>Checkpoint {checkpoint.slice(0, 12)}…</span>}
-    {entries.slice(0, 3).map(([key, value]) => <span key={key}>{titleCase(key)}: {String(value)}</span>)}
+    {entries.slice(0, 3).map(([key, value]) => {
+      const strong = replay && key === "sourceModel"
+      return <span key={key}>{strong ? <b>{titleCase(key)}: {String(value)}</b> : `${titleCase(key)}: ${String(value)}`}</span>
+    })}
   </div>
 }
 
@@ -458,7 +498,7 @@ function LatencyStrip({ timings }: { timings?: RunRecord["timings"] }) {
   return <div className="latency-strip" aria-label="Run latency">{parts.map(([stage, value], index) => <span key={stage}>{index > 0 ? "· " : ""}{stage} <b>{(value as number).toFixed(1)}s</b></span>)}</div>
 }
 
-function ResultCard({ run, motion, onAction, onPrepareRerun }: { run: RunRecord; motion: MotionName; onAction: (type: string, payload: Record<string, unknown>) => void; onPrepareRerun: (run: RunRecord) => void }) {
+function ResultCard({ run, motion, answerAlreadyStreamed = false, onAction, onPrepareRerun }: { run: RunRecord; motion: MotionName; answerAlreadyStreamed?: boolean; onAction: (type: string, payload: Record<string, unknown>) => void; onPrepareRerun: (run: RunRecord) => void }) {
   const result = run.analysis ?? run.result ?? {}
   const semantics = result.scoreSemantics ?? run.scoreSemantics
   const score = result.score ?? result.confidence ?? run.score
@@ -472,7 +512,6 @@ function ResultCard({ run, motion, onAction, onPrepareRerun }: { run: RunRecord;
   // recorded-answer typewriter or the "live detection" label, even though its origin contains "recorded".
   const recordedResult = run.origin === RECORDED_RESULT_ORIGIN
   const replay = !recordedResult && /replay|recorded/i.test(`${run.origin ?? ""} ${run.mode ?? ""}`)
-  const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
   // One-shot: capture at mount whether THIS run id is appearing for the first time ever, then record it.
   // A tab return or re-select remounts the card, finds the id already seen, and renders the fully-settled
   // result with neither the recorded-answer typewriter nor the span reveal replaying.
@@ -481,8 +520,10 @@ function ResultCard({ run, motion, onAction, onPrepareRerun }: { run: RunRecord;
     revealedRunIds.add(run.id)
     return first
   })
-  const animate = motion !== "static" && !reducedMotion && firstAppearance
-  const stageReplay = replay && animate
+  const animate = motion !== "static" && !prefersReducedMotion() && firstAppearance
+  // The hosted "Replay & score" flow already streamed this answer during judging (ReplayScoringCard), so
+  // suppress the answer type-out here while still letting the span reveal play once — no double replay.
+  const stageReplay = replay && animate && !answerAlreadyStreamed
   const [replayFinished, setReplayFinished] = useState(!stageReplay)
   // Span cards get the staggered wash reveal on first appearance; Static/reduced-motion withhold .is-reveal
   // so the card renders complete. --reveal-total = 240 + n·180 + 400ms gates the footer's closing fade.
@@ -549,6 +590,24 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
   const examples = (payload.examples ?? []) as WorkspaceExample[]
   const selectedExample = examples.find((item) => item.id === draft.exampleId)
   const recordedCta = Boolean(selectedExample && (selectedExample.recordedAnswer || selectedExample.answer))
+  const hosted = Boolean(payload.hosted)
+  const replayAnswer = selectedExample?.recordedAnswer ?? selectedExample?.answer ?? ""
+  // Hosted: a chosen example's PRIMARY action replays its recorded answer + live judge (never generates);
+  // Custom (no example) keeps live API generation + judge. Local is unchanged (replay stays secondary).
+  const replayPrimary = hosted && Boolean(selectedExample) && recordedCta
+  const [pendingReplayAnswer, setPendingReplayAnswer] = useState<string | null>(null)
+  const [streamedRunId, setStreamedRunId] = useState<string | null>(null)
+  const streamingReplay = hosted && busy && Boolean(pendingReplayAnswer)
+  const activeRunId = payload.activity?.runId ?? null
+  // Tag the in-flight run as already-streamed so ResultCard skips a second answer type-out on handoff.
+  useEffect(() => { if (streamingReplay && activeRunId) setStreamedRunId(activeRunId) }, [streamingReplay, activeRunId])
+  useEffect(() => { if (!busy) setPendingReplayAnswer(null) }, [busy])
+  const submitReplay = () => {
+    if (busy || !selectedExample) return
+    setPendingReplayAnswer(replayAnswer)
+    onAction("submit", { task: selectedExample.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: replayAnswer, prompt: "", exampleId: selectedExample.id })
+  }
+  const chooseCustom = () => setDraft({ task: draft.task, mode: draft.mode, exampleId: null, context: "", question: "", answer: "", prompt: "", sourceRunId: null }, true)
   const chooseExample = (example: WorkspaceExample) => setDraft({
     task: example.task ?? draft.task,
     mode: draft.mode,
@@ -561,7 +620,10 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
   }, true)
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (!canSubmit || busy) return
+    if (busy) return
+    // Hosted + an example selected: Enter replays too, so a curated example never triggers generation.
+    if (replayPrimary) { submitReplay(); return }
+    if (!canSubmit) return
     const mode = draft.task === "answerability" ? "answerability" : draft.sourceRunId && draft.prompt && !draft.context && !draft.question ? "quickPrompt" : draft.mode === "generate" ? "generateAndScore" : "scoreSuppliedAnswer"
     onAction("submit", {
       task: draft.task,
@@ -595,24 +657,26 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
     </main>
   }
   return <main className="workspace-content analyze-workspace">
-    {showExamples && <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} onSelect={chooseExample} />}
+    {showExamples && <ExampleGallery examples={examples.filter((example) => !example.task || example.task === draft.task)} selected={draft.exampleId} hosted={hosted} onSelect={chooseExample} onCustom={chooseCustom} />}
     <form className="analysis-form" onSubmit={submit}>
       <div className="form-row">
         <Field label="Task"><Select value={draft.task} onChange={(event) => { const task = event.target.value as TaskName; setDraft({ ...draft, task, mode: task === "answerability" ? "generate" : draft.mode }, true) }}><option value="faithfulness" disabled={setupTask !== "faithfulness"}>Hallucination</option><option value="answerability" disabled={!enabled(extendedCapabilities.canAnswerability ?? (setupTask === "answerability"))}>Answerability</option></Select></Field>
         {draft.task === "faithfulness" && <Field label="Answer source"><Select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value as AnalyzeDraft["mode"] }, true)}><option value="generate" disabled={!enabled(capabilities.canGenerate)}>Generate an answer</option><option value="supplied">Score supplied answer</option></Select></Field>}
       </div>
       {draft.prompt && <details className="prompt-disclosure"><summary><svg className="disclosure-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><span>Exact model prompt</span><span className="disclosure-count">{draft.prompt.length.toLocaleString()} characters</span></summary><Field label="Prompt"><textarea rows={5} value={draft.prompt} placeholder="Verified example or imported prompt…" onChange={(event) => setDraft({ ...draft, prompt: event.target.value, exampleId: null })} onBlur={() => setDraft(draft, true)} /></Field></details>}
-      <Field label="Context" hint={`${draft.context.length.toLocaleString()} characters`}><textarea rows={7} value={draft.context} placeholder="Paste the source material the answer must stay grounded in…" onChange={(event) => setDraft({ ...draft, context: event.target.value })} onBlur={() => setDraft(draft, true)} /></Field>
-      <Field label="Question"><textarea rows={2} value={draft.question} placeholder="What should the model answer from this context?" onChange={(event) => setDraft({ ...draft, question: event.target.value })} onBlur={() => setDraft(draft, true)} /></Field>
+      <Field label="Context" hint={`${draft.context.length.toLocaleString()} characters`}><textarea rows={7} value={draft.context} placeholder="Paste the source material the answer must stay grounded in…" onChange={(event) => setDraft({ ...draft, context: event.target.value, exampleId: null })} onBlur={() => setDraft(draft, true)} /></Field>
+      <Field label="Question"><textarea rows={2} value={draft.question} placeholder="What should the model answer from this context?" onChange={(event) => setDraft({ ...draft, question: event.target.value, exampleId: null })} onBlur={() => setDraft(draft, true)} /></Field>
       {draft.task === "faithfulness" && draft.mode === "supplied" && <Field label="Answer to score"><textarea rows={4} value={draft.answer} placeholder="Paste the answer that should be checked…" onChange={(event) => setDraft({ ...draft, answer: event.target.value })} onBlur={() => setDraft(draft, true)} /></Field>}
       {!enabled(taskCapability) && <p className="field-error">{disabledReason(taskCapability) ?? "The active detector does not support this task."}</p>}
       {!enabled(generationCapability) && <p className="field-error">{disabledReason(generationCapability) ?? "Generation is not available with the active setup."}</p>}
       {draft.sourceRunId && <div className="inline-notice info"><b>Imported run prepared</b><span>Review these inputs, then submit explicitly with the current setup.</span></div>}
       <div className="form-actions">
-        {/* Generate/score is the primary CTA on the left; replaying a selected example's
-            verified answer is the secondary path on its right. */}
-        <button className="primary" type="submit" disabled={!canSubmit || busy}><Icon name="spark" />{draft.task === "answerability" ? "Check answerability" : draft.mode === "supplied" ? "Score answer" : "Generate & score"}</button>
-        {recordedCta && <button type="button" className="secondary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
+        {/* Hosted + an example selected → "Replay & score" is primary and never generates. Otherwise
+            Generate/score is primary and replaying the selected example is the secondary path (local). */}
+        {replayPrimary
+          ? <button className="primary" type="button" disabled={busy} onClick={submitReplay}><Icon name="spark" />Replay &amp; score</button>
+          : <button className="primary" type="submit" disabled={!canSubmit || busy}><Icon name="spark" />{draft.task === "answerability" ? "Check answerability" : draft.mode === "supplied" ? "Score answer" : "Generate & score"}</button>}
+        {!replayPrimary && recordedCta && <button type="button" className="secondary" disabled={busy} onClick={() => onAction("submit", { task: selectedExample?.task ?? "faithfulness", mode: "recordedReplay", context: draft.context, question: draft.question, suppliedAnswer: selectedExample?.recordedAnswer ?? selectedExample?.answer ?? "", prompt: "", exampleId: selectedExample?.id })}><Icon name="spark" />Replay recorded answer</button>}
         {/* Compare: side A is the sidebar detector, side B is a preset from the same catalog. Both score
             the SAME answer A produces/receives — the honest, apples-to-apples comparison. */}
         {availablePresets.length > 0 && <button type="button" className="quiet" disabled={busy} aria-expanded={compareOpen} onClick={() => setCompareOpen((value) => !value)}>Compare detectors…</button>}
@@ -623,7 +687,7 @@ function AnalyzeWorkspace({ payload, draft, setDraft, busy, motion, onAction, on
         {!canSubmit && <p className="field-error">Enter a context and question (or an answer to score) first.</p>}
       </div>}
     </form>
-    {busy ? <ActivityCard activity={payload.activity} runs={payload.runs ?? []} /> : payload.selectedRun ? <ResultCard key={payload.selectedRun.id} run={payload.selectedRun} motion={motion} onAction={onAction} onPrepareRerun={onPrepareRerun} /> : <section className="result-placeholder"><div><Icon name="spark" /></div><h2>Your evidence map will appear here.</h2><p>Results lead with the outcome, then reveal only the detail each detector can honestly support.</p></section>}
+    {streamingReplay ? <ReplayScoringCard answer={pendingReplayAnswer ?? ""} motion={motion} /> : busy ? <ActivityCard activity={payload.activity} runs={payload.runs ?? []} /> : payload.selectedRun ? <ResultCard key={payload.selectedRun.id} run={payload.selectedRun} motion={motion} answerAlreadyStreamed={streamedRunId === payload.selectedRun.id} onAction={onAction} onPrepareRerun={onPrepareRerun} /> : <section className="result-placeholder"><div><Icon name="spark" /></div><h2>Your evidence map will appear here.</h2><p>Results lead with the outcome, then reveal only the detail each detector can honestly support.</p></section>}
   </main>
 }
 
@@ -827,6 +891,19 @@ function WorkspaceApp({ componentKey, payload, setStateValue, setTriggerValue }:
     if (viewState?.appearance && (viewState.appearance.theme !== remembered.appearance.theme || viewState.appearance.motion !== remembered.appearance.motion)) { remembered.appearance = viewState.appearance; setAppearanceLocal(viewState.appearance) }
   }, [viewState?.workspace, viewState?.appearance?.theme, viewState?.appearance?.motion, remembered])
   useEffect(() => {
+    // Warm the animated owl while nothing is happening. Fetched on demand it would start
+    // downloading at the exact moment a run does, and arrive after short runs have finished --
+    // missing the only moment it exists for. Lively is opt-in, so this costs nobody else.
+    if (appearance.motion !== "lively" || prefersReducedMotion()) return
+    const warm = () => { new Image().src = owlLiveUrl }
+    if (globalThis.requestIdleCallback) {
+      const idle = globalThis.requestIdleCallback(warm)
+      return () => globalThis.cancelIdleCallback(idle)
+    }
+    const timer = globalThis.setTimeout(warm, 2000)
+    return () => globalThis.clearTimeout(timer)
+  }, [appearance.motion])
+  useEffect(() => {
     // Components v2 renders into a shadow root of the HOST document, so the host silk layer can be
     // switched synchronously via html[data-sirin-motion] instead of waiting a full server round-trip.
     // Server state stays canonical: the transient appearance event still reconciles on the next rerun,
@@ -879,7 +956,7 @@ function WorkspaceApp({ componentKey, payload, setStateValue, setTriggerValue }:
   const notices = payload.notices ?? []
   return <div ref={workspaceRootRef} className="sirin-workspace" data-theme={appearance.theme} data-motion={appearance.motion}>
     <div className="shell">
-      <ShellHeader workspace={workspace} onWorkspace={setWorkspace} setup={payload.setup} title={payload.ui?.title} subtitle={payload.ui?.subtitle} />
+      <ShellHeader workspace={workspace} onWorkspace={setWorkspace} setup={payload.setup} title={payload.ui?.title} subtitle={payload.ui?.subtitle} busy={busy} motion={appearance.motion} />
       {notices.length > 0 && <div className="notice-stack" aria-live="polite">{notices.map((notice, index) => <div className={`inline-notice ${notice.level ?? notice.kind ?? "info"}`} key={index}>{notice.title && <b>{notice.title}</b>}<span>{notice.message}</span></div>)}</div>}
       {payload.actionReceipt?.status === "rejected" && <div className="inline-notice error receipt" role="alert"><b>Action rejected</b><span>{payload.actionReceipt.message ?? "The request could not be accepted."}</span></div>}
       {workspace === "analyze" && <AnalyzeWorkspace payload={payload} draft={draft.analyze} setDraft={setAnalyzeDraft} busy={busy} motion={appearance.motion} onAction={emit} onPrepareRerun={prepareRerun} onCompare={startCompare} />}

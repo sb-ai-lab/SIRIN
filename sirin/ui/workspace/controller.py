@@ -34,6 +34,7 @@ from .contracts import (
     default_view_state,
     utc_now,
 )
+from ..path_policy import is_hosted
 from .examples import ExampleRegistry, cached_example_registry
 from .recipes import detector_recipes
 from .run_engine import RunEngine
@@ -101,9 +102,13 @@ class WorkspaceController:
         only_seeds = bool(state.runs) and all(
             run.origin == RunOrigin.RECORDED_RESULT for run in state.runs
         )
+        # Hosted lands on the Custom card (empty draft) so visitors start by typing their own
+        # inputs or picking an example; the client's DEFAULT_DRAFT (exampleId=null) takes over when
+        # draft is None. Recorded-run seeding is untouched — only the prefilled Analyze fields drop.
         draft = (
             seed_draft()
-            if selected is not None
+            if not is_hosted()
+            and selected is not None
             and selected.origin == RunOrigin.RECORDED_RESULT
             and only_seeds
             else None
@@ -128,6 +133,7 @@ class WorkspaceController:
             available_presets=available_presets or [],
             recipes=detector_recipes(),
             replay_target=self._replay_target(setup),
+            hosted=is_hosted(),
         )
 
     def _replay_target(self, setup: SetupSnapshot) -> ReplayTarget | None:
