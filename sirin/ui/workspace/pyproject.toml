@@ -1,0 +1,7 @@
+[project]
+name = "sirin"
+version = "0.1.0"
+
+[[tool.streamlit.component.components]]
+name = "sirin_workspace"
+asset_dir = "ui/workspace/frontend/build"

@@ -1,6 +1,31 @@
 from typing import Any, Dict, List
 
 
+# Span-annotation prompts for the token-level API judge. The judge parses [SPAN]...[/SPAN]
+# tags out of the model's echoed answer, so the model MUST reproduce the answer verbatim and
+# only insert tags — anything else (paraphrase, corrections, verdict digits) breaks the
+# character alignment and is dropped by the reference-echo check.
+SPAN_TAG_SYSTEM_PROMPT = (
+    "You are a hallucination span annotator. You receive a dialogue: a user prompt "
+    "(which may include a context passage) and an assistant answer. Reproduce the "
+    "assistant's answer EXACTLY, character for character, and insert the markers [SPAN] "
+    "and [/SPAN] around every hallucinated part — any span not supported by, or "
+    "contradicted by, the context.\n"
+    "Rules:\n"
+    "- Copy the answer verbatim. Do NOT correct, paraphrase, reorder, translate, or add "
+    "anything; the ONLY characters you may add are the [SPAN] and [/SPAN] markers.\n"
+    "- Wrap only the hallucinated words; you may use the markers multiple times.\n"
+    "- If nothing is hallucinated, output the answer unchanged with no markers.\n"
+    "- Output ONLY the annotated answer: no explanations, no verdict digits, no quotes, "
+    "no code fences."
+)
+SPAN_TAG_USER_PROMPT = (
+    "Dialogue:\n{sample}\n\n"
+    "Return the assistant's answer verbatim, wrapping each hallucinated span in "
+    "[SPAN]...[/SPAN]. If no content is hallucinated, return the answer unchanged."
+)
+
+
 def format_dialogue_samples(config: Any, samples: List[Any]) -> List[Any]:
     """
     Format dialogue samples using the configured dialogue format.

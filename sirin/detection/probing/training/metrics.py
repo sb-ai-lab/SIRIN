@@ -44,7 +44,7 @@ def fuzzy_f1(input, target, smooth=1e-6):
     return f1_score
 
 
-def balanced_f_score(input, target, betta=1.0, weight=0.5, smooth=1e-6):
+def balanced_f_score(input, target, beta=1.0, weight=0.5, smooth=1e-6):
     input = torch.sigmoid(input)
     tp = torch.sum(input * target)
     fp = torch.sum(input * (1 - target))
@@ -57,16 +57,16 @@ def balanced_f_score(input, target, betta=1.0, weight=0.5, smooth=1e-6):
     recall_class0 = tn / (tn + fp + smooth)
 
     soft_f_class1 = (
-        (1 + betta**2)
+        (1 + beta**2)
         * precision_class1
         * recall_class1
-        / (betta**2 * precision_class1 + recall_class1 + smooth)
+        / (beta**2 * precision_class1 + recall_class1 + smooth)
     )
     soft_f_class0 = (
-        (1 + betta**2)
+        (1 + beta**2)
         * precision_class0
         * recall_class0
-        / (betta**2 * precision_class0 + recall_class0 + smooth)
+        / (beta**2 * precision_class0 + recall_class0 + smooth)
     )
     cost_class1 = 1 - soft_f_class1
     cost_class0 = 1 - soft_f_class0
@@ -95,14 +95,14 @@ class SoftPrecisionLoss(nn.Module):
 
 
 class BalancedFScore(nn.Module):
-    def __init__(self, betta=1.0, weight=0.5, smooth=1e-6):
+    def __init__(self, beta=1.0, weight=0.5, smooth=1e-6):
         super().__init__()
-        self.betta = betta
+        self.beta = beta
         self.weight = weight
         self.smooth = smooth
 
     def forward(self, input, target):
-        return balanced_f_score(input, target, self.betta, self.weight, self.smooth)
+        return balanced_f_score(input, target, self.beta, self.weight, self.smooth)
 
 
 class SupervisedContrastiveLoss(nn.Module):
@@ -205,11 +205,11 @@ def compute_contrastive_metrics(
     )
 
     return {
-        "intra_class_distance": intra_class_dist.item(),
-        "inter_class_distance": inter_class_dist.item(),
-        "separation_ratio": separation_ratio.item(),
-        "alignment": alignment.item(),
-        "uniformity": uniformity.item(),
+        'intra_class_distance': intra_class_dist.item(),
+        'inter_class_distance': inter_class_dist.item(),
+        'separation_ratio': separation_ratio.item(),
+        'alignment': alignment.item(),
+        'uniformity': uniformity.item(),
     }
 
 
@@ -262,7 +262,7 @@ def compute_hard_negative_stats(
         max_hard_negative_similarity = 0.0
 
     return {
-        "hard_negative_ratio": hard_negative_ratio,
-        "avg_hard_negative_similarity": avg_hard_negative_similarity,
-        "max_hard_negative_similarity": max_hard_negative_similarity,
+        'hard_negative_ratio': hard_negative_ratio,
+        'avg_hard_negative_similarity': avg_hard_negative_similarity,
+        'max_hard_negative_similarity': max_hard_negative_similarity,
     }

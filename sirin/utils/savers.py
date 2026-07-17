@@ -57,13 +57,13 @@ class BaseAliasSaver:
         lg.info(f"Saving at {curr_save_path}.")
         self.save_fn(curr_save_path, *save_args, **save_kwgs)
 
-        with open(Path(self.save_dir) / ARTIFACTS_YAML, "a") as f:
+        with open(Path(self.save_dir) / ARTIFACTS_YAML, 'a') as f:
             yaml.dump({artifact_key: str(curr_save_path.resolve())}, f)
 
     def _get_labeled_path(self, label: str) -> Path:
         """Create a path with a label added."""
-        splitted_path = str(self.save_path).split(".")
-        labled_path = ".".join([f"{splitted_path[0]}_{label}"] + splitted_path[1:])
+        splitted_path = str(self.save_path).split('.')
+        labled_path = '.'.join([f"{splitted_path[0]}_{label}"] + splitted_path[1:])
         return Path(labled_path)
 
 
@@ -99,12 +99,12 @@ class BatchCheckpointSaver(BaseAliasSaver):
         data_name: str,
         model_name: str,
         save_dir: str,
-        suffix: str = ".pkl",
+        suffix: str = '.pkl',
         file_type_alias: str = HIDDENS_FILE_KEY,
         create_dir: bool = True,
     ):
         super().__init__(
-            name="_".join([data_name, model_name]),
+            name='_'.join([data_name, model_name]),
             save_dir=save_dir,
             file_type_alias=file_type_alias,
             save_fn=self._save_logic,
@@ -167,7 +167,7 @@ class BatchCheckpointSaver(BaseAliasSaver):
         return processed_indices
 
 
-class TorchModulelSaver(BaseAliasSaver):
+class TorchModuleSaver(BaseAliasSaver):
     import torch
 
     def __init__(
@@ -181,7 +181,7 @@ class TorchModulelSaver(BaseAliasSaver):
             save_dir=save_dir,
             file_type_alias=TORCH_MODULE_KEY,
             save_fn=self._save_logic,
-            suffix=".pt",
+            suffix='.pt',
             create_dir=create_dir,
         )
 
@@ -202,7 +202,7 @@ class TorchModulelSaver(BaseAliasSaver):
     ) -> Path:
         import torch
 
-        checkpoint_path = self.get_save_path(self.save_dir, checkpoint_name, ".pt")
+        checkpoint_path = self.get_save_path(self.save_dir, checkpoint_name, '.pt')
         lg.info(f"Saving module checkpoint to {checkpoint_path}")
         torch.save(module.state_dict(), checkpoint_path)
         return checkpoint_path
@@ -217,10 +217,12 @@ class MetricsSaver(BatchCheckpointSaver):
         create_dir: bool = True,
     ):
         super().__init__(
-            name="_".join([data_name, model_name]),
+            name='_'.join([data_name, model_name]),
             save_dir=save_dir,
             file_type_alias=METRICS_KEY,
             save_fn=self._save_logic,
-            suffix="_metrics.pkl",
+            suffix='_metrics.pkl',
             create_dir=create_dir,
         )
+
+TorchModulelSaver = TorchModuleSaver  # legacy alias

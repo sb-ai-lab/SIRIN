@@ -7,7 +7,11 @@ from loguru import logger as lg
 
 from sirin.definitions import DetectionLevel
 from sirin.detection.judging.judges.base import OpenAIJudgeBase
-from sirin.detection.judging.judges.utils import build_prompt_messages
+from sirin.detection.judging.judges.utils import (
+    build_prompt_messages,
+    probability_of_positive_class,
+    sample_with_logprobs_fallback,
+)
 from sirin.detection.splitters import SplitManager
 from sirin.inference.adapters import ModelAdapterBase
 from sirin.models.detection import OpenAIJudgeConfig, SplitConfig
@@ -62,29 +66,39 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
 
         formatted_input = build_prompt_messages(self.config, samples)
 
-        results, logprobs_results = self.model_adapter.sample(
-            inputs=formatted_input,
-            max_tokens=1,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            return_logprobs=True,
-            top_logprobs=2,
-            **kwargs,
-        )
+        def _sample(return_logprobs: bool):
+            return self.model_adapter.sample(
+                inputs=formatted_input,
+                max_tokens=self.config.verdict_max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                return_logprobs=return_logprobs,
+                top_logprobs=self.config.top_logprobs,
+                max_concurrent=self.config.max_concurrent,
+                **kwargs,
+            )
+
+        results, logprobs_results = sample_with_logprobs_fallback(_sample)
 
         probs = []
         preds = []
 
-        for logprob_result in logprobs_results:
-            most_likely_logprob = -1 * logprob_result[0][0]
-            probs.append(most_likely_logprob)
+        num_classes = max(self.config.num_classification_heads, 2)
+        binary = num_classes <= 2
+        for idx, logprob_result in enumerate(logprobs_results):
+            # See `SequenceOpenAIJudge.detect`: the score has to be P(hallucinated) read
+            # off the class token, not the top token's surprisal. No class token in the
+            # top-k / logprobs omitted / multiclass -> nan; the verdict still holds.
+            prob = probability_of_positive_class(logprob_result) if binary else None
+            probs.append(float('nan') if prob is None else prob)
 
-            pred = (
-                int(results[logprobs_results.index(logprob_result)])
-                if results[logprobs_results.index(logprob_result)].isdigit()
-                else 0
+            text = str(results[idx]).strip()
+            # First valid class digit anywhere in the answer; decorated answers ("1.",
+            # "**0**") no longer collapse to the negative class. Claims default to 0
+            # rather than raising: one unreadable claim should not sink the response.
+            preds.append(
+                next((int(c) for c in text if c.isdigit() and int(c) < num_classes), 0)
             )
-            preds.append(pred)
 
         preds, probs = self._aggregate_context_predictions(
             group_ids, preds, probs, binary=(self.config.num_classification_heads <= 2)
@@ -107,7 +121,7 @@ class ClaimOpenAIJudge(OpenAIJudgeBase):
             sample_preds = [preds[i] for i in sample_mask]
             facts = [
                 {"fact": split[1]["content"], "pred": pred, "prob": prob}
-                for split, pred, prob in zip(splitted_samples, sample_probs, sample_preds)
+                for split, pred, prob in zip(splitted_samples, sample_preds, sample_probs)
             ]
             results.append(
                 {

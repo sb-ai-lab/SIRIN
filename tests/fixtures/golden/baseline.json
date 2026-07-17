@@ -1,0 +1,31 @@
+{
+  "samples": [
+    [
+      {
+        "role": "user",
+        "content": "What is the capital of France?"
+      },
+      {
+        "role": "assistant",
+        "content": "Paris is the capital of France."
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "Who wrote Hamlet?"
+      },
+      {
+        "role": "assistant",
+        "content": "William Shakespeare wrote Hamlet."
+      }
+    ]
+  ],
+  "answerability_probs": [
+    0.5556640625,
+    0.5556640625
+  ],
+  "uncertainty_scores": {
+    "MeanTokenEntropy": 10.82451057434082
+  }
+}

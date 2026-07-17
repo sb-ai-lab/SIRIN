@@ -6,16 +6,19 @@ import torch
 from loguru import logger as lg
 from tabpfn import TabPFNClassifier
 from tabpfn.model.loading import load_model_criterion_config
-from tabpfn.model_loading import load_fitted_tabpfn_model, save_fitted_tabpfn_model
+from tabpfn.model_loading import save_fitted_tabpfn_model
 from torch.utils.data import DataLoader
 
 from sirin.definitions import DetectionLevel, Phase
-from sirin.detection.base import LoggerBase
+from sirin.loggers import LoggerBase
 from sirin.detection.probing.detectors.base import ProbingDetectorBase
 from sirin.detection.probing.detectors.utils.detection import (
     check_features_for_nan_with_indices,
     compute_token_cumulative_lengths,
     handle_binary_multiclass_probs,
+)
+from sirin.detection.probing.detectors.utils.tabpfn_compat import (
+    load_fitted_tabpfn_model_compat,
 )
 from sirin.detection.utils.token import rearrange_token_predictions, convert_spans_to_labels
 from sirin.detection.probing.detectors.utils.training import (
@@ -72,7 +75,17 @@ class TokenTabPFNProbingDetector(ProbingDetectorBase):
 
         features = np.concatenate(processed_features, axis=-1)
 
-        token_probs = self.model.predict_proba(features)
+        # Chunk inference to stay under TabPFN's CUDA grid/sample limit on large inputs
+        # (the training loop batches the same way); predict_proba is per-row independent.
+        chunk = 1000
+        if len(features) > chunk:
+            token_probs = np.concatenate(
+                [self.model.predict_proba(features[i:i + chunk])
+                 for i in range(0, len(features), chunk)],
+                axis=0,
+            )
+        else:
+            token_probs = self.model.predict_proba(features)
         token_probs, token_preds = handle_binary_multiclass_probs(
             token_probs, self.threshold,
             is_binary=(self.config.num_classification_heads <= 2)
@@ -100,14 +113,14 @@ class TokenTabPFNProbingDetector(ProbingDetectorBase):
         if self.config.model_save_path is None:
             if (
                 self.config.checkpoint_path
-                and "TabPFN-Wide" in self.config.checkpoint_path
+                and 'TabPFN-Wide' in self.config.checkpoint_path
             ):
                 self.state, _, _ = load_model_criterion_config(
                     model_path=None,
                     check_bar_distribution_criterion=False,
                     cache_trainset_representation=False,
-                    which="classifier",
-                    version="v2",
+                    which='classifier',
+                    version='v2',
                     download=True,
                 )
                 self.state.features_per_group = 1
@@ -137,18 +150,18 @@ class TokenTabPFNProbingDetector(ProbingDetectorBase):
 
     def _save_model(self, save_dir: Path) -> None:
         """Save the TabPFN model to directory."""
-        model_path = save_dir / "model.tabpfn_fit"
+        model_path = save_dir / 'model.tabpfn_fit'
         save_fitted_tabpfn_model(self.model, model_path)
         lg.info(f"Saved TabPFN model to {model_path}")
 
     def _load_model(self, load_dir: Path) -> None:
         """Load the TabPFN model from directory."""
-        model_path = load_dir / "model.tabpfn_fit"
+        model_path = load_dir / 'model.tabpfn_fit'
 
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found at: {model_path}")
 
-        self.model = load_fitted_tabpfn_model(model_path, device="cpu")
+        self.model = load_fitted_tabpfn_model_compat(model_path, device=self.device)
         lg.info(f"Loaded TabPFN model from {model_path}")
 
     def _preprocess_data(
@@ -188,7 +201,7 @@ class TokenTabPFNProbingDetector(ProbingDetectorBase):
         )
 
         if logger:
-            logger.log_metrics(val_metrics, -1, prefix="/train")
+            logger.log_metrics(val_metrics, -1, prefix='/train')
 
         return DetectionResult(
             metrics=val_metrics,

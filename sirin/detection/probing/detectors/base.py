@@ -9,7 +9,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from sirin.definitions import DetectionLevel, CompressionMethod
-from sirin.detection.base import DetectorBase, LoggerBase
+from sirin.detection.base import DetectorBase
+from sirin.loggers import LoggerBase
 from sirin.detection.probing.preprocessing import FeaturePreprocessor
 from sirin.detection.processors import FeatureProcessorBase
 from sirin.detection.utils.token import get_token_labels, get_answer_offsets
@@ -39,7 +40,7 @@ class ProbingDetectorBase(DetectorBase):
         self.feature_processor.setup_extractor()
         self._cold_run()
 
-        compression_config = getattr(config, "compression", {})
+        compression_config = getattr(config, 'compression', {})
         self.compressor = FeaturePreprocessor(
             method=compression_config.method,
             scaling_method=compression_config.scaling_method,
@@ -54,15 +55,23 @@ class ProbingDetectorBase(DetectorBase):
     def _cold_run(self) -> Tuple[List[int], List[int]]:
         batch = [
             [
-                {"content": "This is cold run sample", "role": "user"},
-                {"content": "Yeah this is it", "role": "assistant"},
+                {'content': "This is cold run sample", 'role': 'user'},
+                {'content': "Yeah this is it", 'role': 'assistant'},
             ]
         ]
 
-        if self.feature_processor._token_locator.config.locate_substring:
-            batch[0][0]["content"] += " " + " ".join(
-                self.feature_processor._token_locator.config.substrings
-            )
+        locators = [getattr(self.feature_processor, '_token_locator', None)]
+        locators.extend(
+            getattr(proc, '_token_locator', None)
+            for proc in getattr(self.feature_processor, 'processors', [])
+        )
+        substrings = []
+        for locator in locators:
+            cfg = getattr(locator, 'config', None)
+            if cfg is not None and cfg.locate_substring and cfg.substrings:
+                substrings.extend(cfg.substrings)
+        if substrings:
+            batch[0][0]['content'] += ' ' + ' '.join(substrings)
         features, _ = self.feature_processor(batch)
 
         embedding_dim = [torch.tensor(feature[0]).shape[-1] for feature in features]
@@ -231,20 +240,20 @@ class ProbingDetectorBase(DetectorBase):
             for hidden in feature:
                 hidden = torch.tensor(hidden)
 
-                if self.config.truncation_side == "right":
+                if self.config.truncation_side == 'right':
                     hidden = hidden[:, : self.config.max_length]
                 else:
                     hidden = hidden[:, -self.config.max_length :]
 
                 if hidden.shape[1] < self.config.max_length:
-                    if self.config.padding_side == "right":
+                    if self.config.padding_side == 'right':
                         pad = (0, 0, 0, self.config.max_length - hidden.shape[1])
                     else:
                         pad = (0, 0, self.config.max_length - hidden.shape[1], 0)
                     hidden = torch.nn.functional.pad(
                         input=hidden,
                         pad=pad,
-                        mode="constant",
+                        mode='constant',
                         value=0,
                     )
                 padded_features.append(hidden)
@@ -277,11 +286,11 @@ class ProbingDetectorBase(DetectorBase):
 
     def _save_config(self, save_dir: Path):
         config_dict = serialize_probing_detector_config(self.config, self.threshold)
-        joblib.dump(config_dict, save_dir / "config.joblib")
+        joblib.dump(config_dict, save_dir / 'config.joblib')
         lg.info(f"Saved config to {save_dir / 'config.joblib'}")
 
     def _load_config(self, load_dir: Path):
-        config_path = load_dir / "config.joblib"
+        config_path = load_dir / 'config.joblib'
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found at: {config_path}")
 
@@ -290,14 +299,14 @@ class ProbingDetectorBase(DetectorBase):
         lg.info(f"Loaded config from {config_path}")
 
     def _save_compressor(self, save_dir: Path):
-        if hasattr(self, "compressor") and self.compressor.is_fitted:
-            compressor_path = save_dir / "compressor"
+        if hasattr(self, 'compressor') and self.compressor.is_fitted:
+            compressor_path = save_dir / 'compressor'
             self.compressor.save(str(compressor_path))
             lg.info(f"Saved compressor to {compressor_path}")
 
     def _load_compressor(self, load_dir: Path):
-        compressor_path = load_dir / "compressor"
-        compressor_config_path = load_dir / "compressor_config.joblib"
+        compressor_path = load_dir / 'compressor'
+        compressor_config_path = load_dir / 'compressor_config.joblib'
 
         if compressor_config_path.exists():
             self.compressor = FeaturePreprocessor.load(str(compressor_path))
@@ -305,7 +314,7 @@ class ProbingDetectorBase(DetectorBase):
         else:
             # Initialize empty compressor if not found
             self.compressor = FeaturePreprocessor(
-                random_state=getattr(self.config, "seed", 42),
+                random_state=getattr(self.config, 'seed', 42),
             )
             lg.info("No saved compressor found, initialized empty compressor")
 

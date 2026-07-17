@@ -31,6 +31,15 @@ from sirin.definitions import (
 )
 
 
+class JudgeAnnotationError(Exception):
+    """Raised when a judge cannot produce a usable annotation for a sample.
+
+    E.g. every sampled generation failed the reference-echo check, so there is no honest
+    per-character consensus to emit. Callers must surface this rather than let an empty
+    annotation render as "all clear".
+    """
+
+
 class JudgeBase(DetectorBase):
     """Base class for all judge implementations with shared configuration logic."""
     detection_level: DetectionLevel

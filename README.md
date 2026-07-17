@@ -1,4 +1,4 @@
-# 🕊️ SIRIN: Semantic Inconsistency Recognition and Inspection Nexus
+# <img src="sirin/ui/assets/logo.png" width="40" align="left" style="margin-right:8px" alt="SIRIN logo"/> SIRIN: Semantic Inconsistency Recognition and Inspection Nexus
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -6,15 +6,18 @@
 [![Transformers](https://img.shields.io/badge/🤗%20Transformers-4.50%2B-blue)](https://huggingface.co/docs/transformers)
 [![Hydra](https://img.shields.io/badge/Hydra-1.3%2B-blue)](https://hydra.cc/)
 
+> 🚀 **Try the live demo** on Hugging Face Spaces: [**SIRIN**](https://huggingface.co/spaces/parchiev/SIRIN)
+
 SIRIN is a Python library for detecting and analyzing contextual inconsistencies in systems that use LLMs. The library provides state-of-the-art methods for two complementary tasks: (1) **hallucination detection** — identifying when LLM outputs contain information that contradicts or cannot be supported by the provided context, and (2) **query answerability detection** — determining whether a given prompt/question can be answered based on the provided context (i.e., whether the prompt is aligned with the context).
 
 Both tasks are supported at **sequence-level** and **token-level** granularities, enabling researchers and practitioners to evaluate LLM outputs and inputs with high precision. SIRIN leverages three complementary detection paradigms: (1) **llm-as-a-judge** approaches that fine-tune lightweight adapters on model representations, (2) **probing-based methods** that train classifiers on frozen LLM internal features (hidden states, attention weights, etc.), and (3) **uncertainty quantification** techniques that analyze prediction uncertainty signals.
 
 ## 📑 Table of Contents
 
-- [🕊️ SIRIN: Semantic Inconsistency Recognition and Inspection Nexus](#️-sirin-semantic-inconsistency-recognition-and-inspection-nexus)
+- [SIRIN: Semantic Inconsistency Recognition and Inspection Nexus](#sirin-semantic-inconsistency-recognition-and-inspection-nexus)
   - [📑 Table of Contents](#-table-of-contents)
   - [🌟 Key Features](#-key-features)
+  - [🖼️ UI](#ui)
   - [🧩 Architecture \& Overview](#-architecture--overview)
     - [Detection Tasks](#detection-tasks)
     - [Detection Granularities](#detection-granularities)
@@ -47,6 +50,20 @@ Both tasks are supported at **sequence-level** and **token-level** granularities
 - 📈 **Advanced features**: Layer-specific extraction, pooling strategies, normalization, and dimensionality reduction
 - 🔄 **Target approximation**: Automatic label generation for unlabeled or noisy data
 - 🌐 **Multi-backend**: Whitebox (HuggingFace) and blackbox (OpenAI API) inference support
+
+## UI
+
+Install and start the Streamlit UI from the repository root:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e '.[ui]'
+python -m streamlit run sirin/ui/streamlit_app.py
+```
+
+![SIRIN Streamlit interface](docs/assets/streamlit-ui.png)
+
+Open the URL printed by Streamlit (for instance `http://localhost:8501`). The unified workspace provides **Analyze**, **Runs**, and **Diagnostics** while the native sidebar owns detector and generator setup. API-backed options require the corresponding provider key and confirmation of external API calls. See [the UI guide](docs/ui.md) for behavior, trust, provenance, and contributor build details.
 
 ## 🧩 Architecture & Overview
 
@@ -218,7 +235,7 @@ The token indices refer to positions in the tokenized sequence, allowing precise
 
 ## 📚 Usage Examples
 
-Below are Python examples demonstrating how to use different detector types. You can also instantiate the entire pipeline using Hydra (see [Configuration with Hydra](#⚙️-configuration-with-hydra)).
+Below are Python examples demonstrating how to use different detector types. You can also instantiate the entire pipeline using Hydra (see [Configuration with Hydra](#️-configuration-with-hydra)).
 
 ### Example 1: Sequence-Level Probing with Ensemble Features and Context Splitter
 
@@ -434,7 +451,7 @@ Apache License 2.0
 
 ## References
 
-[1] Semantic-uncertainty/entropy-style target approximation (2024). arXiv:2406.15927. https://arxiv.org/abs/2406.15927
+[1] Kossen, J., Han, J., Razzak, M., Schut, L., Malik, S., Gal, Y. Semantic Entropy Probes: Robust and Cheap Hallucination Detection in LLMs (2024). arXiv:2406.15927. https://arxiv.org/abs/2406.15927
 
 [2] Belikova, J., Polev, K., Parchiev, R., Simakov, D. Data-efficient Meta-models for Evaluation of Context-based Questions and Answers in LLMs (2025). arXiv:2505.23299. https://arxiv.org/abs/2505.23299
 

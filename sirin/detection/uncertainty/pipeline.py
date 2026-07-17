@@ -6,13 +6,11 @@ from loguru import logger as lg
 
 from sirin.models.detection import DetectionResult, PipelineBaseConfig
 from sirin.detection.approximators import TargetApproximatorBase
-from sirin.detection.base import (
-    ModelAdapterBase,
-    PipelineBase,
-)
+from sirin.detection.base import PipelineBase
 from sirin.detection.utils.basic import flatten_array
 from sirin.detection.uncertainty.detectors import SequenceUncertaintyDetector
 from sirin.definitions import INPUT_COL, DetectionTaskType, TARGET_COL, DetectionLevel
+from sirin.inference.adapters import ModelAdapterBase
 from sirin.loggers import LoggerBase
 from sirin.metrics import calculate_classification_metrics
 from sirin.utils.config_manager import validate_hydra_config
@@ -44,7 +42,13 @@ class UncertaintyPipeline(PipelineBase):
             experiment_logger=experiment_logger,
         )
 
-        # Log hyperparameters if logger is available
+        # propagate pipeline classification_metrics to the detector only when set (don't clobber a detector-level config with None)
+        if (
+            self.config.classification_metrics is not None
+            and getattr(self.detector, 'config', None) is not None
+        ):
+            self.detector.config.classification_metrics = self.config.classification_metrics
+
         if self.experiment_logger:
             self.experiment_logger.log_hyperparameters(config)
 
@@ -52,7 +56,7 @@ class UncertaintyPipeline(PipelineBase):
         lg.info("Starting training pipeline...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Training started')
+            self.experiment_logger.log_text("Training started")
 
         if isinstance(self.train_dataset, datasets.DatasetDict):
             train_data = self.train_dataset['train']
@@ -64,7 +68,7 @@ class UncertaintyPipeline(PipelineBase):
             val_data = None
 
 
-        train_data, _ = self._load_dataset(train_data)
+        train_data, _ = self._load_dataset(train_data, split='train')
         if self.experiment_logger:
             self.experiment_logger.log_dataset_info('train', train_data)
         if val_data:
@@ -106,7 +110,7 @@ class UncertaintyPipeline(PipelineBase):
         lg.info("Starting evaluation...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Evaluation started')
+            self.experiment_logger.log_text("Evaluation started")
 
         batch_size = self.detector.config.batch_size
         data, _ = self._load_dataset(self.eval_dataset)

@@ -82,17 +82,25 @@ def merge_overlapping_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int
 # CHARACTER-LEVEL PROBABILITY CALCULATIONS
 # ============================================================================
 
-def calculate_character_probabilities(generated_texts: List[str]) -> List[float]:
+def calculate_character_probabilities(
+    generated_texts: List[str], reference: str | None = None
+) -> List[float]:
     """
     Calculate character-level probabilities based on span tags in generated texts.
 
+    Each generation independently marks hallucinated spans with [SPAN][/SPAN]; a character's
+    score is the fraction of generations that flagged it (a [0, 1] consensus).
+
     Args:
-        original_answer: The original answer text
         generated_texts: List of generated texts with potential [SPAN][/SPAN] tags
+        reference: When given, scores are computed over the REFERENCE answer's characters
+            (each vote vector is padded/truncated to ``len(reference)``). This is the
+            reference-aligned path used after echo validation. When None (backward compatible),
+            the first generation's tag-stripped length sets the alignment.
 
     Returns:
-        List of probabilities for each character position in the original answer,
-        representing the mean probability across all generated texts
+        List of probabilities, one per character position, representing the mean
+        span-tag agreement across all generated texts.
     """
     all_char_vectors = []
 
@@ -102,18 +110,26 @@ def calculate_character_probabilities(generated_texts: List[str]) -> List[float]
         char_vector = create_char_binary_vector(extracted_answer)
         all_char_vectors.append(char_vector)
 
-    if not all_char_vectors:
-        return [0.0] * len(generated_texts[0])
+    if reference is not None:
+        max_len = len(reference)
+        # Vote vectors come from whitespace-stripped generations, which the echo gate
+        # validated against reference.strip(); they therefore correspond to
+        # reference[lead:]. Offset by the reference's leading whitespace instead of
+        # left-anchoring at 0 (which would shift every char score off its true position).
+        lead = len(reference) - len(reference.lstrip())
+    elif all_char_vectors:
+        max_len = len(all_char_vectors[0])
+        lead = 0
+    else:
+        return [0.0] * len(generated_texts[0]) if generated_texts else []
 
-    max_len = len(all_char_vectors[0])
     padded_vectors = []
     for vec in all_char_vectors:
-        if len(vec) < max_len:
-            padded_vec = vec + [0.0] * (max_len - len(vec))
-        elif len(vec) > max_len:
-            padded_vec = vec[:max_len]
-        else:
-            padded_vec = vec
+        padded_vec = [0.0] * max_len
+        for j, value in enumerate(vec):
+            pos = lead + j
+            if 0 <= pos < max_len:
+                padded_vec[pos] = value
         padded_vectors.append(padded_vec)
 
     mean_vector = []

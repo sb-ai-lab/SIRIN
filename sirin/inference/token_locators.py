@@ -168,52 +168,44 @@ class HfTokenLocator(TokenLocatorBase):
                     f'Options requiring answer positions need `answer_text` to be provided.'
                 )
 
-            # Use the original tokenizer with consistent settings
-            tokenizer_output = tokenizer(
-                answer_text,
-                return_tensors=None,  # Ensure we get list output
-            )
-
-            # Remove the BOS token in the tokenized answer, if present.
-            if (
-                tokenizer.bos_token_id is not None
-                and tokenizer_output['input_ids'][0] == tokenizer.bos_token_id
-            ):
-                answer_tokens = tokenizer_output['input_ids'][1:]
-            else:
-                answer_tokens = tokenizer_output['input_ids']
-
-            # Ensure answer_tokens is a list of ints
-            if isinstance(answer_tokens, list):
-                if len(answer_tokens) > 0 and isinstance(answer_tokens[0], list):
-                    answer_tokens = answer_tokens[0]
-                elif all(isinstance(t, int) for t in answer_tokens):
-                    pass
-                else:
-                    lg.warning(
-                        f'Unexpected structure of `answer_tokens`: {answer_tokens}'
-                    )
-                    answer_tokens = []
-            else:
-                lg.warning(f'`answer_tokens` is not a list: {answer_tokens}')
-                answer_tokens = []
-
-            la = len(answer_tokens)
+            input_string = tokenizer.decode(tokens, skip_special_tokens=False)
+            answer_start_char = input_string.rfind(answer_text)
+            if answer_start_char < 0:
+                raise ValueError('Answer text was not found in the rendered model input.')
+            answer_end_char = answer_start_char + len(answer_text)
+            full_offsets = tokenizer(
+                input_string,
+                return_offsets_mapping=True,
+                add_special_tokens=False,
+            )['offset_mapping']
+            if len(full_offsets) != len(tokens):
+                raise ValueError(
+                    'Rendered input token alignment mismatch: '
+                    f'{len(tokens)} token ids but {len(full_offsets)} offsets.'
+                )
+            answer_token_indices = [
+                index
+                for index, (start, end) in enumerate(full_offsets)
+                if (start, end) != (0, 0)
+                and end > answer_start_char
+                and start < answer_end_char
+            ]
+            if not answer_token_indices:
+                raise ValueError('Answer text overlaps no tokens in the rendered model input.')
+            answer_start_idx = answer_token_indices[0]
+            answer_last_idx = answer_token_indices[-1]
 
             if self.config.locate_answer_end:
                 dout[TokenLocation.ANS_END.value] = answer_last_idx
-
-            if eos_idx is not None:
-                answer_start_idx = lt - la - 1
-            else:
-                answer_start_idx = lt - la
 
             if self.config.locate_answer_start:
                 dout[TokenLocation.ANS_START.value] = answer_start_idx
 
             if self.config.locate_answer_middle:
-                if la > 2:
-                    dout[TokenLocation.ANS_MID.value] = answer_start_idx + int(la / 2)
+                if len(answer_token_indices) > 2:
+                    dout[TokenLocation.ANS_MID.value] = answer_token_indices[
+                        len(answer_token_indices) // 2
+                    ]
                 else:
                     dout[TokenLocation.ANS_MID.value] = answer_start_idx
 

@@ -24,6 +24,7 @@ from sirin.detection.approximators import TargetApproximatorBase
 from sirin.detection.utils.torch import InputsDataset
 from sirin.utils.hf import get_dataset_identifier
 from sirin.inference.adapters import ModelAdapterBase
+from sirin.inference.model_manager import ModelManager
 from sirin.inference.cleaners import (
     BaseCleaner,
     CodeCleaner,
@@ -64,7 +65,7 @@ class DetectorBase(ABC):
             SplitManager(
                 config=config.context_split_config,
                 split_response=getattr(
-                    config.context_split_config, "split_response", False
+                    config.context_split_config, 'split_response', False
                 ),
             )
             if config.context_split_config is not None
@@ -152,7 +153,7 @@ class DetectorBase(ABC):
     def save(self, filepath: Optional[str] = None):
         # Use model_save_path from config if filepath not provided
         if filepath is None:
-            filepath = getattr(self.config, "model_save_path", None)
+            filepath = getattr(self.config, 'model_save_path', None)
 
         save_dir = self._validate_and_create_save_dir(filepath)
 
@@ -160,7 +161,7 @@ class DetectorBase(ABC):
         self._save_config(save_dir)
 
         # Save additional components if implemented
-        if hasattr(self, "_save_additional_components"):
+        if hasattr(self, '_save_additional_components'):
             self._save_additional_components(save_dir)
 
         lg.info(f"Successfully saved to {save_dir}")
@@ -178,7 +179,7 @@ class DetectorBase(ABC):
         self._load_config(load_dir)
 
         # Load additional components if implemented
-        if hasattr(self, "_load_additional_components"):
+        if hasattr(self, '_load_additional_components'):
             self._load_additional_components(load_dir)
 
         lg.info(f"Successfully loaded from {load_dir}")
@@ -234,14 +235,14 @@ class PipelineBase(ABC):
         split: Optional[str] = None,
     ) -> Tuple[InputsDataset, DatasetSaver]:
         """Load and process dataset through the pipeline."""
-        split_name = split or ""
+        split_name = split or ''
         dataset_name = get_dataset_identifier(dataset)
-        if split and hasattr(dataset, "keys") and split in dataset:
+        if split and hasattr(dataset, 'keys') and split in dataset:
             dataset = dataset[split]
         if self._generator_adapter and self._generator_adapter.name:
-            model_name = self._generator_adapter.name.split("/")[-1].replace(".", "")
+            model_name = self._generator_adapter.name.split('/')[-1].replace('.', '')
         else:
-            model_name = ""
+            model_name = ''
 
         assert self.target_col in dataset.column_names, (
             f"Target column '{self.target_col}' not found in dataset."
@@ -250,20 +251,23 @@ class PipelineBase(ABC):
             f"Input column '{INPUT_COL}' not found in dataset."
         )
 
-        dataset_saver = DatasetSaver(
-            dataset_name,
-            save_dir=self.config.save_dir,
-            file_type_alias=DSET_KEY,
+        dataset_saver = (
+            DatasetSaver(
+                dataset_name,
+                save_dir=self.config.save_dir,
+                file_type_alias=DSET_KEY,
+            )
+            if self.config.save_intermediate
+            else None
         )
         stages = [
-            ("generation", self._generate_answers, {}),
-            ("cleaning", self._clean_generation_outputs, {}),
-            ("metrics", self._compute_lm_metrics, {}),
+            ('generation', self._generate_answers, {}),
+            ('cleaning', self._clean_generation_outputs, {}),
+            ('metrics', self._compute_lm_metrics, {}),
         ]
 
-        # Current logic implies that training dataset already contains labeled chunks
-        # if split == 'train':
-        #     stages.append(('splitting', self._split_context, {}))
+        if split == 'train' and self.config.split_context_train:
+            stages.append(('splitting', self._split_context, {}))
 
         for stage_name, processor, kwargs in stages:
             lg.info(f"Starting stage: {stage_name}")
@@ -272,7 +276,7 @@ class PipelineBase(ABC):
             if dataset_saver is not None:
                 dataset_saver.save(
                     dataset,
-                    label="/".join([model_name, stage_name, split_name]).strip("/"),
+                    label='/'.join([model_name, stage_name, split_name]).strip('/'),
                     description=f"Dataset {dataset_name} (split={split_name}, model={model_name}) after {stage_name} stage.",
                 )
 
@@ -314,11 +318,11 @@ class PipelineBase(ABC):
                 batch_size=metrics.bert_score.batch_size,
                 nthreads=metrics.bert_score.nthreads,
                 device=metrics.bert_score.device
-                if hasattr(metrics.bert_score, "device")
+                if hasattr(metrics.bert_score, 'device')
                 else None,
                 lang=metrics.bert_score.lang
-                if hasattr(metrics.bert_score, "lang")
-                else "en",
+                if hasattr(metrics.bert_score, 'lang')
+                else 'en',
             )
 
             for metric in LmMetric.get_bert_metrics():
@@ -337,18 +341,29 @@ class PipelineBase(ABC):
         generation_inputs = []
         for idx, example in enumerate(dataset):
             input_val = example[INPUT_COL]
-            if input_val and input_val[-1]["role"] != "assistant":
+            if input_val and input_val[-1]['role'] != 'assistant':
                 generation_idxs.append(idx)
                 generation_inputs.append(input_val)
 
         if generation_idxs:
-            generator_model = self._load_generator()
+            if self._generator_adapter is None:
+                raise ValueError(
+                    "Dataset contains samples without assistant answers, "
+                    "but no generator_adapter was provided to the pipeline."
+                )
+            generator_model = ModelManager.load_model(self._generator_adapter)
             generated_answers = []
-            batch_size = self.config.get("batch_size") or 1
+            batch_size = self.detector.config.batch_size or 1
+            sampling = self.config.sampling
             for i in range(0, len(generation_inputs), batch_size):
                 batch_inputs = generation_inputs[i : i + batch_size]
                 batch_answers = generator_model.sample(
-                    batch_inputs, **self.config.sampling
+                    batch_inputs,
+                    max_tokens=sampling.max_length,
+                    temperature=sampling.temperature,
+                    top_p=sampling.top_p,
+                    top_k=sampling.top_k,
+                    **sampling.kwargs,
                 )
                 generated_answers.extend(batch_answers)
 
@@ -358,8 +373,8 @@ class PipelineBase(ABC):
                 if idx in generated_dict:
                     example[INPUT_COL].append(
                         {
-                            "role": "assistant",
-                            "content": generated_dict[idx],
+                            'role': 'assistant',
+                            'content': generated_dict[idx],
                         }
                     )
                 return example
@@ -370,7 +385,9 @@ class PipelineBase(ABC):
                 load_from_cache_file=False,
                 desc="Updating with generated answers",
                 batched=False,
-                num_proc=self.num_cpus if self.config.use_multiprocessing else None,
+                num_proc=self.detector.num_cpus
+                if self.detector.config.use_multiprocessing
+                else None,
             )
         else:
             lg.info("There are no missing LLM answers. No need to generate answers.")
@@ -406,15 +423,15 @@ class PipelineBase(ABC):
             for item in dataset[source_col]:
                 if isinstance(item, list):
                     if not item:
-                        generations.append("")
+                        generations.append('')
                         continue
                     last_item = item[-1]
                     if isinstance(last_item, dict):
-                        generations.append(last_item.get("content", ""))
+                        generations.append(last_item.get('content', ''))
                     else:
                         generations.append(str(last_item))
                 elif isinstance(item, dict):
-                    generations.append(item.get("content", ""))
+                    generations.append(item.get('content', ''))
                 else:
                     generations.append(item)
 
@@ -438,16 +455,16 @@ class PipelineBase(ABC):
         if self.config.cleaner_configs:
 
             def clean_example(example: List[Dict[str, str]], cleaner):
-                example[-1]["content"] = cleaner.clean(example[-1]["content"])
+                example[-1]['content'] = cleaner.clean(example[-1]['content'])
                 return example
 
             def _create_cleaner(config: CleanerConfig) -> BaseCleaner:
                 """Factory method to create the appropriate cleaner based on config"""
                 cleaner_map = {
-                    "regex": RegexCleaner,
-                    "html": HTMLCleaner,
-                    "code": CodeCleaner,
-                    "custom": CustomCleaner,
+                    'regex': RegexCleaner,
+                    'html': HTMLCleaner,
+                    'code': CodeCleaner,
+                    'custom': CustomCleaner,
                 }
 
                 cleaner_class = cleaner_map.get(config.type)
@@ -476,5 +493,5 @@ class PipelineBase(ABC):
         if self.experiment_logger:
             try:
                 self.experiment_logger.finish()
-            except:
-                pass
+            except Exception as e:
+                lg.debug(f"Experiment logger finish failed during pipeline cleanup: {e}")

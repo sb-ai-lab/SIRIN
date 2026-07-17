@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "source": "/home/jovyan/ybelikova/sirin-final/data/datasets/ragtruth_qa",
+  "split": "test",
+  "cases": [
+    {
+      "case_id": "ragtruth_qa_gpt-4-0613_0",
+      "label": "RAGTruth: Bowel movement & weight",
+      "why_notable": "Faithful gpt-4 answer with zero hallucination spans — the supported baseline that stays grounded in the passages.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 0,
+      "source_id": 15320,
+      "task_type": "QA",
+      "context": "passage 1:Weight Loss and Calories. Your caloric intake and expenditure, rather than your bowel movements, are tied to healthy weight loss. Throughout the day, you consume calories in the form of food and drinks, which your body uses for energy.At the same time, your body burns calories at various rates, depending on the activities you perform.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 2:Photo Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 3:A decrease in body weight after having a bowel movement does not come from a loss of body fat in stools. Body fat loss comes from creating a calorie deficit, which forces your body to burn stored fat for energy. A small amount of certain forms of fat, such as cholesterol, is normal in your feces.he fat in stools does not come from a loss of body fat, but rather from dietary fat intake that is not properly absorbed. Malabsorption of dietary fats may be caused by digestive conditions, such as celiac disease and Crohn's disease, pancreatitis, liver disease or cystic fibrosis.",
+      "question": "when you have a bowel movement do you lose weight",
+      "answer": "While you may technically lose a small amount of weight after a bowel movement, this does not come from a loss of body fat. The decrease in body weight does not come from fat loss in stools, but rather from the elimination of undigested food and waste. Weight loss is primarily tied to your caloric intake and expenditure, not bowel movements. Unless your scale is highly accurate, you're unlikely to notice a difference in your body weight before and after a bowel movement.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nwhen you have a bowel movement do you lose weight\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Weight Loss and Calories. Your caloric intake and expenditure, rather than your bowel movements, are tied to healthy weight loss. Throughout the day, you consume calories in the form of food and drinks, which your body uses for energy.At the same time, your body burns calories at various rates, depending on the activities you perform.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 2:Photo Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.hoto Credit AVAVA/iStock/Getty Images. Hopping on the bathroom scale to weigh yourself before and after you have a bowel movement might be tempting, but unless your scale is highly accurate, you won't likely notice a difference in your body weight.\n\npassage 3:A decrease in body weight after having a bowel movement does not come from a loss of body fat in stools. Body fat loss comes from creating a calorie deficit, which forces your body to burn stored fat for energy. A small amount of certain forms of fat, such as cholesterol, is normal in your feces.he fat in stools does not come from a loss of body fat, but rather from dietary fat intake that is not properly absorbed. Malabsorption of dietary fats may be caused by digestive conditions, such as celiac disease and Crohn's disease, pancreatitis, liver disease or cystic fibrosis.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "While you may technically lose a small amount of weight after a bowel movement, this does not come from a loss of body fat. The decrease in body weight does not come from fat loss in stools, but rather from the elimination of undigested food and waste. Weight loss is primarily tied to your caloric intake and expenditure, not bowel movements. Unless your scale is highly accurate, you're unlikely to notice a difference in your body weight before and after a bowel movement."
+        }
+      ],
+      "content_sha256": {
+        "user": "06ec0e9fff8872ce5081845ec7eb7104dbccdcc969b55d61f934b918389bdab4",
+        "assistant": "75d008d595933261d900ff54df9b35e57a0cf119faa833ab05752360f01c8966"
+      },
+      "messages_sha256": "36d903fe6f330cd4dd9ae77da71fd10f416d27315d7107590734eee6baaf9a0c",
+      "gold_spans": [],
+      "gold_visibility": "hidden",
+      "source_answer_model": "gpt-4-0613",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_mistral-7B-instruct_138",
+      "label": "RAGTruth: FEHA vs ADA",
+      "why_notable": "Two conflicting spans (Evident Conflict): the employee-count thresholds for FEHA and the ADA are swapped/misstated versus the passages.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 138,
+      "source_id": 15175,
+      "task_type": "QA",
+      "context": "passage 1:One difference between the FEHA (the Fair Employment and Housing Act) and the ADA (Americans with Disabilities Act) is that the ADA applies to all employers in the private sector that have four to fifteen employees, whereas the FEHA affects more employees, and it doesn’t distinguish between private and public employers like the ADA does.\n\npassage 2:Class Description: This class is designed specifically for supervisors and managers to learn the basic provisions of the California's Fair Employment and Housing Act (FEHA) and the Americans with Disabilities Act (ADA) and understand their responsibilities during the reasonable accommodation process.\n\npassage 3:Probably one of the most important differences between the ADA and FEHA is that with FEHA, a disability is required. Under the ADA, to qualify for disability, a physical or mental impairment substantially limits a major life activity, but the FEHA requires only that a mental and physical disability limit a major life activity; not a substantial limit, but a limit.",
+      "question": "difference between feha and ada",
+      "answer": "Based on the given passages, we can see that the FEHA (Fair Employment and Housing Act) applies to all employers with four to fifteen employees, while the ADA (Americans with Disabilities Act) applies to employers with twenty or more employees. Additionally, the ADA distinguishes between private and public employers, whereas the FEHA does not. Another significant difference is that under the ADA, a person needs to have a physical or mental impairment that substantially limits a major life activity in order to qualify as disabled. However, under the FEHA, a person only needs to have a mental or physical disability that limits a major life activity, not necessarily a substantial limitation.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\ndifference between feha and ada\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:One difference between the FEHA (the Fair Employment and Housing Act) and the ADA (Americans with Disabilities Act) is that the ADA applies to all employers in the private sector that have four to fifteen employees, whereas the FEHA affects more employees, and it doesn’t distinguish between private and public employers like the ADA does.\n\npassage 2:Class Description: This class is designed specifically for supervisors and managers to learn the basic provisions of the California's Fair Employment and Housing Act (FEHA) and the Americans with Disabilities Act (ADA) and understand their responsibilities during the reasonable accommodation process.\n\npassage 3:Probably one of the most important differences between the ADA and FEHA is that with FEHA, a disability is required. Under the ADA, to qualify for disability, a physical or mental impairment substantially limits a major life activity, but the FEHA requires only that a mental and physical disability limit a major life activity; not a substantial limit, but a limit.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on the given passages, we can see that the FEHA (Fair Employment and Housing Act) applies to all employers with four to fifteen employees, while the ADA (Americans with Disabilities Act) applies to employers with twenty or more employees. Additionally, the ADA distinguishes between private and public employers, whereas the FEHA does not. Another significant difference is that under the ADA, a person needs to have a physical or mental impairment that substantially limits a major life activity in order to qualify as disabled. However, under the FEHA, a person only needs to have a mental or physical disability that limits a major life activity, not necessarily a substantial limitation."
+        }
+      ],
+      "content_sha256": {
+        "user": "469e556b97cd380e5622269a4823c105c0c26cfcbfda9d7ce2cb9750677faa4f",
+        "assistant": "0aa7379e1a4d117f8e371975d44db413f54e7d454d73e7742e8f81408dd5d729"
+      },
+      "messages_sha256": "b564641d0f2988015129099721f2b8592455b5fbb09f4dbce83c5a493b6a5cb0",
+      "gold_spans": [
+        [
+          49,
+          144
+        ],
+        [
+          155,
+          244
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "mistral-7B-instruct",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_llama-2-13b-chat_839",
+      "label": "RAGTruth: Bucharest weather",
+      "why_notable": "Two fabricated spans (Evident Baseless Info): the llama-2-13b answer invents a live Bucharest weather report (22°C, 82% humidity, 6 mph wind) that appears in no passage.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 839,
+      "source_id": 15388,
+      "task_type": "QA",
+      "context": "passage 1:Today’s and tonight’s Bucharest, Romania weather forecast, weather conditions and Doppler radar from The Weather Channel and Weather.com Today’s and tonight’s Bucharest, Romania weather forecast, weather conditions and Doppler radar from The Weather Channel and Weather.com Connection restored! Show me the weather in... city, zip, or place\n\npassage 2:UK Weather Warnings Map; UK Flood Warnings Map; Current Weather; Highway Conditions; Highway Forecast; Lightning; Current & Future Radar; Past & Future Radar (Precipitation) Traffic Cameras; Traffic Flow; US Highway Forecast; Satellite (Cloud Cover)\n\npassage 3:CLIMATE: AVERAGE MONTHLY WEATHER IN Bucharest, Romania. Bucharest has a humid continental climate. Winters can get windy and temperatures often dip below 0 °Celsius (32 °Fahrenheit), sometimes even dropping to minus 20 °C (4 °F). In summer (July and August), the average temperature is around 23 °C (73 °F). Temperatures often reach 35 °C (95 °F) to 40 °C (104 °F) in mid-summer.",
+      "question": "temperature bucharest",
+      "answer": "Based on the provided passages, I can answer the following question:\n\nQuestion: What is the current temperature in Bucharest?\n\nPassage 1 provides the current weather conditions for Bucharest, including the temperature:\n\n\"Today's temperature in Bucharest is 22°C (72°F), humidity is 82%, wind speed is 6 mph (9 km/h).\"\n\nTherefore, the current temperature in Bucharest is 22°C (72°F).",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\ntemperature bucharest\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Today’s and tonight’s Bucharest, Romania weather forecast, weather conditions and Doppler radar from The Weather Channel and Weather.com Today’s and tonight’s Bucharest, Romania weather forecast, weather conditions and Doppler radar from The Weather Channel and Weather.com Connection restored! Show me the weather in... city, zip, or place\n\npassage 2:UK Weather Warnings Map; UK Flood Warnings Map; Current Weather; Highway Conditions; Highway Forecast; Lightning; Current & Future Radar; Past & Future Radar (Precipitation) Traffic Cameras; Traffic Flow; US Highway Forecast; Satellite (Cloud Cover)\n\npassage 3:CLIMATE: AVERAGE MONTHLY WEATHER IN Bucharest, Romania. Bucharest has a humid continental climate. Winters can get windy and temperatures often dip below 0 °Celsius (32 °Fahrenheit), sometimes even dropping to minus 20 °C (4 °F). In summer (July and August), the average temperature is around 23 °C (73 °F). Temperatures often reach 35 °C (95 °F) to 40 °C (104 °F) in mid-summer.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on the provided passages, I can answer the following question:\n\nQuestion: What is the current temperature in Bucharest?\n\nPassage 1 provides the current weather conditions for Bucharest, including the temperature:\n\n\"Today's temperature in Bucharest is 22°C (72°F), humidity is 82%, wind speed is 6 mph (9 km/h).\"\n\nTherefore, the current temperature in Bucharest is 22°C (72°F)."
+        }
+      ],
+      "content_sha256": {
+        "user": "8ccbbb6414d682ff5f0cb092133cbd45b36568d46a4062019675153643a7da66",
+        "assistant": "72684f4c7165f2762ef8e0be1054e3c64d68664ece5319e4fda8f1393f0680a7"
+      },
+      "messages_sha256": "c44930b437abe946bc9af6eb2623a940854829db79ebdd1b7f24498510a9fe32",
+      "gold_spans": [
+        [
+          220,
+          317
+        ],
+        [
+          319,
+          382
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "llama-2-13b-chat",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_llama-2-70b-chat_570",
+      "label": "RAGTruth: Oracle co-CEOs",
+      "why_notable": "One fabricated span (Subtle Baseless Info): invents a rationale — \"to provide a smooth transition and ensure continued growth\" — for Oracle's co-CEO structure that no passage states.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 570,
+      "source_id": 15576,
+      "task_type": "QA",
+      "context": "passage 1:Oracle’s founder Larry Ellison has stepped down as CEO and has been replaced in the position by former HP CEO Mark Hurd and Safra Catz. Ellison’s new titles are Executive Chairman and Chief Technology Officer.Newslook.arry Ellison, center, smiles with now Oracle co-CEO Safra Catz, left, during the Oracle Open World conference on Oct. 25, 2006, in San Francisco.\n\npassage 2:SAN FRANCISCO — Larry Ellison announced Thursday he has agreed to step down as CEO of Oracle, the software powerhouse he co-founded.Mark Hurd and Safra Catz, co-presidents of Oracle, will take the role as CEO.arry Ellison, center, smiles with now Oracle co-CEO Safra Catz, left, during the Oracle Open World conference on Oct. 25, 2006, in San Francisco.\n\npassage 3:On Thursday, Oracle's Larry Ellison unexpectedly announced that he was stepping down from his CEO post and naming not one, but two CEOs to replace him. Co-president and CFO Safra Catz and co-president Mark Hurd will share the role of CEO.Oracle isn't the first major company to tap more than one CEO at the same time.Chipotle, Whole Foods, and Deutsche Bank are also run by two CEOs. Samsung even has three of them.erman companies Deutsche Bank and SAP both have two CEOs (though SAP co-CEO Jim Hagemann Snabe will step down to the supervisory board in May).",
+      "question": "why does the company Oracle have 2 CEOs",
+      "answer": "Based on the given passages, Oracle has two CEOs, Mark Hurd and Safra Catz, because Larry Ellison, the company's founder, stepped down from his position as CEO and appointed them as co-CEOs. This decision was made to provide a smooth transition and ensure the company's continued growth and success.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nwhy does the company Oracle have 2 CEOs\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Oracle’s founder Larry Ellison has stepped down as CEO and has been replaced in the position by former HP CEO Mark Hurd and Safra Catz. Ellison’s new titles are Executive Chairman and Chief Technology Officer.Newslook.arry Ellison, center, smiles with now Oracle co-CEO Safra Catz, left, during the Oracle Open World conference on Oct. 25, 2006, in San Francisco.\n\npassage 2:SAN FRANCISCO — Larry Ellison announced Thursday he has agreed to step down as CEO of Oracle, the software powerhouse he co-founded.Mark Hurd and Safra Catz, co-presidents of Oracle, will take the role as CEO.arry Ellison, center, smiles with now Oracle co-CEO Safra Catz, left, during the Oracle Open World conference on Oct. 25, 2006, in San Francisco.\n\npassage 3:On Thursday, Oracle's Larry Ellison unexpectedly announced that he was stepping down from his CEO post and naming not one, but two CEOs to replace him. Co-president and CFO Safra Catz and co-president Mark Hurd will share the role of CEO.Oracle isn't the first major company to tap more than one CEO at the same time.Chipotle, Whole Foods, and Deutsche Bank are also run by two CEOs. Samsung even has three of them.erman companies Deutsche Bank and SAP both have two CEOs (though SAP co-CEO Jim Hagemann Snabe will step down to the supervisory board in May).\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on the given passages, Oracle has two CEOs, Mark Hurd and Safra Catz, because Larry Ellison, the company's founder, stepped down from his position as CEO and appointed them as co-CEOs. This decision was made to provide a smooth transition and ensure the company's continued growth and success."
+        }
+      ],
+      "content_sha256": {
+        "user": "decec153e8045ca918292083dca7712a486f789225e1bb5cf9a273c32e5db510",
+        "assistant": "6e960dd46d1fd4c970a30c1db42468531452a5c702b7903c917487da39bbf8ef"
+      },
+      "messages_sha256": "d059bccbb1463336407aa990956c06de7e0c06127f0faef71192aeeae143a4d7",
+      "gold_spans": [
+        [
+          191,
+          299
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "llama-2-70b-chat",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    },
+    {
+      "case_id": "ragtruth_qa_gpt-3.5-turbo-0613_638",
+      "label": "RAGTruth: Carbon footprint effect",
+      "why_notable": "One fabricated span (Subtle Baseless Info): the gpt-3.5 answer adds an unsupported \"contributes to climate change and global warming\" claim that no passage makes.",
+      "dataset": "ragtruth_qa",
+      "split": "test",
+      "dataset_index": 638,
+      "source_id": 15302,
+      "task_type": "QA",
+      "context": "passage 1:Your carbon footprint measures the environmental impact of your lifestyle. Everything you do has an impact --- positive or negative --- on the environment. That's the concept behind your carbon footprint, which is one method of measuring the environmental effect of your lifestyle. A carbon footprint, measured in tons, indicates the amount of carbon dioxide and other greenhouse gases that are produced as a result of your daily activities. You can reduce your footprint by changing the way you live your life. Even seemingly tiny changes can make a significant difference.\n\npassage 2:It all comes back to the average carbon footprint. The average per capita carbon footprint is 6 tons per year. In the U.S. the average is 20 tons per year, and a third of that is created by automobile emissions -- meaning your car itself can put out over 6 tons of C02 a year -- enough for two people.\n\npassage 3:So what exactly is a carbon footprint? In simplest terms, carbon footprint is the total amount of greenhouse gases produced by various human activities within a given time frame. Carbon footprint is usually measured in tons of carbon dioxide (CO2) released into the atmosphere. Your home has a carbon footprint if you use oil, coal or gas to heat it. That cheeseburger at your favorite restaurant has a carbon footprint: raising the beef and wheat and operating the restaurant all involves greenhouse gases. Your car has a carbon footprint, dependent on the vehicle’s fuel consumption and driving distance.",
+      "question": "what is the effect of carbon footprint",
+      "answer": "The effect of carbon footprint is the environmental impact of an individual's lifestyle. It measures the amount of carbon dioxide and other greenhouse gases produced as a result of daily activities. A higher carbon footprint contributes to climate change and global warming. However, individuals can reduce their carbon footprint by making changes in their lifestyle choices, even small changes can make a significant difference.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Briefly answer the following question:\nwhat is the effect of carbon footprint\nBear in mind that your response should be strictly based on the following three passages:\npassage 1:Your carbon footprint measures the environmental impact of your lifestyle. Everything you do has an impact --- positive or negative --- on the environment. That's the concept behind your carbon footprint, which is one method of measuring the environmental effect of your lifestyle. A carbon footprint, measured in tons, indicates the amount of carbon dioxide and other greenhouse gases that are produced as a result of your daily activities. You can reduce your footprint by changing the way you live your life. Even seemingly tiny changes can make a significant difference.\n\npassage 2:It all comes back to the average carbon footprint. The average per capita carbon footprint is 6 tons per year. In the U.S. the average is 20 tons per year, and a third of that is created by automobile emissions -- meaning your car itself can put out over 6 tons of C02 a year -- enough for two people.\n\npassage 3:So what exactly is a carbon footprint? In simplest terms, carbon footprint is the total amount of greenhouse gases produced by various human activities within a given time frame. Carbon footprint is usually measured in tons of carbon dioxide (CO2) released into the atmosphere. Your home has a carbon footprint if you use oil, coal or gas to heat it. That cheeseburger at your favorite restaurant has a carbon footprint: raising the beef and wheat and operating the restaurant all involves greenhouse gases. Your car has a carbon footprint, dependent on the vehicle’s fuel consumption and driving distance.\n\nIn case the passages do not contain the necessary information to answer the question, please reply with: \"Unable to answer based on given passages.\"\noutput:"
+        },
+        {
+          "role": "assistant",
+          "content": "The effect of carbon footprint is the environmental impact of an individual's lifestyle. It measures the amount of carbon dioxide and other greenhouse gases produced as a result of daily activities. A higher carbon footprint contributes to climate change and global warming. However, individuals can reduce their carbon footprint by making changes in their lifestyle choices, even small changes can make a significant difference."
+        }
+      ],
+      "content_sha256": {
+        "user": "844dc3029a7fc844681ac015d5bc6aa57d54d30bf7d629db84fcb5af7f1b7a24",
+        "assistant": "2e2203e707d5ff74cb77acbd42fa96af144450c9555e88d00204b88e36fe455f"
+      },
+      "messages_sha256": "353a803dd65d129dccc7a92180b5402d32b5679bf91012f5bff1c89ff038ba03",
+      "gold_spans": [
+        [
+          197,
+          274
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "gpt-3.5-turbo-0613",
+      "selection_disclosure": "Curated from the held-out RAGTruth QA test split for demo clarity; chosen for short readable RAG contexts and a mix of supported and hallucinated answers.",
+      "annotation_disclosure": "Gold spans are RAGTruth human hallucination annotations over the answer text, hidden by default in the demo.",
+      "source_disclosure": "The answer was generated by the named model over the retrieved passages; SIRIN did not generate or score it — the chip fills the editor for a live run.",
+      "license": "see RAGTruth dataset license"
+    }
+  ]
+}

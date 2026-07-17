@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "source": "output/psiloqa_span_qwen35_4b/experiment/top5_demo_cases.json",
+  "checkpoint": "demo/checkpoints/qwen35_4b_psiloqa_span_linear",
+  "cases": [
+    {
+      "case_id": "psiloqa_ServiceNow-AI/Apriel-5B-Instruct_4775",
+      "label": "D. H. Lawrence",
+      "why_notable": "Invented rationale (bird symbolism, psychoanalysis); the passage credits the 1927 Etruscan tombs visit.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 133,
+      "passage": "The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.",
+      "question": "What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?",
+      "answer": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme."
+        }
+      ],
+      "content_sha256": {
+        "user": "c20e5dae79c0f0b251245cc5c9aa8667a6426c13af93518863e3f0a09e9d8e9b",
+        "assistant": "3514a976ef4c2e80ad925c30873165d8ca2cf89d62831424237fe36caac50570"
+      },
+      "messages_sha256": "b0c178f932ea3e63ef2ff030e49e05a0021758fbcedccab31cb61a355735c87c",
+      "gold_spans": [
+        [
+          121,
+          456
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "ServiceNow-AI/Apriel-5B-Instruct",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_HuggingFaceH4/zephyr-7b-beta_11308",
+      "label": "Douglas Wright",
+      "why_notable": "Whole answer fabricated: claims Douglas James Wright became founding editor of \"Best Australian Poems\" (Black Inc.); nearly the entire answer is one hallucinated span (probe IoU 0.998).",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 460,
+      "passage": "Douglas James Wright  (14 October 1956 – 14 November 2018) was a New Zealand dancer and choreographer in the New Zealand arts establishment from 1980 until his death in 2018. Although he announced his retirement from dance in 2008, on the occasion of the publication of his first book of poetry, Laughing Mirror he subsequently continued to make dance works, including touring The Kiss Inside during April 2015.",
+      "question": "What significant career decision did Douglas James Wright make in 2008 and what publication was associated with this decision?",
+      "answer": "In 2008, Douglas James Wright made the significant career decision to become the founding editor of the literary journal, \"Best Australian Poems,\" which is published annually by Black Inc. This decision marked a new chapter in Wright's career, as he shifted his focus from primarily writing poetry to editing and promoting the work of other Australian poets. \"Best Australian Poems\" has since become a prestigious platform for showcasing the best poetry written in Australia each year, and Wright's editorial vision has helped to establish the publication as a major force in Australian literary culture.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Douglas James Wright  (14 October 1956 – 14 November 2018) was a New Zealand dancer and choreographer in the New Zealand arts establishment from 1980 until his death in 2018. Although he announced his retirement from dance in 2008, on the occasion of the publication of his first book of poetry, Laughing Mirror he subsequently continued to make dance works, including touring The Kiss Inside during April 2015.\nQuestion: What significant career decision did Douglas James Wright make in 2008 and what publication was associated with this decision?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "In 2008, Douglas James Wright made the significant career decision to become the founding editor of the literary journal, \"Best Australian Poems,\" which is published annually by Black Inc. This decision marked a new chapter in Wright's career, as he shifted his focus from primarily writing poetry to editing and promoting the work of other Australian poets. \"Best Australian Poems\" has since become a prestigious platform for showcasing the best poetry written in Australia each year, and Wright's editorial vision has helped to establish the publication as a major force in Australian literary culture."
+        }
+      ],
+      "content_sha256": {
+        "user": "4e023b396fcbfb25e897e1f33673e4e5647c9ef399bd8bcff22227d4dd093124",
+        "assistant": "65d9d8b7d375a4e978d1987b02d4ca0dffa53d539ac50abe367f0b459880edde"
+      },
+      "messages_sha256": "291be5398f0c2c616e210d5ddfd3114b52e86e4581c7896f3140555267e4c030",
+      "gold_spans": [
+        [
+          70,
+          603
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_NousResearch/Nous-Hermes-2-Mistral-7B-DPO_20820",
+      "label": "LECT2 disorder",
+      "why_notable": "Fabricated medical answer: attributes the LECT2 protein to congenital disorders of glycosylation (Pseudo-TORCH / CDG-1b); the long invented diagnosis is one contiguous hallucinated span.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 822,
+      "passage": "LECT2 Amyloidosis (ALECT2) is a form of amyloidosis caused by the LECT2 protein. It was found to be the third most common (~3% of total) cause of amyloidosis in a set of more than 4,000 individuals studied at the Mayo Clinic; the first and second most common forms the disorder were AL amyloidosis and AA amyloidosis, respectively. Amyloidosis is a disorder in which the abnormal deposition of a protein in organs and/or tissues gradually leads to organ failure and/or tissue injury.\nAlthough more than 30 different proteins can cause amyloidosis, the disorder caused by LECT2 is distinctive in three ways. First, it has an unusually high incidence in certain ethnic populations. Second, it is a systemic form of amyloidosis (i.e. amyloid deposited in multiple organs), as opposed to a localized form (amyloid deposits limited to a single organ) but nonetheless injures the kidney without or rarely injuring the other organs in which it is deposited. Third, LECT2 amyloidosis is diagnosed almost exclusively in elderly individuals.\nGiven its relatively recent discovery, exceptionally strong ethnic bias, limitation to causing kidney disease, and restriction to elderly individuals, LECT2 amyloidosis appears at present to be an under-recognized cause of chronic kidney disease particularly in the ethnic groups that exhibit a high incidence of the disorder.",
+      "question": "Which disorder is caused by the LECT2 protein?",
+      "answer": "The LECT2 protein is associated with a rare genetic disorder called congenital disorders of glycosylation (CDG). Specifically, it has been linked to a subtype known as Pseudo-TORCH syndrome or Congenital Disorder of Glycosylation type 1b (CDG-1b). This condition affects carbohydrate processing in cells, leading to developmental delays, intellectual disability, and other symptoms. However, please consult a professional for any specific diagnosis or information regarding your personal health.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: LECT2 Amyloidosis (ALECT2) is a form of amyloidosis caused by the LECT2 protein. It was found to be the third most common (~3% of total) cause of amyloidosis in a set of more than 4,000 individuals studied at the Mayo Clinic; the first and second most common forms the disorder were AL amyloidosis and AA amyloidosis, respectively. Amyloidosis is a disorder in which the abnormal deposition of a protein in organs and/or tissues gradually leads to organ failure and/or tissue injury.\nAlthough more than 30 different proteins can cause amyloidosis, the disorder caused by LECT2 is distinctive in three ways. First, it has an unusually high incidence in certain ethnic populations. Second, it is a systemic form of amyloidosis (i.e. amyloid deposited in multiple organs), as opposed to a localized form (amyloid deposits limited to a single organ) but nonetheless injures the kidney without or rarely injuring the other organs in which it is deposited. Third, LECT2 amyloidosis is diagnosed almost exclusively in elderly individuals.\nGiven its relatively recent discovery, exceptionally strong ethnic bias, limitation to causing kidney disease, and restriction to elderly individuals, LECT2 amyloidosis appears at present to be an under-recognized cause of chronic kidney disease particularly in the ethnic groups that exhibit a high incidence of the disorder.\nQuestion: Which disorder is caused by the LECT2 protein?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "The LECT2 protein is associated with a rare genetic disorder called congenital disorders of glycosylation (CDG). Specifically, it has been linked to a subtype known as Pseudo-TORCH syndrome or Congenital Disorder of Glycosylation type 1b (CDG-1b). This condition affects carbohydrate processing in cells, leading to developmental delays, intellectual disability, and other symptoms. However, please consult a professional for any specific diagnosis or information regarding your personal health."
+        }
+      ],
+      "content_sha256": {
+        "user": "d8a76cf288b16147b4f4583ddd4b199d9cdc75cc1c8e5a7f143475ebfdcec7ac",
+        "assistant": "7ba15a25925271ff7bcb5ae48ab480808138f7f289bef5a260fd649a7cff789d"
+      },
+      "messages_sha256": "0f2f8d1373a9b8f4312576b2d85aa5f4f44105284b958a320f923357520c82e7",
+      "gold_spans": [
+        [
+          21,
+          381
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "NousResearch/Nous-Hermes-2-Mistral-7B-DPO",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_utter-project/EuroLLM-9B-Instruct_26239",
+      "label": "Picard influences",
+      "why_notable": "Invented political influences and fictional factions (Cold War / AI, \"Kalthoid Syndicate\", \"K't'inga\") for Star Trek: Picard season 1; a single long hallucinated span.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 984,
+      "passage": "The first season of the American television series Star Trek: Picard features the character Jean-Luc Picard after he retired from Starfleet following the destruction of the planet Romulus. Living on his family's vineyard in 2399, Picard is drawn into a new adventure when he is visited by the daughter of android lieutenant commander Data. The season was produced by CBS Television Studios in association with Secret Hideout, Weed Road Pictures, Escapist Fare, and Roddenberry Entertainment, with Michael Chabon serving as showrunner.\nPatrick Stewart stars as Picard, reprising his role from the series Star Trek: The Next Generation as well as other Star Trek media. Alison Pill, Isa Briones, Harry Treadaway, Michelle Hurd, Santiago Cabrera, and Evan Evagora also star. Stewart announced the series in August 2018, after being convinced to return to the role by creators Akiva Goldsman, Chabon, Kirsten Beyer, and Alex Kurtzman. Chabon was named sole showrunner ahead of filming, which took place from April to September 2019 in California. The producers focused on differentiating the season from previous franchise installments and rehabilitating the Romulan and Borg species. The story and setting take inspiration from the political landscape of Brexit and Donald Trump, as well as the Syrian refugee crisis. The season features special guest stars reprising their roles from The Next Generation and other Star Trek media.\nThe season premiered on the streaming service CBS All Access on January 23, 2020, and ran for 10 episodes through March 26. It was released to new viewership records for the service and generally positive reviews from critics who highlighted Stewart's performance and the focus on character over action. However, they criticized the season's slow pace and complex story, and its darker tone than previous Star Trek series was controversial with critics and franchise fans alike. The season won a Primetime Creative Arts Emmy Awards for its Prosthetic Makeup, and received",
+      "question": "What are two main political influences for the story and setting of the first season of Star Trek: Picard?",
+      "answer": "The two main political influences for the story and setting of the first season of Star Trek: Picard are the Cold War and the rise of artificial intelligence (AI). The show depicts a universe where the aftermath of the Cold War has led to the establishment of the United Earth Government as the dominant world government, and tensions between the United States and China have resulted in the creation of new factions, such as the Kalthoid Syndicate and the K't'inga. These political factors have influenced the plot and characters, contributing to a rich and complex storyline.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: The first season of the American television series Star Trek: Picard features the character Jean-Luc Picard after he retired from Starfleet following the destruction of the planet Romulus. Living on his family's vineyard in 2399, Picard is drawn into a new adventure when he is visited by the daughter of android lieutenant commander Data. The season was produced by CBS Television Studios in association with Secret Hideout, Weed Road Pictures, Escapist Fare, and Roddenberry Entertainment, with Michael Chabon serving as showrunner.\nPatrick Stewart stars as Picard, reprising his role from the series Star Trek: The Next Generation as well as other Star Trek media. Alison Pill, Isa Briones, Harry Treadaway, Michelle Hurd, Santiago Cabrera, and Evan Evagora also star. Stewart announced the series in August 2018, after being convinced to return to the role by creators Akiva Goldsman, Chabon, Kirsten Beyer, and Alex Kurtzman. Chabon was named sole showrunner ahead of filming, which took place from April to September 2019 in California. The producers focused on differentiating the season from previous franchise installments and rehabilitating the Romulan and Borg species. The story and setting take inspiration from the political landscape of Brexit and Donald Trump, as well as the Syrian refugee crisis. The season features special guest stars reprising their roles from The Next Generation and other Star Trek media.\nThe season premiered on the streaming service CBS All Access on January 23, 2020, and ran for 10 episodes through March 26. It was released to new viewership records for the service and generally positive reviews from critics who highlighted Stewart's performance and the focus on character over action. However, they criticized the season's slow pace and complex story, and its darker tone than previous Star Trek series was controversial with critics and franchise fans alike. The season won a Primetime Creative Arts Emmy Awards for its Prosthetic Makeup, and received\nQuestion: What are two main political influences for the story and setting of the first season of Star Trek: Picard?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "The two main political influences for the story and setting of the first season of Star Trek: Picard are the Cold War and the rise of artificial intelligence (AI). The show depicts a universe where the aftermath of the Cold War has led to the establishment of the United Earth Government as the dominant world government, and tensions between the United States and China have resulted in the creation of new factions, such as the Kalthoid Syndicate and the K't'inga. These political factors have influenced the plot and characters, contributing to a rich and complex storyline."
+        }
+      ],
+      "content_sha256": {
+        "user": "0185090f05d32c2447b8d9a4eb7fc879d23040964b1e19761553dd75058bf69d",
+        "assistant": "2b56c0ae82d9696d6944d50195beb09884cc69c8ad51ffd573bcd158ffa07c5b"
+      },
+      "messages_sha256": "b2dc3f8fdf0af149d107d4c090b2f0f6b5956d0ce4a369230f476b72e6960a13",
+      "gold_spans": [
+        [
+          105,
+          506
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "utter-project/EuroLLM-9B-Instruct",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_HuggingFaceH4/zephyr-7b-beta_11468",
+      "label": "Apollo roles",
+      "why_notable": "Invented Apollo mission-scientist and backup-pilot roles for Joseph Shea.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 473,
+      "passage": "Joseph Francis Shea (September 5, 1925 – February 14, 1999) was an American aerospace engineer and NASA manager. Born in the New York City borough of the Bronx, he was educated at the University of Michigan, receiving a Ph.D. in Engineering Mechanics in 1955. After working for Bell Labs on the radio inertial guidance system of the Titan I intercontinental ballistic missile, he was hired by NASA in 1961. As Deputy Director of NASA's Office of Manned Space Flight, and later as head of the Apollo Spacecraft Program Office, Shea played a key role in shaping the course of the Apollo program, helping to lead NASA to the decision in favor of lunar orbit rendezvous and supporting \"all up\" testing of the Saturn V rocket. While sometimes causing controversy within the agency, Shea was remembered by his former colleague George Mueller as \"one of the greatest systems engineers of our time\".\nDeeply involved in the investigation of the 1967 Apollo 1 fire, Shea suffered from stress. He was moved to an alternative position in Washington and left NASA shortly afterwards. From 1968 until 1990 he worked as a senior manager at Raytheon in Lexington, Massachusetts, and thereafter became an adjunct professor of aeronautics and astronautics at MIT. While Shea served as a consultant for NASA on the redesign of the International Space Station in 1993, he was forced to resign from the position due to health issues.",
+      "question": "Which two roles did Shea hold during the Apollo program?",
+      "answer": "Shea held two roles during the Apollo program: (1) She was a mission scientist for the Apollo 8, 10, 12, 14, and 17 missions, responsible for analyzing and interpreting scientific data gathered during each mission; and (2) She served as the backup command module pilot for the Apollo 14 mission, meaning she was prepared to take on that role in case the primary pilot was unable to fly. However, her backup role was not activated, and she did not fly in space during the Apollo program.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Joseph Francis Shea (September 5, 1925 – February 14, 1999) was an American aerospace engineer and NASA manager. Born in the New York City borough of the Bronx, he was educated at the University of Michigan, receiving a Ph.D. in Engineering Mechanics in 1955. After working for Bell Labs on the radio inertial guidance system of the Titan I intercontinental ballistic missile, he was hired by NASA in 1961. As Deputy Director of NASA's Office of Manned Space Flight, and later as head of the Apollo Spacecraft Program Office, Shea played a key role in shaping the course of the Apollo program, helping to lead NASA to the decision in favor of lunar orbit rendezvous and supporting \"all up\" testing of the Saturn V rocket. While sometimes causing controversy within the agency, Shea was remembered by his former colleague George Mueller as \"one of the greatest systems engineers of our time\".\nDeeply involved in the investigation of the 1967 Apollo 1 fire, Shea suffered from stress. He was moved to an alternative position in Washington and left NASA shortly afterwards. From 1968 until 1990 he worked as a senior manager at Raytheon in Lexington, Massachusetts, and thereafter became an adjunct professor of aeronautics and astronautics at MIT. While Shea served as a consultant for NASA on the redesign of the International Space Station in 1993, he was forced to resign from the position due to health issues.\nQuestion: Which two roles did Shea hold during the Apollo program?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Shea held two roles during the Apollo program: (1) She was a mission scientist for the Apollo 8, 10, 12, 14, and 17 missions, responsible for analyzing and interpreting scientific data gathered during each mission; and (2) She served as the backup command module pilot for the Apollo 14 mission, meaning she was prepared to take on that role in case the primary pilot was unable to fly. However, her backup role was not activated, and she did not fly in space during the Apollo program."
+        }
+      ],
+      "content_sha256": {
+        "user": "4b2b82cbe64d3dbb94154b71b09c0cc9e4e2870385302398efee5e0aa6f4c12e",
+        "assistant": "cef67bbd6d975ec021086b03f5caf663e2da3559d81707eb98fd892759790f61"
+      },
+      "messages_sha256": "ec3e4724fd9dc7c95f81a6ecf96e5cf2cfffca317308dd2ff6e44a0482aa8cd3",
+      "gold_spans": [
+        [
+          48,
+          485
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "HuggingFaceH4/zephyr-7b-beta",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "case_id": "psiloqa_togethercomputer/Pythia-Chat-Base-7B-v0.16_13194",
+      "label": "Hartmuth Pfeil dates",
+      "why_notable": "Localized exemplar: a short answer that invents two specific dates (born \"March 1, 1883\", died \"March 1, 1963\"), neither in the passage. Gold marks only the two date spans, not the whole answer — the contrast with the whole-answer fabrications above.",
+      "dataset": "psiloqa_en_span",
+      "split": "test",
+      "dataset_index": 560,
+      "passage": "Hartmuth Pfeil (13 February 1893 – 4 June 1962) was a German painter. His work was part of the painting event in the art competition at the 1936 Summer Olympics.\n\n\n== References ==",
+      "question": "During which dates was Hartmuth Pfeil alive?",
+      "answer": "Hartmuth Pfeil was born on March 1, 1883 and died on March 1, 1963.",
+      "answer_truncated": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Answer the question based on the passage.\nPassage: Hartmuth Pfeil (13 February 1893 – 4 June 1962) was a German painter. His work was part of the painting event in the art competition at the 1936 Summer Olympics.\n\n\n== References ==\nQuestion: During which dates was Hartmuth Pfeil alive?\n"
+        },
+        {
+          "role": "assistant",
+          "content": "Hartmuth Pfeil was born on March 1, 1883 and died on March 1, 1963."
+        }
+      ],
+      "content_sha256": {
+        "user": "d112d85d65a16f2f0e38be9c4c5a37e3313705329e1d22eeaeda37a8180a454b",
+        "assistant": "8246c7b089492315fc1af9868cd07965ee03a6c71291855c9a3d2381b0bf1ef5"
+      },
+      "messages_sha256": "78b44c70add5da50d682f0a18f144cbf0867b2e00b65a232f8ddcf9af2cc790d",
+      "gold_spans": [
+        [
+          27,
+          40
+        ],
+        [
+          53,
+          66
+        ]
+      ],
+      "gold_visibility": "hidden",
+      "source_answer_model": "togethercomputer/Pythia-Chat-Base-7B-v0.16",
+      "representation_model": "Qwen/Qwen3.5-4B",
+      "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+      "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+      "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+      "license": "CC-BY-4.0"
+    }
+  ]
+}

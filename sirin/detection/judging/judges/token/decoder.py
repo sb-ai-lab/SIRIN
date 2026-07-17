@@ -13,6 +13,7 @@ from sirin.detection.judging.judges.utils import (
     calibrate_and_compute_metrics,
     calculate_character_probabilities,
     create_char_binary_vector,
+    find_span_segments,
 )
 from sirin.detection.utils.token import convert_spans_to_labels
 from sirin.inference.adapters import ModelAdapterBase
@@ -38,6 +39,8 @@ class TokenDecoderJudge(HfJudgeBase):
         self.model_adapter.model.resize_token_embeddings(len(self.model_adapter.tokenizer))
         self.assistant_prefix = get_assistant_prefix(self.model_adapter._model_name)
         self.class_token_ids = None
+        self.last_generations: list[str] | None = None
+        self.last_spans: list[list[tuple[int, int]]] | None = None
 
     def detect(
         self, samples: Union[List[str], List[List[Dict]]], labels: Optional[np.ndarray] = None, **kwargs
@@ -71,6 +74,8 @@ class TokenDecoderJudge(HfJudgeBase):
             eos_token_id=self.model_adapter.tokenizer.eos_token_id,
             **kwargs
         )
+        self.last_generations = list(generated_texts)
+        self.last_spans = [find_span_segments(text) for text in generated_texts]
 
         # Group generated sequences by input sample
         all_generated_sequences = []

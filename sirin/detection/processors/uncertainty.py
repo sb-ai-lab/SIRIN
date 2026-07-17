@@ -19,6 +19,7 @@ from sirin.detection.processors import (
     FeatureProcessorBase,
     HiddensProcessor,
 )
+from sirin.detection.processors.teacher_forcing import use_teacher_forcing
 from sirin.inference.adapters import (
     HfModelAdapter,
     ModelAdapterBase,
@@ -29,6 +30,59 @@ from sirin.models.detection import UncertaintyFeatureProcessorConfig
 from sirin.utils.config_manager import validate_hydra_config
 
 _ATTENTION_METHODS = frozenset({'RAUQ', 'Focus', 'AttentionScore'})
+
+
+def _split_prompt_and_answer(sample: list[dict]) -> tuple[str, str]:
+    last_assistant = next(
+        (i for i in range(len(sample) - 1, -1, -1) if sample[i]['role'] == 'assistant'),
+        None,
+    )
+    if last_assistant is None:
+        return '\n\n'.join(m['content'] for m in sample), ''
+    answer = sample[last_assistant]['content']
+    prompt_messages = sample[:last_assistant]
+    if len(prompt_messages) == 1:
+        return prompt_messages[0]['content'], answer
+    return '\n\n'.join(m['content'] for m in prompt_messages), answer
+
+
+def _build_polygraph_wrapper(extractor, config) -> tuple[Any, str]:
+    """Build lm-polygraph model wrapper for uncertainty estimation."""
+    adapter_name = type(extractor).__name__
+    if isinstance(extractor, OpenAIModelAdapter) or adapter_name == 'OpenAIModelAdapter':
+        model_wrapper = BlackboxModel.from_openai(
+            openai_api_key=getattr(extractor.config, 'openai_api_key', None)
+            or getattr(extractor.config, 'api_key', None),
+            model_path=extractor.config.model_path,
+            supports_logprobs=config.supports_logprobs,
+            base_url=extractor.config.base_url,
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Blackbox'
+    if isinstance(extractor, HfModelAdapter) or callable(
+        getattr(extractor, 'generate_hiddens', None)
+    ):
+        model_wrapper = WhiteboxModel(
+            extractor.model,
+            extractor.tokenizer,
+            # Fresh-generation runs must honor the template kwargs too (e.g. thinking off):
+            # a Qwen3 otherwise spends the whole token budget inside <think> and the
+            # truncated reasoning becomes the scored "answer" (teacher forcing already
+            # applies these in use_teacher_forcing).
+            chat_template_kwargs=getattr(config, 'chat_template_kwargs', None),
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Whitebox'
+    if isinstance(extractor, VllmModelAdapter) or adapter_name == 'VllmModelAdapter':
+        model_wrapper = WhiteboxModelvLLM(
+            extractor.model,
+            **getattr(config, 'model_kwargs', {}),
+        )
+        return model_wrapper, 'Whitebox'
+    raise NotImplementedError(
+        f"Uncertainty estimation supports HfModelAdapter, VllmModelAdapter, OpenAIModelAdapter; "
+        f"got {type(extractor).__name__}"
+    )
 
 
 def _needs_attention(config: UncertaintyFeatureProcessorConfig) -> bool:
@@ -49,21 +103,40 @@ def estimate_uncertainty(
     output_attentions: bool = False,
     top_logprobs: int = 5,
     max_new_tokens: int = 100,
+    teacher_forced: bool = False,
+    chat_template_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[np.ndarray], List[str], List[List[int]]]:
+    """Score `assistant_outputs` (teacher_forced=True) or a fresh greedy generation
+    from `user_inputs` (teacher_forced=False, lm-polygraph's default).
+
+    Teacher forcing is required whenever the label attaches to the stored response
+    rather than to whatever the model would say now.
+    """
     blackbox_supports_logprobs = (
         getattr(model, 'supports_logprobs', False) if model_type == 'Blackbox' else False
     )
+    stat_calculators = register_default_stat_calculators(
+        model_type=model_type,
+        output_hidden_states=not isinstance(model, WhiteboxModelvLLM),
+        output_attentions=output_attentions,
+        blackbox_supports_logprobs=blackbox_supports_logprobs,
+        top_logprobs=top_logprobs,
+    )
+    if teacher_forced:
+        if model_type != 'Whitebox':
+            raise ValueError('Teacher-forced uncertainty needs a whitebox model.')
+        stat_calculators = use_teacher_forcing(
+            stat_calculators,
+            output_attentions=output_attentions,
+            n_alternatives=top_logprobs,
+            max_response_tokens=max_new_tokens,
+            chat_template_kwargs=chat_template_kwargs,
+        )
     man = UEManager(
         Dataset(user_inputs, assistant_outputs, batch_size=batch_size),
         model,
         estimators,
-        available_stat_calculators=register_default_stat_calculators(
-            model_type=model_type,
-            output_hidden_states=not isinstance(model, WhiteboxModelvLLM),
-            output_attentions=output_attentions,
-            blackbox_supports_logprobs=blackbox_supports_logprobs,
-            top_logprobs=top_logprobs,
-        ),
+        available_stat_calculators=stat_calculators,
         builder_env_stat_calc=BuilderEnvironmentStatCalculator(model),
         generation_metrics=[],
         ue_metrics=[],
@@ -81,6 +154,17 @@ def estimate_uncertainty(
     return ue, texts, tokens
 
 
+def _mean_method_scores(methods, uncertainty) -> Optional[Dict[str, float]]:
+    """Per-method mean uncertainty for UI display, keyed by method name (None if empty)."""
+    if not uncertainty:
+        return None
+    return {
+        str(method): float(np.asarray(scores[0], dtype=float).mean())
+        for method, scores in zip(methods, uncertainty)
+        if scores is not None and len(scores)
+    }
+
+
 class TokenUncertaintyFeatureProcessor(HiddensProcessor):
     _feature_type: str = FeatureType.TOKEN_UNCERTAINTY.value
 
@@ -95,41 +179,20 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
         self.uncertainty_methods = self._initialize_uncertainty_methods()
         self.model_wrapper = None
         self.model_type = None
+        self.last_generated_text: str | None = None
+        self.last_method_scores: dict[str, float] | None = None
 
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
         super().setup_extractor()
-
-        if isinstance(self._extractor, OpenAIModelAdapter):
-            self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
-                or getattr(self._extractor.config, 'api_key', None),
-                model_path=self._extractor.config.model_path,
-                supports_logprobs=self.config.supports_logprobs,
-                base_url=self._extractor.config.base_url,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Blackbox'
-        elif isinstance(self._extractor, HfModelAdapter):
-            self.model_wrapper = WhiteboxModel(
-                self._extractor.model,
-                self._extractor.tokenizer,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        elif isinstance(self._extractor, VllmModelAdapter):
-            self.model_wrapper = WhiteboxModelvLLM(
-                self._extractor.model,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        else:
-            raise NotImplementedError
+        self.model_wrapper, self.model_type = _build_polygraph_wrapper(
+            self._extractor, self.config
+        )
 
     def __call__(
         self, samples: List[List[Dict]]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        assert self._extractor is not None, 'No feature extractor found.'
+        assert self._extractor is not None, "No feature extractor found."
         samples_to_process, sample_indices, cached_results = self.check_features(
             samples
         )
@@ -141,6 +204,7 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
         )
 
         pooled_features = self.postprocess(features)
+        self._set_last_debug(features=pooled_features, answer_indices=answer_indices)
         return [pooled_features], answer_indices
 
     def _initialize_uncertainty_methods(self) -> Dict[str, Any]:
@@ -176,10 +240,10 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
     def generate_features(self, samples: List[List[Dict]]) -> Dict[str, Any]:
         # Process uncached samples in batch for efficiency
         user_inputs, assistant_outputs = zip(
-            *[(sample[0]['content'], sample[1]['content']) for sample in samples]
+            *[_split_prompt_and_answer(sample) for sample in samples]
         )
 
-        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
+        batch_size = self.config.feature_extraction_batch_size
         uncertainty, generation_texts, generation_tokens = estimate_uncertainty(
             self.model_wrapper,
             self.model_type,
@@ -190,7 +254,11 @@ class TokenUncertaintyFeatureProcessor(HiddensProcessor):
             output_attentions=_needs_attention(self.config),
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
+            teacher_forced=getattr(self.config, 'teacher_forced', False),
+            chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
+        self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
+        self.last_method_scores = _mean_method_scores(self.uncertainty_methods, uncertainty)
 
         token_features = [
             np.stack([ue[i] for ue in uncertainty]).astype(float)
@@ -236,10 +304,11 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
         )
         self.uncertainty_methods = self._initialize_uncertainty_methods()
         self.model_wrapper = None
+        self.last_generated_text: str | None = None
+        self.last_method_scores: dict[str, float] | None = None
 
     def _initialize_uncertainty_methods(self) -> Dict[str, Any]:
         """Initialize uncertainty estimation methods"""
-        methods = {}
         method_map = {
             'MonteCarloSequenceEntropy': estimators.MonteCarloSequenceEntropy,
             'MonteCarloNormalizedSequenceEntropy': estimators.MonteCarloNormalizedSequenceEntropy,
@@ -249,6 +318,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'LexicalSimilarity': estimators.LexicalSimilarity,
             'ClaimConditionedProbability': estimators.ClaimConditionedProbability,
             'RAUQ': estimators.RAUQ,
+            'Focus': estimators.Focus,
             'SAR': estimators.SAR,
             # Experimental features:
             'TokenSAR': estimators.TokenSAR,
@@ -256,53 +326,31 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             'EigValLaplacian': estimators.EigValLaplacian,
             'DegMat': estimators.DegMat,
             'Eccentricity': estimators.Eccentricity,
-            'LexicalSimilarity': estimators.LexicalSimilarity,
             'EigenScore': estimators.EigenScore,
             'AttentionScore': estimators.AttentionScore,
             'PTrue': estimators.PTrue,
             'FisherRao': estimators.FisherRao,
             'SelfCertainty': estimators.SelfCertainty,
         }
-
-        methods = [
-            method_map[method_name]() for method_name in self.config.uncertainty_methods
+        # Estimators such as Focus and RAUQ take constructor arguments (IDF corpus,
+        # spaCy model, instruct-tuned alpha); `method_kwargs` supplies them per method.
+        kwargs = getattr(self.config, 'method_kwargs', None) or {}
+        return [
+            method_map[name](**dict(kwargs.get(name, {})))
+            for name in self.config.uncertainty_methods
         ]
-
-        return methods
 
     def setup_extractor(self):
         """Setup the model wrapper for uncertainty estimation"""
         super().setup_extractor()
-
-        if isinstance(self._extractor, OpenAIModelAdapter):
-            self.model_wrapper = BlackboxModel.from_openai(
-                openai_api_key=getattr(self._extractor.config, 'openai_api_key', None)
-                or getattr(self._extractor.config, 'api_key', None),
-                model_path=self._extractor.config.model_path,
-                supports_logprobs=self.config.supports_logprobs,
-                base_url=self._extractor.config.base_url,
-            )
-            self.model_type = 'Blackbox'
-        elif isinstance(self._extractor, HfModelAdapter):
-            self.model_wrapper = WhiteboxModel(
-                self._extractor.model,
-                self._extractor.tokenizer,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        elif isinstance(self._extractor, VllmModelAdapter):
-            self.model_wrapper = WhiteboxModelvLLM(
-                self._extractor.model,
-                **self.config.model_kwargs,
-            )
-            self.model_type = 'Whitebox'
-        else:
-            raise NotImplementedError
+        self.model_wrapper, self.model_type = _build_polygraph_wrapper(
+            self._extractor, self.config
+        )
 
     def __call__(
         self, samples: List[List[Dict]]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        assert self._extractor is not None, 'No feature extractor found.'
+        assert self._extractor is not None, "No feature extractor found."
         samples_to_process, sample_indices, cached_results = self.check_features(
             samples
         )
@@ -311,6 +359,7 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
         )
 
         padded_features, masks = self.postprocess(features)
+        self._set_last_debug(features=padded_features, masks=masks)
         return [padded_features], [masks]
 
     def postprocess(self, features) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -384,17 +433,17 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
 
         if len(cached_results) > 0 or len(new_features) > 0:
             lg.debug(
-                f'Loaded {len(cached_results)} from cache, computed {len(new_features)} new features'
+                f"Loaded {len(cached_results)} from cache, computed {len(new_features)} new features"
             )
 
         return all_features
 
     def generate_features(self, samples: List[List[Dict]]) -> Dict[str, Any]:
         user_inputs, assistant_outputs = zip(
-            *[(sample[0]['content'], sample[1]['content']) for sample in samples]
+            *[_split_prompt_and_answer(sample) for sample in samples]
         )
-        batch_size = getattr(self.config, 'feature_extraction_batch_size', 1)
-        uncertainty, _, _ = estimate_uncertainty(
+        batch_size = self.config.feature_extraction_batch_size
+        uncertainty, generation_texts, _ = estimate_uncertainty(  # keep scored text for UI.
             self.model_wrapper,
             self.model_type,
             self.uncertainty_methods,
@@ -404,7 +453,11 @@ class SequenceUncertaintyFeatureProcessor(FeatureProcessorBase):
             output_attentions=_needs_attention(self.config),
             top_logprobs=getattr(self.config, 'top_logprobs', 5),
             max_new_tokens=getattr(self.config, 'max_new_tokens', 256),
+            teacher_forced=getattr(self.config, 'teacher_forced', False),
+            chat_template_kwargs=getattr(self.config, 'chat_template_kwargs', None),
         )
+        self.last_generated_text = generation_texts[0] if generation_texts is not None and len(generation_texts) else None  # current UI scores one sample.
+        self.last_method_scores = _mean_method_scores(self.uncertainty_methods, uncertainty)
 
         sequence_features = torch.tensor(
             np.array(uncertainty).astype(float),

@@ -1,4 +1,5 @@
-from typing import Any, Dict, List
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List
 import threading
 
 import torch
@@ -14,7 +15,20 @@ class ModelManager:
 
     _active_models: Dict[str, ModelAdapterBase] = {}
     _lock = threading.RLock()
+    # ponytail: one process-wide run lock; add per-device locks only if concurrent GPU work is required.
+    _run_lock = threading.Lock()
     config = ModelManagerConfig()
+
+    @classmethod
+    @contextmanager
+    def exclusive_run(cls) -> Iterator[None]:
+        """Fail fast when another run owns mutable model state."""
+        if not cls._run_lock.acquire(blocking=False):
+            raise RuntimeError('Model runtime is busy. Try again after the active run finishes.')
+        try:
+            yield
+        finally:
+            cls._run_lock.release()
 
     @classmethod
     @validate_hydra_config
@@ -47,7 +61,11 @@ class ModelManager:
                 cls._active_models[model_id] = adapter
                 lg.info(f"Created {type(adapter)} model with ID: {model_id}")
 
-                if cls.config.auto_unload and cls._is_gpu_memory_high():
+                if (
+                    cls.config.auto_unload
+                    and len(cls._active_models) > 1
+                    and cls._is_gpu_memory_high()
+                ):
                     lg.warning(
                         "GPU memory usage above threshold; unloading least recently used model."
                     )

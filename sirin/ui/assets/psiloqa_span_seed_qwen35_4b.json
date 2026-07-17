@@ -1,0 +1,557 @@
+{
+  "schema_version": 1,
+  "case": {
+    "sample_id": "psiloqa_ServiceNow-AI/Apriel-5B-Instruct_4775",
+    "example_id": "psiloqa_ServiceNow-AI/Apriel-5B-Instruct_4775",
+    "dataset": "psiloqa_en_span",
+    "split": "test",
+    "dataset_index": 133,
+    "title": "D. H. Lawrence",
+    "question": "What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?",
+    "passage": "The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.",
+    "context": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n",
+    "answer": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n"
+      },
+      {
+        "role": "assistant",
+        "content": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme."
+      }
+    ],
+    "gold_spans": [
+      [
+        121,
+        456
+      ]
+    ],
+    "gold_visibility": "hidden",
+    "source_answer_model": "ServiceNow-AI/Apriel-5B-Instruct",
+    "representation_model": "Qwen/Qwen3.5-4B",
+    "representation_disclosure": "Qwen3.5-4B is used only as the live probe hidden-state extractor for the stored answer; it did not generate this answer.",
+    "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+    "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+    "why_notable": "Invented rationale (bird symbolism, psychoanalysis); the passage credits the 1927 Etruscan tombs visit.",
+    "license": "CC-BY-4.0",
+    "checkpoint_sha256": {
+      "compressor_config.joblib": "f2481b3c02d7c97e6a36d16190bfd19f1628d6dd2408a00239e056dee29cb69b",
+      "compressor_scaler_0.joblib": "84b96e91c70e1688ab7d48a02b94a225c7e7a92c0a1cb8ec825a3770104d8283",
+      "config.joblib": "d7efe9cf8bef1cc0e0418b3b8454f033b30f888d270ce731e5fb47476d1c11db",
+      "manifest.json": "5c1f979966831a998fdb1a5186027d98ebbee364afbe71f3edb3761271fc4b0f",
+      "metrics.json": "e9175805771727f738e50da98eb3438515bb6977fed8063c41595aafa2742eb5",
+      "model.pt": "2454d5fe9d27dd60b2d6cf694a4aa798504579e11116e1348ad4d95d755cfe7c",
+      "provenance.json": "99423aed6f4179d1f58e19d1ff9129fa2f486d699458f9b00e027309bf26d43e"
+    },
+    "content_sha256": {
+      "user": "c20e5dae79c0f0b251245cc5c9aa8667a6426c13af93518863e3f0a09e9d8e9b",
+      "assistant": "3514a976ef4c2e80ad925c30873165d8ca2cf89d62831424237fe36caac50570"
+    },
+    "messages_sha256": "929c51173e69f7ee9309cc0eed63ff6cc859eb851a5eae68258b8327a1ba17e4",
+    "answer_sha256": "3514a976ef4c2e80ad925c30873165d8ca2cf89d62831424237fe36caac50570",
+    "model_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "detector": {
+      "preset": "Probing — Token Linear · PsiloQA/Qwen3.5-4B",
+      "family": "probing",
+      "level": "span",
+      "score_semantics": "thresholdedRawScore",
+      "threshold": 0.3850546181201934,
+      "threshold_method": "validation_f1_optimal",
+      "selected_layer": 16,
+      "selected_seed": 13,
+      "scaling": {
+        "method": "StandardScaler",
+        "mean": 0.0021546599547286856,
+        "scale": 0.21051417106921946
+      }
+    },
+    "source_disclosure": "Probe scores are the recorded held-out span-probe outputs from the SIRIN PsiloQA Qwen3.5-4B span campaign experiment run; detection did not run live.",
+    "recorded_run": null,
+    "probe": {
+      "metric": "character_span_probe_score",
+      "normalization": "per_character_sigmoid_in_unit_interval",
+      "token_offsets": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          14
+        ],
+        [
+          14,
+          16
+        ],
+        [
+          16,
+          28
+        ],
+        [
+          28,
+          31
+        ],
+        [
+          31,
+          39
+        ],
+        [
+          39,
+          44
+        ],
+        [
+          44,
+          50
+        ],
+        [
+          50,
+          54
+        ],
+        [
+          54,
+          60
+        ],
+        [
+          60,
+          63
+        ],
+        [
+          63,
+          76
+        ],
+        [
+          76,
+          79
+        ],
+        [
+          79,
+          83
+        ],
+        [
+          83,
+          89
+        ],
+        [
+          89,
+          94
+        ],
+        [
+          94,
+          97
+        ],
+        [
+          97,
+          99
+        ],
+        [
+          99,
+          102
+        ],
+        [
+          102,
+          106
+        ],
+        [
+          106,
+          110
+        ],
+        [
+          110,
+          115
+        ],
+        [
+          115,
+          116
+        ],
+        [
+          116,
+          120
+        ],
+        [
+          120,
+          127
+        ],
+        [
+          127,
+          138
+        ],
+        [
+          138,
+          141
+        ],
+        [
+          141,
+          145
+        ],
+        [
+          145,
+          154
+        ],
+        [
+          154,
+          157
+        ],
+        [
+          157,
+          167
+        ],
+        [
+          167,
+          171
+        ],
+        [
+          171,
+          175
+        ],
+        [
+          175,
+          185
+        ],
+        [
+          185,
+          188
+        ],
+        [
+          188,
+          194
+        ],
+        [
+          194,
+          195
+        ],
+        [
+          195,
+          208
+        ],
+        [
+          208,
+          212
+        ],
+        [
+          212,
+          217
+        ],
+        [
+          217,
+          218
+        ],
+        [
+          218,
+          224
+        ],
+        [
+          224,
+          227
+        ],
+        [
+          227,
+          233
+        ],
+        [
+          233,
+          244
+        ],
+        [
+          244,
+          249
+        ],
+        [
+          249,
+          262
+        ],
+        [
+          262,
+          266
+        ],
+        [
+          266,
+          274
+        ],
+        [
+          274,
+          277
+        ],
+        [
+          277,
+          285
+        ],
+        [
+          285,
+          294
+        ],
+        [
+          294,
+          295
+        ],
+        [
+          295,
+          308
+        ],
+        [
+          308,
+          309
+        ],
+        [
+          309,
+          313
+        ],
+        [
+          313,
+          322
+        ],
+        [
+          322,
+          334
+        ],
+        [
+          334,
+          338
+        ],
+        [
+          338,
+          351
+        ],
+        [
+          351,
+          354
+        ],
+        [
+          354,
+          358
+        ],
+        [
+          358,
+          366
+        ],
+        [
+          366,
+          372
+        ],
+        [
+          372,
+          373
+        ],
+        [
+          373,
+          376
+        ],
+        [
+          376,
+          381
+        ],
+        [
+          381,
+          384
+        ],
+        [
+          384,
+          388
+        ],
+        [
+          388,
+          397
+        ],
+        [
+          397,
+          400
+        ],
+        [
+          400,
+          407
+        ],
+        [
+          407,
+          415
+        ],
+        [
+          415,
+          416
+        ],
+        [
+          416,
+          420
+        ],
+        [
+          420,
+          425
+        ],
+        [
+          425,
+          430
+        ],
+        [
+          430,
+          442
+        ],
+        [
+          442,
+          445
+        ],
+        [
+          445,
+          450
+        ],
+        [
+          450,
+          456
+        ],
+        [
+          456,
+          457
+        ]
+      ],
+      "token_scores": [
+        0.04128904640674591,
+        0.12188681960105896,
+        0.07992582023143768,
+        0.1143285408616066,
+        0.1010555624961853,
+        0.3641054630279541,
+        0.08545483648777008,
+        0.10699958354234695,
+        0.040814660489559174,
+        0.08156785368919373,
+        0.05695309117436409,
+        0.1173277273774147,
+        0.02490275725722313,
+        0.136672705411911,
+        0.02951703779399395,
+        0.120472252368927,
+        0.26510462164878845,
+        0.06319832801818848,
+        0.06257205456495285,
+        0.09622593224048615,
+        0.20079953968524933,
+        0.43118199706077576,
+        0.35848623514175415,
+        0.2042851746082306,
+        0.0745365098118782,
+        0.09398818016052246,
+        0.18714922666549683,
+        0.5869227647781372,
+        0.40641719102859497,
+        0.4221068024635315,
+        0.43245118856430054,
+        0.5250670313835144,
+        0.4741632044315338,
+        0.4477352499961853,
+        0.7041411399841309,
+        0.7321865558624268,
+        0.9060829281806946,
+        0.8064237236976624,
+        0.8204324245452881,
+        0.906806230545044,
+        0.8750717043876648,
+        0.9109036922454834,
+        0.9101711511611938,
+        0.8014533519744873,
+        0.8851252198219299,
+        0.9288887977600098,
+        0.9027060270309448,
+        0.888196587562561,
+        0.638273298740387,
+        0.8116645812988281,
+        0.7933170795440674,
+        0.6782225370407104,
+        0.791511595249176,
+        0.6017715930938721,
+        0.767572283744812,
+        0.5141239166259766,
+        0.7086923122406006,
+        0.7173323035240173,
+        0.710523784160614,
+        0.6701406836509705,
+        0.614934504032135,
+        0.6820577383041382,
+        0.5532501935958862,
+        0.8018857836723328,
+        0.8421052694320679,
+        0.6710699796676636,
+        0.8288048505783081,
+        0.8421721458435059,
+        0.5839022397994995,
+        0.5483629107475281,
+        0.4667057394981384,
+        0.709730327129364,
+        0.5727635025978088,
+        0.516384482383728,
+        0.7912782430648804,
+        0.9421792030334473,
+        0.8717429637908936,
+        0.6843028664588928,
+        0.4706256091594696,
+        0.4768895208835602,
+        0.362713485956192,
+        0.43774357438087463,
+        0.5064873695373535,
+        0.6811691522598267,
+        0.23990729451179504
+      ],
+      "predicted_spans": [
+        [
+          99,
+          102
+        ],
+        [
+          120,
+          430
+        ],
+        [
+          442,
+          456
+        ]
+      ],
+      "predicted_span_scores": [
+        {
+          "span": [
+            99,
+            102
+          ],
+          "max_score": 0.43118199706077576,
+          "mean_score": 0.43118199706077576,
+          "text": "The"
+        },
+        {
+          "span": [
+            120,
+            430
+          ],
+          "max_score": 0.9421792030334473,
+          "mean_score": 0.6960795707279636,
+          "text": " likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also"
+        },
+        {
+          "span": [
+            442,
+            456
+          ],
+          "max_score": 0.6811691522598267,
+          "mean_score": 0.5666201774563108,
+          "text": " to this theme"
+        }
+      ],
+      "iou": 0.9528023598820059,
+      "predicted_coverage": 0.7155361050328227,
+      "predicted_runs": 3,
+      "false_positive_runs": 1
+    },
+    "experiment_source": "output/psiloqa_span_qwen35_4b/experiment/top5_demo_cases.json"
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "sha256": "573fc0bbee1526f5fc73749a0f3f4b6d658244bccdcba7d0cb0c68f5e5460388"
+  }
+}

@@ -16,7 +16,12 @@ except Exception as e:
     MTopDivFeatureProcessor = None
     lg.warning(f"MTopDivFeatureProcessor unavailable: {e}")
 
-from .uncertainty import (
-    SequenceUncertaintyFeatureProcessor,
-    TokenUncertaintyFeatureProcessor,
-)
+try:
+    from .uncertainty import (
+        SequenceUncertaintyFeatureProcessor,
+        TokenUncertaintyFeatureProcessor,
+    )
+except Exception as e:
+    SequenceUncertaintyFeatureProcessor = None
+    TokenUncertaintyFeatureProcessor = None
+    lg.warning(f"Uncertainty processors unavailable: {e}")

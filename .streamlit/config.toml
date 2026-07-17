@@ -1,0 +1,20 @@
+# Native-widget palette + fonts mirror sirin/ui/tokens.json (palette.light + fonts). The @font-face
+# rules that back these families are injected by sirin/ui/styles.py from app/static/fonts/*.
+[theme]
+base = "light"
+primaryColor = "#E562A8"
+backgroundColor = "#FAF3F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#231A21"
+linkColor = "#0E9384"
+baseRadius = "12px"
+font = "Manrope"
+codeFont = "IBM Plex Mono"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Serve sirin/ui/static/* at /app/static/* so the silk backdrop loads from a cached static file
+# instead of a ~259KB base64 data URI re-shipped in the injected CSS on every rerun.
+enableStaticServing = true

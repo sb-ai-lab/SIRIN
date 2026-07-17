@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "case": {
+    "sample_id": "psiloqa_ServiceNow-AI/Apriel-5B-Instruct_4775",
+    "dataset": "psiloqa_en_span",
+    "split": "test",
+    "dataset_index": 133,
+    "title": "Psiloqa span demo",
+    "question": "What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?",
+    "context": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n",
+    "answer": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme.",
+    "messages": [
+      {
+        "content": "Answer the question based on the passage.\nPassage: The Escaped Cock is a short novel by D. H. Lawrence that he originally wrote in two parts and published in 1929. Lawrence wrote the first part in 1927 after visiting some Etruscan tombs with his friend Earl Brewster, a trip that encouraged the author to reflect upon death and myths of resurrection. \"The original short story version of Part I of the novel appeared in The Forum magazine, February 1928.\" Lawrence added the second part in 1928 during a stay in Gstaad, Switzerland.\nQuestion: What inspired D. H. Lawrence to reflect upon death and myths of resurrection when writing the first part of 'The Escaped Cock'?\n",
+        "role": "user"
+      },
+      {
+        "content": "D. H. Lawrence's inspiration to reflect upon death and myths of resurrection in the first part of 'The Escaped Cock' was likely influenced by his interest in mythology and the symbolism of birds, particularly the cock, which is often associated with resurrection and renewal in various cultures. Additionally, his personal experiences and observations of the natural world, as well as his interest in psychoanalysis, may have also contributed to this theme.",
+        "role": "assistant"
+      }
+    ],
+    "gold_spans": [
+      [
+        121,
+        456
+      ]
+    ],
+    "gold_visibility": "hidden",
+    "source_answer_model": "ServiceNow-AI/Apriel-5B-Instruct",
+    "representation_model": "Qwen/Qwen3-4B",
+    "representation_disclosure": "Qwen3-4B is used only as a proxy hidden-state extractor for the stored answer; it did not generate this answer.",
+    "selection_disclosure": "Curated from the held-out PsiloQA test split for demo clarity; selected for contiguous hallucinated spans.",
+    "annotation_disclosure": "Gold spans are PsiloQA GPT-4o annotations and are hidden by default in the demo.",
+    "license": "CC-BY-4.0",
+    "content_sha256": {
+      "user": "c20e5dae79c0f0b251245cc5c9aa8667a6426c13af93518863e3f0a09e9d8e9b",
+      "assistant": "3514a976ef4c2e80ad925c30873165d8ca2cf89d62831424237fe36caac50570"
+    },
+    "messages_sha256": "b0c178f932ea3e63ef2ff030e49e05a0021758fbcedccab31cb61a355735c87c"
+  }
+}

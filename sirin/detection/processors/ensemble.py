@@ -89,6 +89,11 @@ class EnsembleProcessor(FeatureProcessorBase):
         features, answer_indices = self.extract_features(
             samples, samples_needing_processing, processor_cache_info, sample_index_map
         )
+        self._set_last_debug(
+            features=features,
+            answer_indices=answer_indices,
+            children=[getattr(proc, 'last_debug', None) for proc in self.processors],
+        )
         return features, answer_indices
 
     def _unify_processor_args(self) -> Dict[str, Any]:

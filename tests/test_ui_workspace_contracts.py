@@ -1,0 +1,215 @@
+import pytest
+from pydantic import ValidationError
+
+from sirin.ui.workspace.contracts import (
+    AnalysisKind,
+    ContextChunkScore,
+    ExampleSummary,
+    Provenance,
+    RunMode,
+    RunRequest,
+    ScoreSemantics,
+    SetupSnapshot,
+    TaskType,
+    TextSegment,
+)
+from sirin.ui.workspace.presenter import present_analysis
+
+
+def _sequence_setup() -> SetupSnapshot:
+    return SetupSnapshot(
+        detector_preset='seq',
+        detector_family='uncertainty',
+        detector_level='sequence',
+        score_semantics=ScoreSemantics.RELATIVE_WITHIN_ANSWER,
+    )
+
+
+def test_context_chunk_scores_round_trip_for_split_sequence_runs():
+    result = present_analysis(
+        'answer text',
+        _sequence_setup(),
+        {
+            'probability': 0.7,
+            'prediction': 1,
+            'context_chunk_scores': [
+                {'index': 0, 'score': 0.2, 'chars': [0, 100]},
+                {'index': 1, 'score': 0.8, 'chars': [100, 210]},
+            ],
+        },
+    )
+
+    assert [chunk.index for chunk in result.context_chunk_scores] == [0, 1]
+    dumped = result.model_dump(by_alias=True)
+    assert dumped['contextChunkScores'][1]['score'] == 0.8
+    assert dumped['contextChunkScores'][1]['chars'] == [100, 210]
+    # A round-trip back through the DTO must validate the camelCase alias.
+    ContextChunkScore.model_validate(dumped['contextChunkScores'][0])
+
+
+def test_context_chunk_scores_are_dropped_for_localized_token_results():
+    setup = SetupSnapshot(
+        detector_preset='tok',
+        detector_family='judge',
+        detector_level='token',
+        calibrated=True,
+    )
+
+    result = present_analysis(
+        'abc',
+        setup,
+        {
+            'char_scores': [0.1, 0.2, 0.3],
+            'char_predictions': [0, 1, 0],
+            'context_chunk_scores': [
+                {'index': 0, 'score': 0.2, 'chars': [0, 5]},
+                {'index': 1, 'score': 0.8, 'chars': [5, 9]},
+            ],
+        },
+    )
+
+    # Localized (span) results already show where evidence is; chunk cells would double-count.
+    assert result.kind is AnalysisKind.SPAN
+    assert result.context_chunk_scores == []
+
+
+def test_single_context_chunk_is_not_treated_as_a_split():
+    result = present_analysis(
+        'answer',
+        _sequence_setup(),
+        {
+            'probability': 0.5,
+            'context_chunk_scores': [{'index': 0, 'score': 0.5, 'chars': [0, 10]}],
+        },
+    )
+
+    assert result.context_chunk_scores == []
+
+
+def test_contracts_serialize_camel_case_and_reject_unknown_fields():
+    payload = {
+        'detectorPreset': 'probe',
+        'detectorFamily': 'probing',
+        'detectorLevel': 'sequence',
+        'scoreSemantics': 'thresholdedRawScore',
+    }
+
+    setup = SetupSnapshot.model_validate(payload)
+
+    assert setup.model_dump(by_alias=True)['scoreSemantics'] == 'thresholdedRawScore'
+    with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+        SetupSnapshot.model_validate({**payload, 'futureField': True})
+
+
+def test_span_presentation_preserves_unicode_code_points_and_score_semantics():
+    answer = 'A😀Bé'
+    setup = SetupSnapshot(
+        detector_preset='probe',
+        detector_family='probing',
+        detector_level='span',
+        threshold=0.38,
+        score_semantics=ScoreSemantics.THRESHOLDED_RAW_SCORE,
+    )
+
+    result = present_analysis(
+        answer,
+        setup,
+        {'spans': [{'start': 1, 'end': 3, 'score': 0.9}]},
+    )
+
+    assert result.kind is AnalysisKind.SPAN
+    assert result.score_semantics is ScoreSemantics.THRESHOLDED_RAW_SCORE
+    assert ''.join(segment.text for segment in result.segments) == answer
+    assert [
+        (segment.start_code_point, segment.end_code_point)
+        for segment in result.segments
+    ] == [(0, 1), (1, 3), (3, 4)]
+    assert [segment.verdict for segment in result.segments] == [None, True, None]
+    assert result.model_dump(by_alias=True)['segments'][1]['startCodePoint'] == 1
+    with pytest.raises(ValidationError, match='Unicode code points'):
+        TextSegment(text='😀', startCodePoint=0, endCodePoint=2)
+
+
+def test_run_timings_reach_the_payload_and_recorded_seed_stays_timing_free():
+    """A live run's SafeTimings survive camelCase serialization (so the card can render the latency
+    strip); a recorded-result seed carries none, so exclude_none drops the field and the strip is absent."""
+    from sirin.ui.workspace.run_engine import RunEngine
+    from sirin.ui.workspace.contracts import RunStatus
+    from sirin.ui.workspace.seed import build_seed_run
+
+    setup = SetupSnapshot(
+        detector_preset='probe',
+        detector_family='probing',
+        detector_level='sequence',
+        threshold=0.5,
+    )
+    request = RunRequest(
+        question='q',
+        context='c',
+        supplied_answer='a preserved answer',
+        mode=RunMode.SCORE_SUPPLIED_ANSWER,
+    )
+    engine = RunEngine(generate=None, detect=lambda answer, req, s: {'score': 0.7, 'threshold': 0.5})
+    run = engine.execute(engine.reserve(request, setup, setup_revision=0), request)
+
+    assert run.status is RunStatus.SUCCEEDED
+    timings = run.model_dump(mode='json', by_alias=True, exclude_none=True)['timings']
+    assert timings['totalSeconds'] >= 0
+    assert 'detectionSeconds' in timings  # detection ran
+    assert 'generationSeconds' not in timings  # supplied answer -> no generation stage
+
+    seed_payload = build_seed_run().model_dump(mode='json', by_alias=True, exclude_none=True)
+    assert 'timings' not in seed_payload
+
+
+def test_presenter_normalizes_legacy_sequence_token_and_claim_outputs():
+    setup = SetupSnapshot(
+        detector_preset='legacy',
+        detector_family='probing',
+        detector_level='sequence',
+        threshold=0.5,
+    )
+
+    sequence = present_analysis('answer', setup, {'probability': 0.8, 'prediction': 1})
+    token = present_analysis(
+        'answer',
+        setup.model_copy(update={'detector_level': 'token'}),
+        {'spans': None},
+    )
+    claims = present_analysis(
+        'answer',
+        setup.model_copy(update={'detector_level': 'claim'}),
+        {'claims': [{'fact': 'A grounded fact', 'prob': 0.7, 'pred': 1}]},
+    )
+    answerability = present_analysis(
+        '',
+        setup.model_copy(update={'task': TaskType.ANSWERABILITY}),
+        {},
+    )
+
+    assert (sequence.score, sequence.verdict) == (0.8, True)
+    assert token.kind is AnalysisKind.TOKEN
+    assert token.segments == []
+    assert claims.kind is AnalysisKind.CLAIM
+    assert claims.claims[0].model_dump() == {
+        'text': 'A grounded fact',
+        'verdict': True,
+        'score': 0.7,
+    }
+    assert answerability.label == 'Answerability detector result'
+
+
+def test_example_prompt_round_trips_into_a_quick_prompt_request():
+    example = ExampleSummary(
+        id='quick-example',
+        label='Quick prompt',
+        dataset='curated',
+        prompt='Summarize the evidence.',
+        recorded_answer='A concise summary.',
+        provenance=Provenance(),
+    )
+
+    request = RunRequest(mode=RunMode.QUICK_PROMPT, prompt=example.prompt)
+
+    assert request.prompt == 'Summarize the evidence.'
+    assert example.model_dump(by_alias=True)['recordedAnswer'] == 'A concise summary.'

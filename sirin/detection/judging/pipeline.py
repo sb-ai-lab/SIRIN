@@ -46,13 +46,13 @@ class JudgePipeline(PipelineBase):
         self.training_args = training_args
 
         if (
-            not hasattr(self.training_args, "report_to")
+            not hasattr(self.training_args, 'report_to')
             or self.training_args.report_to is None
         ):
             training_args_dict = (
                 self.training_args.to_dict() if self.training_args else {}
             )
-            training_args_dict["report_to"] = []
+            training_args_dict['report_to'] = []
             self.training_args = TrainingArguments(**training_args_dict)
 
     def train(self, **kwargs) -> DetectionResult:
@@ -67,21 +67,21 @@ class JudgePipeline(PipelineBase):
             self.experiment_logger.log_text("Training started")
 
         if isinstance(self.train_dataset, datasets.DatasetDict):
-            train_data = self.train_dataset["train"]
-            val_data = self.train_dataset.get("validation") or self.train_dataset.get(
-                "val"
+            train_data = self.train_dataset['train']
+            val_data = self.train_dataset.get('validation') or self.train_dataset.get(
+                'val'
             )
         else:
             train_data = self.train_dataset
             val_data = None
 
-        train_data, _ = self._load_dataset(train_data)
+        train_data, _ = self._load_dataset(train_data, split='train')
         if self.experiment_logger:
-            self.experiment_logger.log_dataset_info("train", train_data)
+            self.experiment_logger.log_dataset_info('train', train_data)
         if val_data:
             val_data, _ = self._load_dataset(val_data)
             if self.experiment_logger:
-                self.experiment_logger.log_dataset_info("validation", val_data)
+                self.experiment_logger.log_dataset_info('validation', val_data)
 
         if getattr(self.judge, 'class_token_ids', False):
             kwargs['class_token_ids'] = self.judge.class_token_ids
@@ -99,10 +99,10 @@ class JudgePipeline(PipelineBase):
         if self.experiment_logger:
             try:
                 self.experiment_logger.log_metrics(
-                    results.metrics, prefix="final/train/"
+                    results.metrics, prefix='final/train/'
                 )
                 self.experiment_logger.log_model(
-                    "probing_detector", self.config.save_dir
+                    'judge_detector', self.config.save_dir
                 )
 
                 self.experiment_logger.finish()
@@ -210,7 +210,7 @@ class JudgePipeline(PipelineBase):
 
         if self.experiment_logger:
             try:
-                self.experiment_logger.log_metrics(result_metrics, prefix="eval/")
+                self.experiment_logger.log_metrics(result_metrics, prefix='eval/')
 
             except Exception as e:
                 lg.warning(f"Failed to log evaluation results to logger: {e}")

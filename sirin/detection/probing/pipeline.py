@@ -15,13 +15,11 @@ from sirin.definitions import (
     Phase,
 )
 from sirin.detection.approximators import TargetApproximatorBase
-from sirin.detection.base import (
-    ModelAdapterBase,
-    PipelineBase,
-)
+from sirin.detection.base import PipelineBase
 from sirin.detection.probing.detectors.base import ProbingDetectorBase
 from sirin.detection.utils.basic import flatten_array
 from sirin.detection.utils.torch import FeaturesDataset, InputsDataset
+from sirin.inference.adapters import ModelAdapterBase
 from sirin.loggers.base import LoggerBase
 from sirin.metrics import calculate_classification_metrics
 from sirin.models.detection import DetectionResult, ProbingPipelineConfig
@@ -61,7 +59,7 @@ class ProbingPipeline(PipelineBase):
         lg.info("Starting training pipeline...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Training started')
+            self.experiment_logger.log_text("Training started")
 
         if self.target_approximator is not None:
             new_targets = self.target_approximator(
@@ -139,11 +137,11 @@ class ProbingPipeline(PipelineBase):
         if not self.eval_dataset:
             lg.warning("Empty evaluation dataset: you need to set `eval_dataset`")
             return DetectionResult()
-        
+
         lg.info("Starting evaluation...")
 
         if self.experiment_logger:
-            self.experiment_logger.log_text('Evaluation started')
+            self.experiment_logger.log_text("Evaluation started")
 
         batch_size = self.detector.config.batch_size
         data, _ = self._load_dataset(self.eval_dataset)
@@ -308,8 +306,8 @@ class ProbingPipeline(PipelineBase):
         offsets = [-1] * len(features[0]) if offsets is None else offsets
 
         data_dict = {
-            **{f'hiddens{index}': features[index] for index in range(len(features))},
-            **{f'attention_masks{index}': masks[index] for index in range(len(masks))},
+            **{f"hiddens{index}": features[index] for index in range(len(features))},
+            **{f"attention_masks{index}": masks[index] for index in range(len(masks))},
             TARGET_COL: labels,
             OFFSETS_COL: offsets,
         }

@@ -46,10 +46,10 @@ class ClaimSplitter(TextSplitterBase):
                 for fact_idx in range(len(facts)):
                     if facts[fact_idx] is None or not facts[fact_idx]:
                         facts[fact_idx] = [batch[fact_idx]]
-                        lg.warning(f'Facts not found for sample. Supposing sample is being the fact itself')
+                        lg.warning("Claim splitting failed; treating the whole sample as a single fact.")
 
             except Exception as e:
-                lg.error(f'Model call failed for batch #{batch_idx}-{batch_idx + batch_size}: {e}')
+                lg.error(f"Model call failed for batch #{batch_idx}-{batch_idx + batch_size}: {e}")
 
             final_results.extend(facts)
 
@@ -58,8 +58,8 @@ class ClaimSplitter(TextSplitterBase):
     @staticmethod
     def _find_json_between_fences(text: str) -> Optional[str]:
         patterns = [
-            r'```json\s*\n(.*?)\n```',
-            r'```\s*\n(.*?)\n```',
+            r"```json\s*\n(.*?)\n```",
+            r"```\s*\n(.*?)\n```",
         ]
         for p in patterns:
             m = re.search(p, text, re.DOTALL | re.IGNORECASE)
@@ -84,7 +84,7 @@ class ClaimSplitter(TextSplitterBase):
 
     @staticmethod
     def _repair_json(s: str) -> str:
-        s = re.sub(r',\s*([}\]])', r'\1', s)
+        s = re.sub(r",\s*([}\]])", r"\1", s)
         if '"' not in s and s.count("'") > 0:
             s = s.replace("'", '"')
         return s

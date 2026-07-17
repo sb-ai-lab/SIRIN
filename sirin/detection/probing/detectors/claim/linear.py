@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from sirin.detection.splitters import SplitManager
 from sirin.classification import LinearClassifier
 from sirin.definitions import DetectionLevel
-from sirin.detection.base import LoggerBase
+from sirin.loggers import LoggerBase
 from sirin.detection.probing.detectors.base import ProbingDetectorBase
 from sirin.detection.probing.detectors.utils.detection import check_features_for_nan
 from sirin.detection.probing.detectors.utils.training import setup_linear_model_config
@@ -109,7 +109,7 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
             sample_preds = [preds[i] for i in sample_mask]
 
             facts = [
-                {"fact": split[1]["content"], "pred": pred, "prob": prob}
+                {'fact': split[1]['content'], 'pred': pred, 'prob': prob}
                 for split, pred, prob in zip(
                     splitted_samples, sample_probs, sample_preds
                 )
@@ -117,10 +117,10 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
 
             results.append(
                 {
-                    "sample": sample,
-                    "overall_pred": overall_preds[sample_idx],
-                    "overall_prob": overall_probs[sample_idx],
-                    "facts": facts,
+                    'sample': sample,
+                    'overall_pred': overall_preds[sample_idx],
+                    'overall_prob': overall_probs[sample_idx],
+                    'facts': facts,
                 }
             )
 
@@ -145,20 +145,20 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
                 projection_dim=self.config.projection_dim,
                 contrastive_layers=self.config.contrastive_layers,
                 projection_hidden_dim=getattr(
-                    self.config, "projection_hidden_dim", None
+                    self.config, 'projection_hidden_dim', None
                 ),
-                projection_num_layers=getattr(self.config, "projection_num_layers", 2),
+                projection_num_layers=getattr(self.config, 'projection_num_layers', 2),
                 use_projection_dropout=getattr(
-                    self.config, "use_projection_dropout", False
+                    self.config, 'use_projection_dropout', False
                 ),
-                projection_dropout=getattr(self.config, "projection_dropout", 0.1),
+                projection_dropout=getattr(self.config, 'projection_dropout', 0.1),
             )
             self.model.to(self.device)
         self.threshold = self.config.threshold
 
     def _load_model(self, load_dir: Path) -> None:
         """Load the LinearClassifier model from directory."""
-        model_path = load_dir / "model.pt"
+        model_path = load_dir / 'model.pt'
 
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found at: {model_path}")
@@ -178,20 +178,20 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
             projection_dim=self.config.projection_dim,
             contrastive_layers=self.config.contrastive_layers,
             projection_hidden_dim=getattr(
-                self.config, "projection_hidden_dim", None
+                self.config, 'projection_hidden_dim', None
             ),
-            projection_num_layers=getattr(self.config, "projection_num_layers", 2),
+            projection_num_layers=getattr(self.config, 'projection_num_layers', 2),
             use_projection_dropout=getattr(
-                self.config, "use_projection_dropout", False
+                self.config, 'use_projection_dropout', False
             ),
-            projection_dropout=getattr(self.config, "projection_dropout", 0.1),
+            projection_dropout=getattr(self.config, 'projection_dropout', 0.1),
         )
 
         # Load model state dict
-        model.classifier.load_state_dict(checkpoint["model_state_dict"])
+        model.classifier.load_state_dict(checkpoint['model_state_dict'])
         for i in range(len(model.layer_classifiers)):
             model.layer_classifiers[i].load_state_dict(
-                checkpoint["layer_classifiers_dicts"][i]
+                checkpoint['layer_classifiers_dicts'][i]
             )
 
         self.model = model
@@ -200,7 +200,7 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
 
     def _save_model(self, save_dir: Path) -> None:
         """Save the LinearClassifier model to directory."""
-        model_path = save_dir / "model.pt"
+        model_path = save_dir / 'model.pt'
 
         model_state_dict = self.model.classifier.state_dict()
         layer_classifiers_dicts = [
@@ -210,8 +210,8 @@ class ClaimLinearProbingDetector(ProbingDetectorBase):
 
         torch.save(
             {
-                "model_state_dict": model_state_dict,
-                "layer_classifiers_dicts": layer_classifiers_dicts,
+                'model_state_dict': model_state_dict,
+                'layer_classifiers_dicts': layer_classifiers_dicts,
             },
             model_path,
         )

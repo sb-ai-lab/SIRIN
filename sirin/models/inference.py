@@ -40,19 +40,24 @@ class ModelAdapterBaseConfig:
 class HFConfig(ModelAdapterBaseConfig):
     """Configuration for HuggingFace inference engine."""
 
-    _target_: str = 'engine.inference.hf_adapter.HfModelAdapter'
+    _target_: str = 'sirin.inference.adapters.HfModelAdapter'
     model_type: ModelType = field(default=ModelType.CAUSAL)
     model_dtype: Optional[str] = 'bf16'
     tokenizer_path: Optional[str] = None
+    revision: Optional[str] = None
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
     num_labels: int = 2
     truncation: bool = False
     padding: Union[bool, str] = 'longest'
     padding_side: str = 'right'
-    use_chat_template: bool = True 
+    use_chat_template: bool = True
     # Multi-GPU support via Accelerate
-    device_map: Optional[Union[str, Dict[str, Any]]] = None  # 'auto', 'balanced', 'balanced_low_0', or custom dict
-    max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None  # e.g., {0: "20GiB", 1: "20GiB"}
+    device_map: Optional[Union[str, Dict[str, Any]]] = (
+        None  # 'auto', 'balanced', 'balanced_low_0', or custom dict
+    )
+    max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = (
+        None  # e.g., {0: "20GiB", 1: "20GiB"}
+    )
     offload_folder: Optional[str] = None  # For CPU offloading
     low_cpu_mem_usage: bool = True  # Recommended for large models
     attn_implementation: str = 'eager'  # 'eager', 'sdpa', 'flash_attention_2'
@@ -62,7 +67,7 @@ class HFConfig(ModelAdapterBaseConfig):
 class VLLMConfig(ModelAdapterBaseConfig):
     """Configuration for vLLM inference engine."""
 
-    _target_: str = 'engine.inference.vllm_adapter.VllmModelAdapter'
+    _target_: str = 'sirin.inference.adapters.VllmModelAdapter'
     enforce_eager: bool = True
     gpu_memory_utilization: float = 0.8
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
@@ -83,9 +88,13 @@ class ModelManagerConfig:
 @dataclass
 class OpenAIConfig(ModelAdapterBaseConfig):
     """Configuration for OpenAI model adapter."""
+
     api_key: Optional[str] = None
     model_path: str = 'gpt-3.5-turbo'
     base_url: Optional[str] = 'https://openrouter.ai/api/v1'
     timeout: int = 30
     max_retries: int = 3
     proxy_url: Optional[str] = None
+    # Provider-specific request extensions forwarded verbatim on every chat completion
+    # (e.g. vLLM's {'chat_template_kwargs': {'enable_thinking': False}}). None sends nothing.
+    extra_body: Optional[dict] = None

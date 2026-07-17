@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "transformers (>=4.56.0,<5.0.0)",
+    "transformers (>=4.56.0,<5.4.0)",
     "accelerate (>=1.12.0,<2.0.0)",
     "tqdm (>=4.67.1,<5.0.0)",
     "pandas (>=2.2.3,<3.0.0)",
@@ -49,12 +49,43 @@ dependencies = [
     "vllm (>=0.11.0,<0.12.0) ; sys_platform == 'linux'",
     "peft (>=0.17.1,<0.18.0)",
     "pytest",
-    "lm-polygraph @ ./sirin/detection/lm-polygraph",
+    "lm-polygraph @ file:./sirin/detection/lm-polygraph",
 ]
 
-[tool.ruff]
-select = ["Q"]
+[project.optional-dependencies]
+ui = [
+    "streamlit>=1.58,<2",
+]
 
-[tool.ruff.flake8-quotes]
-inline-quotes = "single"
+[[tool.streamlit.component.components]]
+name = "sirin_workspace"
+asset_dir = "ui/workspace/frontend/build"
+
+[tool.setuptools.package-data]
+"sirin.ui" = ["assets/*.json", "assets/*.png", "assets/*.jpg", "tokens.json", "static/*.jpg", "static/fonts/*"]
+"sirin.ui.workspace" = [
+    "pyproject.toml",
+    "frontend/package.json",
+    "frontend/package-lock.json",
+    "frontend/build/*",
+    "frontend/build/**/*",
+    "frontend/src/assets/fonts/*-OFL.txt",
+]
+
+[tool.setuptools.packages.find]
+include = ["sirin*"]
+
+[tool.ruff.lint]
+select = ["Q002", "Q003"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: real GPU/endpoint tests",
+]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from sirin.detection.splitters import SplitManager
 from sirin.definitions import Phase, DetectionLevel
-from sirin.detection.base import LoggerBase
+from sirin.loggers import LoggerBase
 from sirin.detection.probing.detectors.base import ProbingDetectorBase
 from sirin.detection.probing.detectors.utils.detection import (
     check_features_for_nan,
@@ -100,7 +100,7 @@ class ClaimCatboostProbingDetector(ProbingDetectorBase):
             sample_preds = [preds[i] for i in sample_mask]
 
             facts = [
-                {"fact": split[1]["content"], "pred": pred, "prob": prob}
+                {'fact': split[1]['content'], 'pred': pred, 'prob': prob}
                 for split, pred, prob in zip(
                     splitted_samples, sample_probs, sample_preds
                 )
@@ -108,10 +108,10 @@ class ClaimCatboostProbingDetector(ProbingDetectorBase):
 
             results.append(
                 {
-                    "sample": sample,
-                    "overall_pred": overall_preds[sample_idx],
-                    "overall_prob": overall_probs[sample_idx],
-                    "facts": facts,
+                    'sample': sample,
+                    'overall_pred': overall_preds[sample_idx],
+                    'overall_prob': overall_probs[sample_idx],
+                    'facts': facts,
                 }
             )
 
@@ -161,7 +161,7 @@ class ClaimCatboostProbingDetector(ProbingDetectorBase):
         )
 
         if logger:
-            logger.log_metrics(val_metrics, -1, prefix="/train")
+            logger.log_metrics(val_metrics, -1, prefix='/train')
 
         return DetectionResult(
             metrics=val_metrics,
@@ -171,13 +171,13 @@ class ClaimCatboostProbingDetector(ProbingDetectorBase):
 
     def _save_model(self, save_dir: Path) -> None:
         """Save the CatBoost model to directory."""
-        model_path = save_dir / "catboost_model"
+        model_path = save_dir / 'catboost_model'
         self.model.save_model(str(model_path))
         lg.info(f"Saved CatBoost model to {model_path}")
 
     def _load_model(self, load_dir: Path) -> None:
         """Load the CatBoost model from directory."""
-        model_path = load_dir / "catboost_model"
+        model_path = load_dir / 'catboost_model'
 
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found at: {model_path}")

@@ -19,6 +19,7 @@ class FeatureProcessorBase(ABC):
         self._token_locator = HfTokenLocator(
             self.config.token_locator_config or TokenLocatorConfig()
         )
+        self.last_debug = None
 
         self.use_cache = config.cache_features
         self.cache_saver = None
@@ -27,6 +28,31 @@ class FeatureProcessorBase(ABC):
                 model_name=extractor.config.model_path,
                 save_dir=cache_dir,
             )
+
+    def _debug_shape(self, value):
+        if hasattr(value, 'shape'):
+            return list(value.shape)
+        if isinstance(value, tuple):
+            value = list(value)
+        if isinstance(value, list):
+            if not value:
+                return [0]
+            child = self._debug_shape(value[0])
+            return [len(value)] + (child or [])
+        return None
+
+    def _set_last_debug(self, **artifacts):
+        self.last_debug = {
+            'processor': type(self).__name__,
+            'feature_type': getattr(self, '_feature_type', None),
+        }
+        for key, value in artifacts.items():
+            if key == 'children':
+                self.last_debug[key] = value
+                continue
+            shape = self._debug_shape(value)
+            if shape is not None:
+                self.last_debug[f'{key}_shape'] = shape
 
     def setup_extractor(self):
         self._extractor = ModelManager.load_model(self._extractor)

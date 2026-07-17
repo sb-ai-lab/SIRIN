@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "name": "LongMemEval / Qwen3.5-35B-A3B",
+  "dataset": "LongMemEval",
+  "model": {
+    "path": "Qwen/Qwen3.5-35B-A3B",
+    "revision": "59d61f3ce65a6d9863b86d2e96597125219dc754",
+    "device": "cuda",
+    "dtype": "bf16",
+    "max_length": 2048
+  },
+  "generation_api": {
+    "backend": "Custom OpenAI-compatible",
+    "base_url": "http://127.0.0.1:30110/v1",
+    "api_key_env": "SIRIN_CUSTOM_OPENAI_API_KEY",
+    "snapshot": "59d61f3ce65a6d9863b86d2e96597125219dc754"
+  },
+  "ui": {
+    "default_preset": "Probing \u2014 Sequence TabPFN (checkpoint)",
+    "max_tokens": 192,
+    "temperature": 0.0,
+    "default_checkpoint": {
+      "preset": "Probing \u2014 Sequence TabPFN (checkpoint)",
+      "task": "hallucination_strict",
+      "detector": "tabpfn"
+    }
+  },
+  "run": {
+    "root": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500",
+    "hiddens_config": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/config_resolved.yaml"
+  },
+  "probing": {
+    "hallucination_strict": {
+      "feature": "Hiddens_R",
+      "layers": [20, 35, 36, 37, 38, 39],
+      "side": "RIGHT",
+      "pooling_type": "mean",
+      "locate_answer_start": true,
+      "checkpoint_feature_shape": [6, 1, 2048]
+    }
+  },
+  "checkpoints": {
+    "hallucination_strict": {
+      "linear": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/hallucination_strict/Hiddens_R_Linear",
+        "threshold": 0.22103483974933624
+      },
+      "catboost": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/hallucination_strict/Hiddens_R_CatBoost",
+        "threshold": 0.1840662475348843
+      },
+      "tabpfn": {
+        "path": "demo/checkpoints/qwen35_longmemeval_hallucination_tabpfn",
+        "threshold": 0.09885282069444656,
+        "manifest": "demo/checkpoints/qwen35_longmemeval_hallucination_tabpfn/SHA256SUMS"
+      },
+      "best": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/hallucination_strict/best",
+        "target": "tabpfn",
+        "threshold": 0.09885282069444656
+      }
+    },
+    "answerability_strict": {
+      "linear": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/answerability_strict/Hiddens_L_Linear",
+        "threshold": 0.2527576982975006
+      },
+      "catboost": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/answerability_strict/Hiddens_L_CatBoost",
+        "threshold": 0.22336943390823702
+      },
+      "tabpfn": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/answerability_strict/Hiddens_L_TabPFN",
+        "threshold": 0.33056640625
+      },
+      "best": {
+        "path": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/hiddens/saved_detectors/answerability_strict/best",
+        "target": "catboost",
+        "threshold": 0.22336943390823702
+      }
+    }
+  },
+  "uncertainty": {
+    "sequence": {
+      "methods": ["MeanTokenEntropy", "Perplexity"],
+      "aggregation_method": "mean",
+      "max_new_tokens": 64,
+      "thresholds": {
+        "hallucination_strict": {
+          "value": 0.053362876176834106,
+          "fit": "full-set optimal",
+          "samples": 409,
+          "runtime_compatible": false,
+          "calibration_scope": "HF full-vocabulary uncertainty over a newly generated completion"
+        },
+        "answerability_strict": {
+          "value": 0.19262787699699402,
+          "fit": "full-set optimal",
+          "samples": 469
+        }
+      },
+      "config": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/baselines/config_resolved.yaml",
+      "metrics": "/home/jovyan/parchiev/magistr/dynmem/results/longmemeval/pure_simplemem_qwen35_35b_a3b/20260703_120500_qwen35_35b_a3b_s_full_combined_500/sirin_datasets/parallel/baselines/sirin_metrics.json",
+      "log": "/home/jovyan/parchiev/magistr/dynmem/logs/tm_baselines_gpu123.log"
+    },
+    "token": {
+      "methods": ["MaximumTokenProbability", "TokenEntropy"],
+      "threshold": null,
+      "reason": "No compatible token-labelled Qwen3.5-35B LongMemEval calibration was run."
+    }
+  }
+}

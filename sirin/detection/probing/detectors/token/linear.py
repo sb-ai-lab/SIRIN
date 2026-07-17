@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sirin.classification import LinearClassifier
 from sirin.definitions import DetectionLevel
-from sirin.detection.base import LoggerBase
+from sirin.loggers import LoggerBase
 from sirin.detection.probing.detectors.base import ProbingDetectorBase
 from sirin.detection.probing.detectors.utils.detection import (
     check_features_for_nan_with_indices,
@@ -111,7 +111,7 @@ class TokenLinearProbingDetector(ProbingDetectorBase):
 
     def _load_model(self, load_dir: Path) -> None:
         """Load the LinearClassifier model from directory."""
-        model_path = load_dir / "model.pt"
+        model_path = load_dir / 'model.pt'
 
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found at: {model_path}")
@@ -133,10 +133,10 @@ class TokenLinearProbingDetector(ProbingDetectorBase):
         )
 
         # Load model state dict
-        model.classifier.load_state_dict(checkpoint["model_state_dict"])
+        model.classifier.load_state_dict(checkpoint['model_state_dict'])
         for i in range(len(model.layer_classifiers)):
             model.layer_classifiers[i].load_state_dict(
-                checkpoint["layer_classifiers_dicts"][i]
+                checkpoint['layer_classifiers_dicts'][i]
             )
 
         self.model = model
@@ -145,7 +145,7 @@ class TokenLinearProbingDetector(ProbingDetectorBase):
 
     def _save_model(self, save_dir: Path) -> None:
         """Save the LinearClassifier model to directory."""
-        model_path = save_dir / "model.pt"
+        model_path = save_dir / 'model.pt'
 
         model_state_dict = self.model.classifier.state_dict()
         layer_classifiers_dicts = [
@@ -155,8 +155,8 @@ class TokenLinearProbingDetector(ProbingDetectorBase):
 
         torch.save(
             {
-                "model_state_dict": model_state_dict,
-                "layer_classifiers_dicts": layer_classifiers_dicts,
+                'model_state_dict': model_state_dict,
+                'layer_classifiers_dicts': layer_classifiers_dicts,
             },
             model_path,
         )

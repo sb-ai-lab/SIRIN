@@ -1,4 +1,9 @@
 from .token import TokenDecoderJudge, TokenEncoderJudge, TokenOpenAIJudge
-from .sequence import SequenceDecoderJudge, SequenceEncoderJudge, SequenceOpenAIJudge
+from .sequence import (
+    SequenceDecoderJudge,
+    SequenceEncoderJudge,
+    SequenceOpenAIJudge,
+    SequenceOpenAIVerbalizedJudge,
+)
 from .claim import ClaimDecoderJudge, ClaimEncoderJudge, ClaimOpenAIJudge
-from .base import HfJudgeBase, OpenAIJudgeBase
+from .base import HfJudgeBase, JudgeAnnotationError, OpenAIJudgeBase
