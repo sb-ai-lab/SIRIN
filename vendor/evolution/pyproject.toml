@@ -1,0 +1,169 @@
+[project]
+name = "evo-skills"
+dynamic = ["version"]
+description = "Trace-driven skill evolution framework for LLM agents"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Evolution contributors" }]
+maintainers = [{ name = "Evolution maintainers" }]
+keywords = [
+    "llm",
+    "agents",
+    "agent-skills",
+    "procedural-memory",
+    "skill-evolution",
+    "prompt-optimization",
+]
+requires-python = ">=3.11"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: POSIX",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "pytest>=8.0",
+]
+
+[project.optional-dependencies]
+llm = ["litellm>=1.40"]
+gigachat = ["gigachat>=0.1.0"]
+gui = ["streamlit>=1.35", "pandas>=2.0", "plotly>=5.0"]
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "build>=1.2",
+    "twine>=5.1",
+]
+research = [
+    "litellm>=1.40",
+    "langgraph>=0.2",
+    "duckdb>=1.0",
+    "numpy>=1.26",
+    "openpyxl>=3.1",
+    "pandas>=2.0",
+    "pdfplumber>=0.11",
+    "pymupdf>=1.24",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "python-dotenv>=1.0",
+    "python-pptx>=0.6.23",
+    "requests>=2.31",
+    "openai>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/makamoa/evolution"
+Repository = "https://github.com/makamoa/evolution"
+Issues = "https://github.com/makamoa/evolution/issues"
+Documentation = "https://github.com/makamoa/evolution/tree/main/docs"
+Changelog = "https://github.com/makamoa/evolution/blob/main/CHANGELOG.md"
+
+[project.scripts]
+evo = "evolution.cli.main:app"
+
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/evolution/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evolution"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    # `/src/evolution`, never `/src`: the second framework is vendored at
+    # `src/agent_harness/` and belongs to the `evo-skills-agent` distribution.
+    # A bare `/src` carried all 148 of its modules into the core sdist, which
+    # the release workflow publishes beside the wheel.
+    "/src/evolution",
+    "/README.md",
+    "/QUICKSTART.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
+    "/CITATION.cff",
+    "/pyproject.toml",
+]
+exclude = [
+    "/.agents",
+    "/tasks",
+    "/results",
+    "/dist",
+    "/papers",
+    "/data",
+    "/models",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "live: requires API key (deselect with -m 'not live')",
+    "paper: requires the external CRAFT/SB-Bench paper corpus and paper artifacts",
+    "external_repo: requires sibling baseline repositories outside this checkout",
+    "slow: builds a wheel or otherwise costs seconds (deselect with -m 'not slow')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "docs/internal",
+    ".agents",
+    "tasks",
+    "splits",
+    "src/evolution/eval/_guard_scripts",
+    # Vendored at an upstream commit and re-vendored wholesale, never edited in
+    # place. Restyling it would turn every future re-vendor into a merge
+    # conflict against changes that carry no meaning, and would make the diff
+    # against upstream unreadable -- which is the one thing that keeps a vendored
+    # tree answerable to its origin. Code this repository writes *about* it
+    # (tests/agent/conftest.py, tests/agent/test_vendored_engine.py) is linted.
+    "src/agent_harness",
+    "tests/agent/inpackage",
+    "tests/agent/suite",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # line-length is enforced by formatter
+    "B008",  # typer pattern: function-call defaults in argument signatures
+    "B904",  # CLI pattern: raise typer.Exit() after catching an unrelated exc
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]
+"experiments/adapters/skillx_adapter.py" = ["E402"]  # SkillX compat shim must run before imports
+"src/evolution/cli/bench.py" = ["UP007", "UP045"]  # Typer compatibility with older local releases
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+files = ["src/evolution"]
+exclude = ['src/evolution/eval/_guard_scripts/']
+
+[[tool.mypy.overrides]]
+module = ["litellm", "litellm.*", "gigachat", "gigachat.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
