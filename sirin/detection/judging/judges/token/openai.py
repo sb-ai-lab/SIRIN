@@ -6,6 +6,8 @@ import torch
 from sirin.definitions import DetectionLevel, DataCollatorType
 from sirin.detection.judging.judges.base import JudgeAnnotationError, OpenAIJudgeBase
 from sirin.detection.judging.judges.utils import (
+    SpanAlignmentError,
+    align_span_annotation,
     build_prompt_messages,
     calculate_character_probabilities,
     extract_answer_from_generation,
@@ -93,28 +95,38 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
         for i, (reference, gens) in enumerate(zip(references, per_sample_gens)):
             reasons = list(per_sample_reasons[i]) if i < len(per_sample_reasons) else []
             reasons += [None] * (len(gens) - len(reasons))
-            # Compare echoes with span tags stripped from BOTH sides: an answer that
-            # legitimately contains the literal '[SPAN]' text must still validate.
-            reference_echo = (
-                str(reference).replace('[SPAN]', '').replace('[/SPAN]', '').strip()
-            )
             valid = []
-            invalid = {'truncated': 0, 'empty': 0, 'not_verbatim': 0}
+            invalid = {
+                'truncated': 0,
+                'empty': 0,
+                'malformed_tags': 0,
+                'lexical_rewrite': 0,
+            }
+            recovered = 0
             for gen, reason in zip(gens, reasons):
-                if self._echo_of(gen) == reference_echo:
-                    valid.append(gen)
-                elif reason == 'length':
+                if reason == 'length':
                     invalid['truncated'] += 1
                 elif not gen:
                     invalid['empty'] += 1
                 else:
-                    invalid['not_verbatim'] += 1
+                    candidate = extract_answer_from_generation(gen, strip=False)
+                    try:
+                        result = align_span_annotation(
+                            candidate, str(reference), self.config.span_alignment
+                        )
+                    except SpanAlignmentError as error:
+                        invalid[error.reason] += 1
+                    else:
+                        valid.append(candidate)
+                        recovered += int(result.status == 'whitespace_recovered')
             entry = {
                 'requested': n, 'valid': len(valid), 'temperature': self.config.temperature,
             }
             counts = {kind: count for kind, count in invalid.items() if count}
             if counts:
                 entry['invalid'] = counts
+            if recovered:
+                entry['whitespace_recovered'] = recovered
             self.last_consensus.append(entry)
             if not valid:
                 raise JudgeAnnotationError(
@@ -122,7 +134,9 @@ class TokenOpenAIJudge(OpenAIJudgeBase):
                     f'({len(gens)} generation(s) all dropped); cannot annotate spans.'
                 )
             sample_char_probs = torch.tensor(
-                calculate_character_probabilities(valid, reference=reference)
+                calculate_character_probabilities(
+                    valid, reference=reference, alignment=self.config.span_alignment
+                )
             )
             all_char_probs.append(sample_char_probs)
             all_char_preds.append((sample_char_probs > self.threshold).long())

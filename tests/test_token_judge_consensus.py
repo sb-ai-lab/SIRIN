@@ -97,7 +97,7 @@ def test_shorter_longer_and_paraphrased_echoes_are_dropped():
         'requested': 4,
         'valid': 1,
         'temperature': 0.7,
-        'invalid': {'not_verbatim': 3},
+        'invalid': {'lexical_rewrite': 3},
     }
 
 
@@ -169,7 +169,7 @@ def test_invalid_votes_classified_truncated_empty_not_verbatim():
         'requested': 4,
         'valid': 1,
         'temperature': 0.7,
-        'invalid': {'truncated': 1, 'empty': 1, 'not_verbatim': 1},
+        'invalid': {'truncated': 1, 'empty': 1, 'lexical_rewrite': 1},
     }
 
 
@@ -190,7 +190,7 @@ def test_missing_finish_reasons_default_to_not_verbatim():
 
     judge.detect([_sample('abcd')])
 
-    assert judge.last_consensus[0]['invalid'] == {'not_verbatim': 1}
+    assert judge.last_consensus[0]['invalid'] == {'lexical_rewrite': 1}
 
 
 def test_ui_warning_splits_truncated_from_not_verbatim():
@@ -218,5 +218,7 @@ def test_char_probabilities_offset_by_reference_leading_whitespace():
 
     gen = '[SPAN]Paris[/SPAN].'
     base = calculate_character_probabilities([gen], reference='Paris.')
-    shifted = calculate_character_probabilities([gen], reference=' Paris.')
+    shifted = calculate_character_probabilities(
+        [gen], reference=' Paris.', alignment='whitespace_only'
+    )
     assert shifted == [0.0] + base

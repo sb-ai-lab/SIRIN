@@ -240,6 +240,7 @@ class JudgeBaseConfig(DetectorBaseConfig):
     diversity_penalty: float = 1.0
     num_beam_groups: int = 5
     num_beams: int = 5
+    span_alignment: Literal['strict', 'whitespace_only'] = 'strict'
 
 
 @dataclass
@@ -421,6 +422,9 @@ class TrainingArgsConfig:
     zero_bce: bool = False
     use_lr_scheduler: bool = False
     log_contrastive_metrics: bool = True  # Log contrastive-learning metrics
+    resume_from_checkpoint: Union[bool, str] = False
+    checkpoint_dir: Optional[str] = None
+    checkpoint_interval_epochs: int = 1
 
 
 @dataclass

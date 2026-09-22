@@ -1,5 +1,7 @@
 import os
 import re
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -102,6 +104,7 @@ class BatchCheckpointSaver(BaseAliasSaver):
         suffix: str = '.pkl',
         file_type_alias: str = HIDDENS_FILE_KEY,
         create_dir: bool = True,
+        computation_identity: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             name='_'.join([data_name, model_name]),
@@ -111,6 +114,8 @@ class BatchCheckpointSaver(BaseAliasSaver):
             suffix=suffix,
             create_dir=create_dir,
         )
+        canonical = json.dumps(computation_identity or {}, sort_keys=True, default=str)
+        self.computation_identity = hashlib.sha256(canonical.encode()).hexdigest()
 
     def _save_logic(self, savepath: Path, **kwargs):
         joblib.dump(kwargs, savepath)
@@ -120,16 +125,40 @@ class BatchCheckpointSaver(BaseAliasSaver):
             Path(self.save_dir) / f"checkpoint_{start_idx}_{end_idx}{self.suffix}"
         )
         lg.info(f"Saving checkpoint: {checkpoint_path}")
-        joblib.dump(kwargs, checkpoint_path)
+        temporary = checkpoint_path.with_suffix(checkpoint_path.suffix + f'.{os.getpid()}.tmp')
+        joblib.dump(kwargs, temporary)
+        digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        manifest = checkpoint_path.with_suffix(checkpoint_path.suffix + '.json')
+        manifest_temporary = manifest.with_suffix(manifest.suffix + f'.{os.getpid()}.tmp')
+        manifest_temporary.write_text(
+            json.dumps({
+                'sha256': digest,
+                'identity': self.computation_identity,
+                'start_idx': start_idx,
+                'end_idx': end_idx,
+            }, sort_keys=True),
+            encoding='utf-8',
+        )
+        os.replace(temporary, checkpoint_path)
+        os.replace(manifest_temporary, manifest)
 
     def load_single_checkpoint(self, checkpoint_file: Path) -> Dict[str, Any]:
+        manifest_path = checkpoint_file.with_suffix(checkpoint_file.suffix + '.json')
+        if not manifest_path.is_file():
+            raise RuntimeError(f'Checkpoint integrity manifest is missing: {checkpoint_file}')
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        actual = hashlib.sha256(checkpoint_file.read_bytes()).hexdigest()
+        if actual != manifest.get('sha256'):
+            raise RuntimeError(f'Checkpoint checksum mismatch: {checkpoint_file}')
+        if manifest.get('identity') != self.computation_identity:
+            raise RuntimeError(f'Checkpoint computation identity mismatch: {checkpoint_file}')
         return joblib.load(checkpoint_file)
 
     def load_checkpoints(
         self, checkpoint_sources: List[str], n_jobs: int = -1, use_tqdm: bool = True
     ) -> Dict[str, List]:
         checkpoint_files = sorted(
-            map(Path, checkpoint_sources),
+            (Path(path) for path in checkpoint_sources if not str(path).endswith('.json')),
             key=lambda x: self._get_checkpoint_indices(x)[0],
         )
 

@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -8,6 +9,20 @@ from loguru import logger as lg
 from sirin.definitions import TARGET_COL
 from sirin.detection.utils.basic import calibrate_threshold
 from sirin.metrics.classification import calculate_classification_metrics
+
+
+def catboost_snapshot_kwargs(cfg: Any, detector: Any) -> Dict[str, Any]:
+    """Return deterministic native snapshot options when checkpoint storage is configured."""
+    directory = cfg.checkpoint_dir or detector.config.model_save_path
+    if not directory:
+        return {}
+    snapshot_dir = Path(directory)
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        'save_snapshot': True,
+        'snapshot_file': str(snapshot_dir / f'{type(detector).__name__}.catboost.snapshot'),
+        'snapshot_interval': 300,
+    }
 
 
 def preprocess_dataloader_to_numpy(

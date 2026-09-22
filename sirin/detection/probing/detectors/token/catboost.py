@@ -16,6 +16,7 @@ from sirin.detection.probing.detectors.utils.detection import (
 )
 from sirin.detection.utils.token import rearrange_token_predictions, convert_spans_to_labels
 from sirin.detection.probing.detectors.utils.training import (
+    catboost_snapshot_kwargs,
     calibrate_and_evaluate,
     preprocess_dataloader_to_numpy,
 )
@@ -116,6 +117,7 @@ class TokenCatboostProbingDetector(ProbingDetectorBase):
             eval_set=(X_val_np, y_val_np),
             verbose=False,
             callbacks=callbacks,
+            **catboost_snapshot_kwargs(cfg, self),
         )
         val_probs_full = self.model.predict_proba(X_val_np)
 

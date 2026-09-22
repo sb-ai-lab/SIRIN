@@ -16,6 +16,9 @@ from sirin.detection.judging.judges.utils.prompts import (
     format_dialogue_samples,
 )
 from sirin.detection.judging.judges.utils.token_level import (
+    SpanAlignmentError,
+    SpanAlignmentResult,
+    align_span_annotation,
     calculate_character_probabilities,
     create_char_binary_vector,
     extract_answer_from_generation,

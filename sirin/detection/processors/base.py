@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Optional
 
 from sirin.inference.adapters import ModelAdapterBase
@@ -24,9 +25,19 @@ class FeatureProcessorBase(ABC):
         self.use_cache = config.cache_features
         self.cache_saver = None
         if self.use_cache and cache_dir:
+            adapter_config = getattr(extractor, 'config', None)
+            processor_config = asdict(config) if is_dataclass(config) else vars(config)
             self.cache_saver = LayerFeatureCacheSaver(
                 model_name=extractor.config.model_path,
                 save_dir=cache_dir,
+                identity={
+                    'model': getattr(adapter_config, 'model_path', None),
+                    'revision': getattr(adapter_config, 'revision', None),
+                    'model_kwargs': getattr(adapter_config, 'model_kwargs', None),
+                    'tokenizer': getattr(getattr(extractor, 'tokenizer', None), 'name_or_path', None),
+                    'processor': type(self).__name__,
+                    'processor_config': processor_config,
+                },
             )
 
     def _debug_shape(self, value):

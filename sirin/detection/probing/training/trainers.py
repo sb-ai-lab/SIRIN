@@ -1,4 +1,10 @@
 from abc import ABC, abstractmethod
+from dataclasses import asdict
+import hashlib
+import json
+import os
+from pathlib import Path
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -74,8 +80,14 @@ class HiddenStatesClassifierTrainerBase(ABC):
 
         history = TrainingHistory()
 
+        start_epoch = 0
+        if cfg.resume_from_checkpoint:
+            start_epoch, history, best_metric, loss_history = self._load_training_state(
+                cfg, detector, train_data, val_data
+            )
+
         lg.info(f'Starting training for {cfg.max_epochs} epochs.')
-        for epoch in range(cfg.max_epochs):
+        for epoch in range(start_epoch, cfg.max_epochs):
             detector.model.to(cfg.device)
             detector.model.train()
 
@@ -161,6 +173,22 @@ class HiddenStatesClassifierTrainerBase(ABC):
             if self.alpha_scheduler is not None:
                 self.alpha_scheduler.step()
 
+            if (
+                (cfg.checkpoint_dir or detector.config.model_save_path)
+                and cfg.checkpoint_interval_epochs > 0
+                and (epoch + 1) % cfg.checkpoint_interval_epochs == 0
+            ):
+                self._save_training_state(
+                    cfg,
+                    detector,
+                    train_data,
+                    val_data,
+                    epoch + 1,
+                    history,
+                    best_metric,
+                    loss_history,
+                )
+
         lg.info(
             f'Training is over. Best validation results: {target_metric}={best_metric}.'
         )
@@ -187,6 +215,133 @@ class HiddenStatesClassifierTrainerBase(ABC):
             probs=train_results.probs,
             threshold=self.threshold,
             history=history,
+        )
+
+    @staticmethod
+    def _state_path(cfg: TrainingArgsConfig, detector: Any) -> Path:
+        directory = cfg.checkpoint_dir or detector.config.model_save_path
+        if not directory:
+            raise ValueError(
+                'Checkpointing/resume requires checkpoint_dir or detector.model_save_path.'
+            )
+        requested = cfg.resume_from_checkpoint
+        if isinstance(requested, str) and requested:
+            return Path(requested)
+        return Path(directory) / 'training_state.pt'
+
+    @staticmethod
+    def _training_identity(
+        cfg: TrainingArgsConfig,
+        detector: Any,
+        train_data: DataLoader,
+        val_data: Optional[DataLoader],
+    ) -> str:
+        config = asdict(cfg)
+        for key in ('resume_from_checkpoint', 'checkpoint_dir'):
+            config.pop(key, None)
+        payload = {
+            'trainer': type(detector).__qualname__,
+            'detector_config': asdict(detector.config),
+            'training_config': config,
+            'train_samples': len(train_data.dataset),
+            'validation_samples': len(val_data.dataset) if val_data is not None else 0,
+        }
+        canonical = json.dumps(payload, sort_keys=True, default=str).encode()
+        return hashlib.sha256(canonical).hexdigest()
+
+    def _save_training_state(
+        self,
+        cfg: TrainingArgsConfig,
+        detector: Any,
+        train_data: DataLoader,
+        val_data: Optional[DataLoader],
+        next_epoch: int,
+        history: TrainingHistory,
+        best_metric: Optional[float],
+        loss_history: List[float],
+    ) -> None:
+        path = self._state_path(cfg, detector)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generator = getattr(getattr(train_data, 'sampler', None), 'generator', None)
+        state = {
+            'identity': self._training_identity(cfg, detector, train_data, val_data),
+            'next_epoch': next_epoch,
+            'model': detector.model.state_dict(),
+            'optimizer': self.optimizer.state_dict() if self.optimizer else None,
+            'scheduler': self.scheduler.state_dict() if self.scheduler else None,
+            'amp_scaler': (
+                self.scaler.state_dict()
+                if getattr(self, 'scaler', None) is not None
+                else None
+            ),
+            'alpha_scheduler': (
+                self.alpha_scheduler.state_dict()
+                if self.alpha_scheduler and hasattr(self.alpha_scheduler, 'state_dict')
+                else None
+            ),
+            'history': history,
+            'best_metric': best_metric,
+            'loss_history': loss_history,
+            'python_rng': random.getstate(),
+            'numpy_rng': np.random.get_state(),
+            'torch_rng': torch.get_rng_state(),
+            'cuda_rng': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            'sampler_rng': generator.get_state() if generator is not None else None,
+        }
+        temporary = path.with_suffix(path.suffix + f'.{os.getpid()}.tmp')
+        torch.save(state, temporary)
+        digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        checksum = path.with_suffix(path.suffix + '.sha256')
+        checksum_temporary = checksum.with_suffix(checksum.suffix + f'.{os.getpid()}.tmp')
+        checksum_temporary.write_text(digest + '\n', encoding='ascii')
+        os.replace(temporary, path)
+        os.replace(checksum_temporary, checksum)
+
+    def _load_training_state(
+        self,
+        cfg: TrainingArgsConfig,
+        detector: Any,
+        train_data: DataLoader,
+        val_data: Optional[DataLoader],
+    ) -> Tuple[int, TrainingHistory, Optional[float], List[float]]:
+        path = self._state_path(cfg, detector)
+        checksum = path.with_suffix(path.suffix + '.sha256')
+        if not path.is_file() or not checksum.is_file():
+            raise FileNotFoundError(f'Complete training checkpoint not found: {path}')
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        expected = checksum.read_text(encoding='ascii').strip()
+        if actual != expected:
+            raise RuntimeError(f'Training checkpoint checksum mismatch: {path}')
+        state = torch.load(path, map_location='cpu', weights_only=False)
+        identity = self._training_identity(cfg, detector, train_data, val_data)
+        if state.get('identity') != identity:
+            raise RuntimeError('Training checkpoint identity does not match this computation.')
+        detector.model.load_state_dict(state['model'])
+        if self.optimizer and state.get('optimizer'):
+            self.optimizer.load_state_dict(state['optimizer'])
+        if self.scheduler and state.get('scheduler'):
+            self.scheduler.load_state_dict(state['scheduler'])
+        if getattr(self, 'scaler', None) is not None and state.get('amp_scaler'):
+            self.scaler.load_state_dict(state['amp_scaler'])
+        if (
+            self.alpha_scheduler
+            and state.get('alpha_scheduler')
+            and hasattr(self.alpha_scheduler, 'load_state_dict')
+        ):
+            self.alpha_scheduler.load_state_dict(state['alpha_scheduler'])
+        random.setstate(state['python_rng'])
+        np.random.set_state(state['numpy_rng'])
+        torch.set_rng_state(state['torch_rng'])
+        if torch.cuda.is_available() and state.get('cuda_rng'):
+            torch.cuda.set_rng_state_all(state['cuda_rng'])
+        generator = getattr(getattr(train_data, 'sampler', None), 'generator', None)
+        if generator is not None and state.get('sampler_rng') is not None:
+            generator.set_state(state['sampler_rng'])
+        return (
+            int(state['next_epoch']),
+            state.get('history') or TrainingHistory(),
+            state.get('best_metric'),
+            list(state.get('loss_history') or []),
         )
 
     def _setup_contrastive_loss(self, cfg: TrainingArgsConfig):

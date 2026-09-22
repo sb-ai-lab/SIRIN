@@ -14,6 +14,7 @@ from sirin.detection.judging.judges.utils import (
     repeat_labels_with_offsets,
 )
 from sirin.detection.utils.token import get_token_labels, get_answer_offsets
+from sirin.detection.utils.token import convert_spans_to_labels
 from sirin.models.detection import HfJudgeConfig
 from sirin.inference.adapters import HfModelAdapter
 
@@ -57,8 +58,7 @@ class TokenEncoderJudge(HfJudgeBase):
         # Token-level approach: Get character offsets for each token in answer
         offsets, _, answer_indices = get_answer_offsets(samples, self.model_adapter)
 
-        if labels is not None:
-            labels = get_token_labels(offsets, labels)
+        span_labels = labels
 
         # Get per-token logits from token classification head
         model_states = self.model_adapter.generate_hiddens(
@@ -78,16 +78,19 @@ class TokenEncoderJudge(HfJudgeBase):
 
         # Rearrange token predictions to character-level using shared utility
         char_probs, char_preds = rearrange_token_predictions_with_indices(
-            probs, preds, offsets, answer_indices
+            probs,
+            preds,
+            offsets,
+            answer_indices,
+            response_lengths=[len(sample[-1]['content']) for sample in samples],
         )
 
         char_preds, char_probs = self._aggregate_context_predictions(
             group_ids, char_preds, char_probs, binary=(self.config.num_classification_heads <= 2)
         )
 
-        if labels is not None:
-            repeats = [offset[:, 1] - offset[:, 0] for offset in offsets]
-            char_labels = repeat_labels_with_offsets(labels, repeats)
+        if span_labels is not None:
+            char_labels = convert_spans_to_labels(span_labels, char_probs)
         else:
             char_labels = None
 
@@ -119,12 +122,13 @@ class TokenEncoderJudge(HfJudgeBase):
 
         self._check_truncation_warning(inputs)
 
-        answer_offsets, tokenized, _ = get_answer_offsets(inputs, self.model_adapter)
+        answer_offsets, tokenized, answer_indices = get_answer_offsets(inputs, self.model_adapter)
         labels_raw = get_token_labels(answer_offsets=answer_offsets, target_spans=targets)
 
         labels = [[-100] * len(sample) for sample in tokenized['input_ids']]
-        for i in range(len(labels)):
-            labels[i][-len(labels_raw[i]):] = labels_raw[i]
+        for sample_labels, indices, answer_labels in zip(labels, answer_indices, labels_raw):
+            for token_index, label in zip(indices, answer_labels):
+                sample_labels[token_index] = label
 
         tokenized['labels'] = labels
 

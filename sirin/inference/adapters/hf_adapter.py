@@ -1,5 +1,6 @@
 import gc
 import hashlib
+import inspect
 import json
 import os
 from threading import Thread
@@ -31,6 +32,45 @@ from sirin.definitions import (
 from sirin.definitions import TorchDtype
 from sirin.utils.config_manager import validate_hydra_config
 from sirin.inference.model_manager import manage_active_model
+
+
+def _state_forward_kwargs(
+    model: Any,
+    *,
+    return_hiddens: bool,
+    return_attention: bool,
+    return_logits: bool,
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {
+        'output_hidden_states': return_hiddens,
+        'output_attentions': return_attention,
+    }
+    if not return_logits and 'logits_to_keep' in inspect.signature(model.forward).parameters:
+        kwargs['logits_to_keep'] = 1
+    return kwargs
+
+
+def _decode_generated(
+    tokenizer: Any,
+    generated_ids: Any,
+    preserve_special_tokens: Optional[List[str]] = None,
+) -> str:
+    if not preserve_special_tokens:
+        return tokenizer.decode(
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+    response = tokenizer.decode(
+        generated_ids,
+        skip_special_tokens=False,
+        clean_up_tokenization_spaces=False,
+    )
+    preserved = set(preserve_special_tokens)
+    for token in tokenizer.all_special_tokens:
+        if token not in preserved:
+            response = response.replace(token, '')
+    return response
 
 
 def _token_uncertainty_trace(
@@ -333,6 +373,7 @@ class HfModelAdapter(ModelAdapterBase):
         return_logprobs: bool = False,
         top_logprobs: int = 1,
         num_return_sequences: int = 1,
+        preserve_special_tokens: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Union[List[str], Tuple[List[str], List[List[List[Tuple[str, float]]]]]]:
         """Generate text using HuggingFace model with batch processing."""
@@ -399,7 +440,9 @@ class HfModelAdapter(ModelAdapterBase):
             generated_ids = generated_sequences[
                 i, input_lengths[i // num_return_sequences] :
             ]
-            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+            response = _decode_generated(
+                self.tokenizer, generated_ids, preserve_special_tokens
+            )
             responses.append(response)
 
         if return_logprobs and scores is not None:
@@ -736,10 +779,18 @@ class HfModelAdapter(ModelAdapterBase):
 
         with torch.no_grad():
             try:
+                # Qwen and compatible causal heads can avoid allocating full-vocabulary
+                # logits when callers only need internal states. Signature gating keeps
+                # encoder and third-party model contracts unchanged.
+                forward_kwargs = _state_forward_kwargs(
+                    self.model,
+                    return_hiddens=return_hiddens,
+                    return_attention=return_attention and not use_attn_hooks,
+                    return_logits=return_logits,
+                )
                 outputs = self.model(
                     **tokenized_inputs,
-                    output_hidden_states=return_hiddens,
-                    output_attentions=return_attention and not use_attn_hooks,
+                    **forward_kwargs,
                 )
             finally:
                 for _h in attn_handles:
