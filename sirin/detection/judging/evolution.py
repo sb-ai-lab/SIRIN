@@ -262,8 +262,9 @@ class EvolutionPromptTrainer:
         self._prepare_env(adapter_cfg)
 
         lg.info('Evolution (in-process): optimize_skill solver/editor via model_adapter')
-        try:
-            self._result = optimize_skill(
+
+        def _call_optimize():
+            return optimize_skill(
                 self._skill_name,
                 train_tasks=train_names,
                 validate_tasks=val_names,
@@ -281,6 +282,15 @@ class EvolutionPromptTrainer:
                 editor_backend=backend,
                 pass_env=list(cfg.pass_env or _JUDGE_ENV_VARS),
             )
+
+        # Run in a dedicated worker thread: the harness calls asyncio.run() internally,
+        # which raises "cannot be called from a running event loop" inside Jupyter (the
+        # kernel already runs a loop). A fresh thread has no running loop, so it works.
+        import concurrent.futures
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                self._result = pool.submit(_call_optimize).result()
         except Exception as exc:  # noqa: BLE001 - surface a readable train() failure
             lg.error(f'Evolution optimization failed: {type(exc).__name__}: {exc}')
             raise
