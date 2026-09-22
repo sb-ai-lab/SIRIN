@@ -161,7 +161,16 @@ class _AdapterBackend:
         if system:
             full.append({'role': 'system', 'content': system})
         full.extend(messages)
-        out = self.adapter.sample([full], max_tokens=max_tokens, temperature=self.temperature)
+        try:
+            # use_async=False: force the plain synchronous HTTP path. The harness calls
+            # this backend from inside its own event loop, and the adapter's async path
+            # would nest asyncio.run()/share an AsyncClient across loops and break.
+            out = self.adapter.sample(
+                [full], max_tokens=max_tokens, temperature=self.temperature, use_async=False
+            )
+        except Exception:
+            lg.exception('Evolution backend: adapter.sample failed (see traceback above)')
+            raise
         content = out[0] if isinstance(out, (list, tuple)) else str(out)
         return LLMResponse(content=content)
 
