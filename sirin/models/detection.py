@@ -271,8 +271,10 @@ class PromptEvolutionConfig:
     # calls the judge's model_adapter, so this is mostly informational.
     model: Optional[str] = None
     editor_model: Optional[str] = None  # None -> model
-    bridge_port: int = 8099
     skill_name: str = 'judge-prompt'
+    # Extra env var names forwarded to task subprocesses (the judge helper reads
+    # SIRIN_JUDGE_*; these are added automatically).
+    pass_env: List[str] = field(default_factory=list)
     # Which prompt(s) to evolve. 'both' evolves system_prompt and user_prompt.
     target: Literal['system_prompt', 'user_prompt', 'both'] = 'system_prompt'
     claims_per_task: int = 20

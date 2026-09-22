@@ -2,37 +2,38 @@
 
 API judges (:class:`~sirin.detection.judging.judges.base.OpenAIJudgeBase` and its
 subclasses) have no gradient-based fine-tuning -- ``train()`` used to be a no-op stub.
-Instead of doing nothing, ``train()`` can now *evolve* the judge prompt:
+Instead of doing nothing, ``train()`` can now *evolve* the judge prompt.
 
-1. Evolution gets a small project: tasks built from the training/validation samples, a
-   skill whose body is the current judge system prompt, and a pytest evaluator that
-   checks the judge's verdicts against the gold labels.
-2. A local OpenAI-compatible bridge (``http://127.0.0.1:<port>/v1``) exposes the judge's
-   *own* ``model_adapter`` -- whatever it is (GigaChat mTLS, DeepSeek, ...) -- so the
-   Evolution solver and editor can call it with plain HTTP.
-3. ``evo evolve optimize`` reflects on the judge's mistakes, rewrites the prompt, and
-   promotes a candidate only if it passes the paired gate on validation.
-4. The promoted prompt is written back onto the judge config, so the object returned by
-   ``train()`` is already improved and ready for ``detect()``.
+This integration is **bridge-free**: it does not start an HTTP server. Evolution is
+called as a Python library (:func:`evolution.evolve.optimizer.optimize_skill`) and both
+the solver and the editor run on the judge's own model adapter through
+:class:`_AdapterBackend` -- so GigaChat (mTLS) is used exactly as on inference, with no
+extra endpoint.
 
-The module shells out to the ``evo`` CLI (installed as ``evo-skills``) rather than
-importing it, so it has no import-time dependency on Evolution and works with any model
-adapter that implements ``sample(inputs, max_tokens=..., temperature=...)``.
+How a task is scored: Evolution's solver is a *code generator* -- it writes a small
+Python script that the harness executes in a guarded child process and then runs a
+pytest evaluator. Because that script runs in a separate process, it cannot receive the
+in-memory adapter object; instead each task ships a tiny ``judge_client.py`` helper (and,
+optionally, copies of the TLS cert/key) into the task workspace. The generated script
+imports that helper, which builds the same ``GigaChatModelAdapter`` from environment
+variables forwarded via ``pass_env``.
+
+Requirements:
+* ``evo-skills`` importable in the same interpreter as ``sirin`` (``pip install evo-skills``);
+* for GigaChat, the adapter must expose ``cert_file``/``key_file``/``base_url`` on its
+  config (``GigaChatConfig`` does) so the helper can rebuild it in the child process.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import shutil
-import socket
 import subprocess
-import sys
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from loguru import logger as lg
@@ -43,41 +44,82 @@ from sirin.models.detection import DetectionResult, PromptEvolutionConfig
 
 _SYSTEM_MARK_OPEN = '<<<JUDGE_SYSTEM_PROMPT'
 _SYSTEM_MARK_CLOSE = 'JUDGE_SYSTEM_PROMPT>>>'
-_USER_MARK_OPEN = '<<<JUDGE_USER_PROMPT'
-_USER_MARK_CLOSE = 'JUDGE_USER_PROMPT>>>'
+
+# Env vars forwarded to task subprocesses so the helper can rebuild the adapter.
+_JUDGE_ENV_VARS = (
+    'SIRIN_JUDGE_KIND',
+    'SIRIN_JUDGE_MODEL',
+    'SIRIN_JUDGE_BASE_URL',
+    'SIRIN_JUDGE_CERT_FILE',
+    'SIRIN_JUDGE_KEY_FILE',
+    'SIRIN_JUDGE_VERIFY_SSL',
+)
+
+# Written verbatim into every task workspace. Rebuilds the judge adapter from env and
+# exposes a single ``judge(system_prompt, user_prompt)`` call.
+_JUDGE_CLIENT_SRC = '''"""Rebuild the judge model in the task sandbox and call it (no HTTP bridge)."""
+import os
+
+
+def _make_adapter():
+    kind = os.environ.get("SIRIN_JUDGE_KIND", "gigachat")
+    if kind == "gigachat":
+        from sirin.inference.adapters import GigaChatConfig, GigaChatModelAdapter
+        cfg = GigaChatConfig(
+            model_path=os.environ["SIRIN_JUDGE_MODEL"],
+            base_url=os.environ["SIRIN_JUDGE_BASE_URL"],
+            cert_file=os.environ["SIRIN_JUDGE_CERT_FILE"],
+            key_file=os.environ["SIRIN_JUDGE_KEY_FILE"],
+            verify_ssl_certs=os.environ.get("SIRIN_JUDGE_VERIFY_SSL", "false").lower() == "true",
+        )
+        adapter = GigaChatModelAdapter(config=cfg)
+    elif kind == "openai":
+        from sirin.inference.adapters import OpenAIModelAdapter
+        from sirin.models.inference import OpenAIConfig
+        adapter = OpenAIModelAdapter(config=OpenAIConfig(
+            model_path=os.environ["SIRIN_JUDGE_MODEL"],
+            base_url=os.environ.get("SIRIN_JUDGE_BASE_URL"),
+            api_key=os.environ.get("SIRIN_JUDGE_API_KEY"),
+        ))
+    else:
+        raise ValueError(f"unknown SIRIN_JUDGE_KIND: {kind!r}")
+    adapter.load()
+    return adapter
+
+
+_ADAPTER = None
+
+
+def judge(system_prompt, user_prompt, max_tokens=32, temperature=0.0):
+    """Return the judge model's raw answer for one (system, user) pair."""
+    global _ADAPTER
+    if _ADAPTER is None:
+        _ADAPTER = _make_adapter()
+    out = _ADAPTER.sample(
+        [[{"role": "system", "content": system_prompt},
+          {"role": "user", "content": user_prompt}]],
+        max_tokens=max_tokens, temperature=temperature,
+    )
+    return out[0] if isinstance(out, (list, tuple)) else str(out)
+'''
 
 
 # --------------------------------------------------------------------------- helpers
 def _resolve_evo(explicit: Optional[str]) -> Optional[str]:
-    """Locate the ``evo`` CLI: explicit path, ``PATH``, then known venv locations."""
+    """Locate the ``evo`` CLI (used only for ``evo skill commit``)."""
     if explicit and Path(explicit).exists():
         return explicit
     found = shutil.which('evo')
     if found:
         return found
-    candidates = [
-        Path(sys.executable).parent / 'evo',
+    for cand in (
         Path.home() / 'sirin_dialogs_bench' / 'evo_env' / 'bin' / 'evo',
         Path.home() / 'evo_env' / 'bin' / 'evo',
         Path.home() / '.local' / 'bin' / 'evo',
-    ]
-    for cand in candidates:
+    ):
         if Path(cand).exists():
             return str(cand)
     return None
-
-
-def _free_port(preferred: int) -> int:
-    """Return ``preferred`` if bindable, else an OS-assigned free port."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind(('127.0.0.1', preferred))
-            return preferred
-        except OSError:
-            pass
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
 
 
 def _extract_marked(text: str, open_mark: str, close_mark: str) -> Optional[str]:
@@ -87,107 +129,78 @@ def _extract_marked(text: str, open_mark: str, close_mark: str) -> Optional[str]
     return match.group(1) if match else None
 
 
-# --------------------------------------------------------------------------- bridge
-class _BridgeHandler(BaseHTTPRequestHandler):
-    protocol_version = 'HTTP/1.1'
-
-    def log_message(self, *args):  # silence per-request logging
-        pass
-
-    def _send(self, code: int, obj: Dict[str, Any]):
-        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):  # noqa: N802 - HTTP verb
-        self._send(
-            200,
-            {
-                'object': 'list',
-                'data': [{'id': self.server.model_name, 'object': 'model'}],
-            },
-        )
-
-    def do_POST(self):  # noqa: N802 - HTTP verb
-        length = int(self.headers.get('Content-Length') or 0)
-        try:
-            request = json.loads(self.rfile.read(length) or b'{}')
-            messages = request.get('messages') or []
-            max_tokens = int(request.get('max_tokens') or 64)
-            temperature = float(request.get('temperature') or 0.0)
-            with self.server.lock:
-                out = self.server.adapter.sample(
-                    [messages], max_tokens=max_tokens, temperature=temperature
-                )
-            text = out[0] if isinstance(out, (list, tuple)) else str(out)
-        except Exception as exc:  # surface the real error to the Evolution solver
-            self._send(500, {'error': {'message': f'{type(exc).__name__}: {exc}'}})
-            return
-        self._send(
-            200,
-            {
-                'id': 'sirin-bridge',
-                'object': 'chat.completion',
-                'model': self.server.model_name,
-                'choices': [
-                    {
-                        'index': 0,
-                        'finish_reason': 'stop',
-                        'message': {'role': 'assistant', 'content': text},
-                    }
-                ],
-                'usage': {
-                    'prompt_tokens': 0,
-                    'completion_tokens': 0,
-                    'total_tokens': 0,
-                },
-            },
-        )
+def _chunk(records: List[Dict[str, Any]], size: int, count: int, seed: int):
+    records = list(records)
+    random.Random(seed).shuffle(records)
+    size = max(1, size)
+    units = [records[i * size : (i + 1) * size] for i in range(max(1, count))]
+    units = [u for u in units if len(u) >= max(2, size // 2)]
+    return units or ([records] if records else [])
 
 
-class _BridgeServer(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
+class _AdapterBackend:
+    """Evolution ``LLMBackend`` backed by a SIRIN model adapter (no HTTP).
 
-    def __init__(self, adapter, port: int, model_name: str):
-        super().__init__(('127.0.0.1', port), _BridgeHandler)
-        self.adapter = adapter
-        self.model_name = model_name
-        self.lock = threading.Lock()
-
-
-# --------------------------------------------------------------------------- trainer
-class EvolutionPromptTrainer:
-    """Evolve an API judge's prompt with the ``evo`` CLI; drop-in for ``train()``.
-
-    See the module docstring for the full flow. The judge's ``model_adapter`` is reused
-    as the Evolution solver/editor backend, so no extra model configuration is needed.
+    Implements the async protocol expected by ``optimize_skill``; the sync
+    ``adapter.sample`` call is pushed to a worker thread.
     """
+
+    seed_mode = 'forwarded'  # adapter ignores the seed; we accept it so the gate is happy
+
+    def __init__(self, adapter, max_tokens: int = 2048, temperature: float = 0.0):
+        self.adapter = adapter
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+    def _sample(self, messages: List[Dict[str, str]], system: Optional[str], max_tokens: int):
+        from evolution.llm.backend import LLMResponse
+
+        full: List[Dict[str, str]] = []
+        if system:
+            full.append({'role': 'system', 'content': system})
+        full.extend(messages)
+        out = self.adapter.sample([full], max_tokens=max_tokens, temperature=self.temperature)
+        content = out[0] if isinstance(out, (list, tuple)) else str(out)
+        return LLMResponse(content=content)
+
+    async def complete(self, messages, system=None, seed=None):
+        import asyncio
+
+        return await asyncio.to_thread(self._sample, messages, system, self.max_tokens)
+
+    async def complete_with_skill(self, messages, skill, system=None, seed=None):
+        return await self.complete_with_skills(messages, [skill], system=system, seed=seed)
+
+    async def complete_with_skills(self, messages, skills, system=None, seed=None):
+        blocks = '\n\n'.join(
+            f'<skill_content name="{s.name}">\n{s.body}\n</skill_content>' for s in skills
+        )
+        combined = f'{system}\n\n{blocks}' if system else blocks
+        return await self.complete(messages, system=combined, seed=seed)
+
+
+class EvolutionPromptTrainer:
+    """Evolve an API judge's prompt with Evolution, in-process (no bridge)."""
 
     def __init__(self, judge, config: PromptEvolutionConfig, training_args=None):
         self.judge = judge
         self.config = config
         self.training_args = training_args
         self._skill_name = config.skill_name
-        self._report: Optional[Dict[str, Any]] = None
+        self._result: Any = None
 
     # ------------------------------------------------------------------ public
-    def run(
-        self,
-        train_data,
-        val_data=None,
-        metrics: Optional[List[Any]] = None,
-    ) -> DetectionResult:
+    def run(self, train_data, val_data=None, metrics: Optional[List[Any]] = None) -> DetectionResult:
         cfg = self.config
-        evo = _resolve_evo(cfg.evo_bin)
-        if evo is None:
+        try:
+            from evolution.evolve.optimizer import optimize_skill
+        except ImportError as exc:
             raise RuntimeError(
-                'Evolution CLI "evo" not found. Install evo-skills[llm] and/or set '
-                'PromptEvolutionConfig.evo_bin to the evo executable.'
-            )
+                'Evolution must be importable in the same interpreter as sirin. '
+                'Install it with `pip install evo-skills` (or `pip install -e <evolution>/src`).'
+            ) from exc
+
+        adapter_cfg = self._adapter_identity()
 
         work_dir = Path(
             cfg.work_dir
@@ -198,80 +211,113 @@ class EvolutionPromptTrainer:
         project = work_dir / 'project'
         if project.exists():
             shutil.rmtree(project)
-        (project / 'tasks').mkdir(parents=True)
+        tasks_root = project / 'tasks'
+        tasks_root.mkdir(parents=True)
 
         train_records = self._to_records(train_data)
-        val_records = (
-            self._to_records(val_data) if val_data is not None else train_records
-        )
+        val_records = self._to_records(val_data) if val_data is not None else train_records
         if not train_records:
             lg.warning('Evolution: no training records; skipping prompt optimization')
             return DetectionResult()
-
         train_units = _chunk(train_records, cfg.claims_per_task, cfg.n_train_tasks, cfg.seed)
         val_units = _chunk(val_records, cfg.claims_per_task, cfg.n_val_tasks, cfg.seed)
 
-        seed_system, seed_user = self._seed_prompts()
-        skill_md = self._skill_md(seed_system, seed_user)
+        seed_system, _ = self._seed_prompts()
         skill_dir = project / '.agents' / 'skills' / self._skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / 'SKILL.md').write_text(skill_md, encoding='utf-8')
+        (skill_dir / 'SKILL.md').write_text(self._skill_md(seed_system), encoding='utf-8')
 
-        model = cfg.model or getattr(self._model_adapter.config, 'model_path', 'judge')
-        editor = cfg.editor_model or cfg.model or model
-        port = _free_port(cfg.bridge_port)
-        bridge = _BridgeServer(self._model_adapter, port, str(model))
-        threading.Thread(target=bridge.serve_forever, daemon=True).start()
-        api_base = f'http://127.0.0.1:{port}/v1'
-        lg.info(f'Evolution bridge on {api_base} -> {type(self._model_adapter).__name__}')
+        evo = _resolve_evo(cfg.evo_bin)
+        if evo is None:
+            raise RuntimeError(
+                'evo CLI not found (needed for `evo skill commit`). Set '
+                'PromptEvolutionConfig.evo_bin or install evo-skills on PATH.'
+            )
+        commit = subprocess.run(
+            [evo, 'skill', 'commit', self._skill_name, '-m', 'seed prompt'],
+            cwd=str(project), capture_output=True, text=True,
+        )
+        if commit.returncode != 0:
+            lg.warning('evo skill commit output: ' + ((commit.stdout or '') + (commit.stderr or ''))[-800:])
 
+        self._write_tasks(tasks_root, 'train', train_units, adapter_cfg)
+        self._write_tasks(tasks_root, 'val', val_units, adapter_cfg)
+        train_names = [f'train-{i}' for i in range(len(train_units))]
+        val_names = [f'val-{i}' for i in range(len(val_units))]
+        # The paired gate needs >=4 validation pairs; bump trials if needed.
+        trials = max(cfg.trials, (4 + max(1, len(val_names)) - 1) // max(1, len(val_names)))
+
+        backend = _AdapterBackend(self.judge.model_adapter, max_tokens=cfg.max_tokens)
+        self._prepare_env(adapter_cfg)
+
+        lg.info('Evolution (in-process): optimize_skill solver/editor via model_adapter')
         try:
-            self._run_evo(evo, ['skill', 'commit', self._skill_name, '-m', 'seed prompt'], project)
-            train_names = self._write_tasks(project, 'train', train_units, api_base, str(model))
-            val_names = self._write_tasks(project, 'val', val_units, api_base, str(model))
-
-            smoke_ws = work_dir / 'ws_smoke'
-            if smoke_ws.exists():
-                shutil.rmtree(smoke_ws)
-            self._run_evo(
-                evo,
-                [
-                    'run', 'solve', train_names[0],
-                    '-m', f'openai/{model}',
-                    '--api-base', api_base,
-                    '-s', self._skill_name,
-                    '-w', str(smoke_ws),
-                    '-d', 'tasks',
-                    '--timeout', str(int(cfg.timeout)),
-                ],
-                project,
-                check=False,
+            self._result = optimize_skill(
+                self._skill_name,
+                train_tasks=train_names,
+                validate_tasks=val_names,
+                solver_model='openai/sirin-adapter',  # nominal id; real calls go via backend
+                editor_model='openai/sirin-adapter',
+                project_dir=project,
+                tasks_dir=tasks_root,
+                rounds=cfg.rounds,
+                trials=trials,
+                seed=cfg.seed,
+                rewrite_mode='edit-ops',
+                max_tokens=cfg.max_tokens,
+                timeout=cfg.timeout,
+                solver_backend=backend,
+                editor_backend=backend,
+                pass_env=list(cfg.pass_env or _JUDGE_ENV_VARS),
             )
-            lg.info(f'Evolution smoke verdicts.json: {(smoke_ws / "verdicts.json").exists()}')
-
-            self._report = self._optimize(
-                evo, project, api_base, train_names, val_names, str(model), str(editor)
-            )
-        finally:
-            bridge.shutdown()
-            bridge.server_close()
+        except Exception as exc:  # noqa: BLE001 - surface a readable train() failure
+            lg.error(f'Evolution optimization failed: {type(exc).__name__}: {exc}')
+            raise
 
         active_md = (skill_dir / 'SKILL.md').read_text(encoding='utf-8')
-        self._apply_evolved_prompt(active_md, seed_system, seed_user)
+        self._apply_evolved_prompt(active_md, seed_system)
 
-        result = DetectionResult(
-            metrics=self._evaluate(val_data),
-            probs=None,
-            threshold=self.judge.threshold,
-        )
+        result = DetectionResult(metrics=self._evaluate(val_data), threshold=self.judge.threshold)
         self._save_artifacts(work_dir)
         return result
 
-    # ------------------------------------------------------------------ data
+    # ------------------------------------------------------------------ adapter
+    def _adapter_identity(self) -> Dict[str, Any]:
+        adapter = self.judge.model_adapter
+        cfg = getattr(adapter, 'config', None)
+        name = type(adapter).__name__
+        cert = getattr(cfg, 'cert_file', None)
+        key = getattr(cfg, 'key_file', None)
+        base_url = getattr(cfg, 'base_url', None)
+        model = getattr(cfg, 'model_path', None)
+        if cert and key:
+            return {
+                'kind': 'gigachat', 'model': model, 'base_url': base_url,
+                'cert_file': cert, 'key_file': key,
+                'verify_ssl': bool(getattr(cfg, 'verify_ssl_certs', False)),
+                'copy_files': True,
+            }
+        # Non-cert adapters (e.g. OpenAI-compatible): helper rebuilds without certs.
+        return {
+            'kind': 'openai', 'model': model, 'base_url': base_url,
+            'api_key': getattr(cfg, 'api_key', None), 'copy_files': False,
+        }
+
     @property
     def _model_adapter(self):
         return self.judge.model_adapter
 
+    def _prepare_env(self, adapter_cfg: Dict[str, Any]):
+        os.environ['SIRIN_JUDGE_KIND'] = adapter_cfg['kind']
+        if adapter_cfg.get('model'):
+            os.environ['SIRIN_JUDGE_MODEL'] = str(adapter_cfg['model'])
+        if adapter_cfg.get('base_url'):
+            os.environ['SIRIN_JUDGE_BASE_URL'] = str(adapter_cfg['base_url'])
+        os.environ['SIRIN_JUDGE_VERIFY_SSL'] = 'true' if adapter_cfg.get('verify_ssl') else 'false'
+        if adapter_cfg.get('api_key'):
+            os.environ['SIRIN_JUDGE_API_KEY'] = str(adapter_cfg['api_key'])
+
+    # ------------------------------------------------------------------ data
     def _to_records(self, data) -> List[Dict[str, Any]]:
         from sirin.detection.judging.judges.utils import format_dialogue_samples
 
@@ -283,14 +329,12 @@ class EvolutionPromptTrainer:
         records = []
         for uid, (dialogue, label) in enumerate(zip(formatted, labels)):
             dialogue = str(dialogue)
-            records.append(
-                {
-                    'uid': int(uid),
-                    'dialogue': dialogue,
-                    'user_prompt': self._user_prompt(dialogue),
-                    'label': int(label),
-                }
-            )
+            records.append({
+                'uid': int(uid),
+                'dialogue': dialogue,
+                'user_prompt': self._user_prompt(dialogue),
+                'label': int(label),
+            })
         return records
 
     def _user_prompt(self, dialogue: str) -> str:
@@ -302,76 +346,43 @@ class EvolutionPromptTrainer:
 
     def _seed_prompts(self) -> Tuple[str, str]:
         cfg = self.judge.config
-        return (
-            getattr(cfg, 'system_prompt', '') or '',
-            getattr(cfg, 'user_prompt', '') or '',
-        )
+        return getattr(cfg, 'system_prompt', '') or '', getattr(cfg, 'user_prompt', '') or ''
 
     # ------------------------------------------------------------------ project
-    def _skill_md(self, system_prompt: str, user_prompt: str) -> str:
-        target = self.config.target
-        blocks = [
-            f'# Judge prompt\n',
-            f'## Процедура\n',
-            f'1. Прочитай `claims.json` в рабочем каталоге.',
-            f'2. Для каждого объекта вызови модель судьи так, как описано в instruction.md.',
-            f'3. Системное сообщение — ровно текст между маркерами ниже, дословно, без правок.',
-            f'4. Запиши `verdicts.json` в корень рабочего каталога.\n',
-        ]
-        if target in ('system_prompt', 'both'):
-            blocks += [
-                '## Judge system prompt',
-                _SYSTEM_MARK_OPEN,
-                system_prompt,
-                _SYSTEM_MARK_CLOSE,
-                '',
-            ]
-        if target in ('user_prompt', 'both'):
-            blocks += [
-                '## Judge user prompt template',
-                _USER_MARK_OPEN,
-                user_prompt,
-                _USER_MARK_CLOSE,
-                '',
-            ]
-        body = '\n'.join(blocks)
+    def _skill_md(self, system_prompt: str) -> str:
         return (
             '---\n'
             f'name: {self._skill_name}\n'
             "description: 'Судья: подтверждается ли утверждение/ответ саммари транскриптом "
             "встречи.'\n"
             '---\n\n'
-            f'{body}'
+            '# Judge prompt\n\n'
+            '## Процедура\n'
+            '1. Прочитай `claims.json` в рабочем каталоге.\n'
+            '2. Импортируй `judge_client` и для каждого объекта вызови '
+            '`judge_client.judge(<system prompt>, item["user_prompt"])`.\n'
+            '3. Системное сообщение — ровно текст между маркерами ниже, дословно.\n'
+            '4. Запиши `verdicts.json` в корень рабочего каталога.\n\n'
+            '## Judge system prompt\n'
+            f'{_SYSTEM_MARK_OPEN}\n{system_prompt}\n{_SYSTEM_MARK_CLOSE}\n'
         )
 
-    def _instruction(self, name: str, api_base: str, model: str) -> str:
-        system_note = (
-            'Системный промпт судьи — блок между строками '
-            f'`{_SYSTEM_MARK_OPEN}` и `{_SYSTEM_MARK_CLOSE}`; используй его дословно.'
-        )
-        user_note = (
-            'Если в skill есть блок '
-            f'`{_USER_MARK_OPEN}` … `{_USER_MARK_CLOSE}`, подставляй в него '
-            '`dialogue` из объекта.'
-        )
-        return f'''# {name}
+    _INSTRUCTION = '''# {name}
 
 В рабочем каталоге лежит `claims.json` — список объектов
 {{"uid": int, "dialogue": str, "user_prompt": str}}.
-Для каждого определи, подтверждается ли ответ/утверждение (1 = недостоверно, 0 = достоверно).
+Определи для каждого, подтверждается ли ответ (1 = недостоверно, 0 = достоверно).
 
-Правила процедуры — в подключённом skill (`{self._skill_name}`). {system_note}
-{user_note}
+Системный промпт судьи — блок между `{sys_open}` и `{sys_close}` в подключённом skill
+(`{skill}`); используй его дословно.
 
-Вызов модели (только stdlib):
-  POST {api_base}/chat/completions
-  body = {{"model": "{model}", "max_tokens": 32, "temperature": 0,
-          "messages": [{{"role": "system", "content": <judge system prompt>}},
-                       {{"role": "user", "content": item["user_prompt"]}}]}}
-  ответ = response["choices"][0]["message"]["content"]  # например "0 87" или "1"
-
-Запиши `verdicts.json` в корень рабочего каталога:
+Судья доступен как локальный helper `judge_client` (импортируется без установки):
+  import json, judge_client
+  answer = judge_client.judge(SYSTEM_PROMPT, item["user_prompt"])   # "0 87" / "1"
+Разбери метку из ответа и собери `verdicts.json` в корне рабочего каталога:
 {{"<uid>": {{"label": 0 или 1, "confidence": 0-100}}, ...}}
+
+Напиши ОДИН python-скрипт, который всё это делает (stdlib + `judge_client`).
 '''
 
     _EVAL = '''import json, os
@@ -392,26 +403,35 @@ def test_claim(uid, gold):
     assert int(v["label"]) == int(gold), f"uid={{uid}}: {{v}} != gold={{gold}}"
 '''
 
-    def _write_tasks(self, project: Path, split: str, units, api_base: str, model: str):
-        names = []
+    def _write_tasks(self, tasks_root: Path, split: str, units, adapter_cfg: Dict[str, Any]):
         for index, unit in enumerate(units):
             name = f'{split}-{index}'
-            task_dir = project / 'tasks' / name
-            (task_dir / 'inputs').mkdir(parents=True, exist_ok=True)
+            task_dir = tasks_root / name
+            inputs = task_dir / 'inputs'
+            inputs.mkdir(parents=True, exist_ok=True)
             (task_dir / 'tests').mkdir(parents=True, exist_ok=True)
             claims = [
-                {
-                    'uid': int(r['uid']),
-                    'dialogue': r['dialogue'],
-                    'user_prompt': r['user_prompt'],
-                }
+                {'uid': int(r['uid']), 'dialogue': r['dialogue'], 'user_prompt': r['user_prompt']}
                 for r in unit
             ]
-            (task_dir / 'inputs' / 'claims.json').write_text(
+            (inputs / 'claims.json').write_text(
                 json.dumps(claims, ensure_ascii=False, indent=1), encoding='utf-8'
             )
+            (inputs / 'judge_client.py').write_text(_JUDGE_CLIENT_SRC, encoding='utf-8')
+            if adapter_cfg.get('copy_files'):
+                # Guard blocks /home; copy TLS material next to the task so the child can read it.
+                cert_dst = inputs / 'judge_cert.pem'
+                key_dst = inputs / 'judge_key.pem'
+                shutil.copyfile(adapter_cfg['cert_file'], cert_dst)
+                shutil.copyfile(adapter_cfg['key_file'], key_dst)
+                os.environ['SIRIN_JUDGE_CERT_FILE'] = cert_dst.name
+                os.environ['SIRIN_JUDGE_KEY_FILE'] = key_dst.name
             (task_dir / 'instruction.md').write_text(
-                self._instruction(name, api_base, model), encoding='utf-8'
+                self._INSTRUCTION.format(
+                    name=name, skill=self._skill_name,
+                    sys_open=_SYSTEM_MARK_OPEN, sys_close=_SYSTEM_MARK_CLOSE,
+                ),
+                encoding='utf-8',
             )
             gold = {int(r['uid']): int(r['label']) for r in unit}
             (task_dir / 'tests' / 'test_outputs.py').write_text(
@@ -431,94 +451,17 @@ def test_claim(uid, gold):
                 'test_file = "tests/test_outputs.py"\n',
                 encoding='utf-8',
             )
-            names.append(name)
-        return names
-
-    # ------------------------------------------------------------------ evo cli
-    def _run_evo(self, evo: str, args: List[str], cwd: Path, check: bool = True):
-        cmd = [evo] + args
-        lg.info('$ ' + ' '.join(cmd))
-        proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
-        tail = (proc.stdout or '')[-4000:] + '\n' + (proc.stderr or '')[-2000:]
-        lg.info(tail)
-        if check and proc.returncode != 0:
-            raise RuntimeError(f'evo {" ".join(args)} failed (rc={proc.returncode}):\n{tail}')
-        return proc
-
-    def _optimize(
-        self,
-        evo: str,
-        project: Path,
-        api_base: str,
-        train_names: List[str],
-        val_names: List[str],
-        model: str,
-        editor: str,
-    ) -> Optional[Dict[str, Any]]:
-        cfg = self.config
-        args = (
-            ['evolve', 'optimize', self._skill_name]
-            + sum([['--train', name] for name in train_names], [])
-            + sum([['--validate', name] for name in val_names], [])
-            + [
-                '--solver-model', f'openai/{model}',
-                '--solver-api-base', api_base,
-                '--editor-model', f'openai/{editor}',
-                '--editor-api-base', api_base,
-                '--solver-temperature', '0',
-                '--editor-temperature', '0.4',
-                '--rounds', str(cfg.rounds),
-                '--trials', str(cfg.trials),
-                '--rewrite-mode', 'edit-ops',
-                '--max-tokens', str(cfg.max_tokens),
-                '--timeout', str(cfg.timeout),
-                '-d', 'tasks',
-            ]
-            + list(cfg.extra_evo_args or [])  # type: ignore[arg-type]
-            + ['--json']
-        )
-        proc = self._run_evo(evo, args, project, check=False)
-        report = self._parse_report(proc.stdout or '')
-        if report is None:
-            lg.warning('Evolution: optimizer JSON not parsed; tail:\n' + (proc.stdout or '')[-1500:])
-        return report
-
-    @staticmethod
-    def _parse_report(text: str) -> Optional[Dict[str, Any]]:
-        start = text.find('{"schema_version"')
-        if start < 0:
-            return None
-        depth = 0
-        for index in range(start, len(text)):
-            char = text[index]
-            if char == '{':
-                depth += 1
-            elif char == '}':
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start : index + 1])
-                    except json.JSONDecodeError:
-                        return None
-        return None
 
     # ------------------------------------------------------------------ results
-    def _apply_evolved_prompt(self, active_md: str, seed_system: str, seed_user: str):
-        target = self.config.target
-        applied = False
-        if target in ('system_prompt', 'both'):
-            evolved = _extract_marked(active_md, _SYSTEM_MARK_OPEN, _SYSTEM_MARK_CLOSE)
-            if evolved and evolved.strip():
-                self.judge.config.system_prompt = evolved
-                applied = evolved.strip() != seed_system.strip()
-                lg.info(f'Evolution: system_prompt updated (changed={applied})')
-        if target in ('user_prompt', 'both'):
-            evolved = _extract_marked(active_md, _USER_MARK_OPEN, _USER_MARK_CLOSE)
-            if evolved and evolved.strip():
-                self.judge.config.user_prompt = evolved
-                applied = applied or evolved.strip() != seed_user.strip()
-                lg.info('Evolution: user_prompt updated')
-        if not applied:
+    def _apply_evolved_prompt(self, active_md: str, seed_system: str):
+        evolved = _extract_marked(active_md, _SYSTEM_MARK_OPEN, _SYSTEM_MARK_CLOSE)
+        if evolved and evolved.strip():
+            self.judge.config.system_prompt = evolved
+            lg.info(
+                f'Evolution: system_prompt updated '
+                f'(changed={evolved.strip() != seed_system.strip()})'
+            )
+        else:
             lg.info('Evolution: prompt unchanged after optimization')
 
     def _evaluate(self, data) -> Optional[Dict[str, float]]:
@@ -528,7 +471,7 @@ def test_claim(uid, gold):
         labels = np.asarray(list(data[TARGET_COL]), dtype=float)
         try:
             probs, preds, _ = self.judge.detect(inputs, labels)
-        except Exception as exc:  # noqa: BLE001 - evaluation must never sink train()
+        except Exception as exc:  # noqa: BLE001
             lg.warning(f'Evolution: post-train evaluate failed ({type(exc).__name__}: {exc})')
             return None
         probs = np.asarray(probs, dtype=float)
@@ -546,24 +489,14 @@ def test_claim(uid, gold):
 
     def _save_artifacts(self, work_dir: Path):
         payload = {
-            'report': self._report,
+            'result': getattr(self._result, 'to_dict', lambda: str(self._result))(),
             'system_prompt': getattr(self.judge.config, 'system_prompt', None),
             'user_prompt': getattr(self.judge.config, 'user_prompt', None),
         }
         try:
             (work_dir / 'evolution_result.json').write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8'
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding='utf-8'
             )
             lg.info(f'Evolution artifacts saved to {work_dir / "evolution_result.json"}')
         except Exception as exc:  # noqa: BLE001
             lg.warning(f'Evolution: could not save artifacts: {exc}')
-
-
-def _chunk(records: List[Dict[str, Any]], size: int, count: int, seed: int):
-    """Split records into ``count`` shuffled units of ``size`` (drop tiny leftovers)."""
-    records = list(records)
-    random.Random(seed).shuffle(records)
-    size = max(1, size)
-    units = [records[i * size : (i + 1) * size] for i in range(max(1, count))]
-    units = [u for u in units if len(u) >= max(2, size // 2)]
-    return units or ([records] if records else [])
