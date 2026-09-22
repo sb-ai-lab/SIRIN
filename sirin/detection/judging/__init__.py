@@ -39,3 +39,4 @@ from .judges import (
     OpenAIJudgeBase,
 )
 from .pipeline import JudgePipeline
+from .evolution import EvolutionPromptTrainer

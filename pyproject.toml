@@ -56,6 +56,10 @@ dependencies = [
 ui = [
     "streamlit>=1.58,<2",
 ]
+# Prompt optimization for API judges (OpenAIJudgeBase.train -> `evo` CLI).
+evolution = [
+    "evo-skills[llm]",
+]
 
 [[tool.streamlit.component.components]]
 name = "sirin_workspace"

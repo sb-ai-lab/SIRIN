@@ -281,6 +281,21 @@ class OpenAIJudgeBase(JudgeBase):
         metrics: Optional[List[ClassificationMetric]] = None,
         **kwargs,
     ) -> DetectionResult:
+        """Optimize the judge prompt with Evolution, or no-op if it is disabled.
+
+        API judges cannot be fine-tuned, so ``train()`` normally does nothing. When
+        ``config.prompt_evolution.enabled`` is set, the judge prompt is evolved on
+        ``train_data`` / ``val_data`` (see ``sirin.detection.judging.evolution``) and the
+        promoted prompt is written back onto ``self.config``.
+        """
+        evolution_config = getattr(self.config, 'prompt_evolution', None)
+        if evolution_config is not None and getattr(evolution_config, 'enabled', False):
+            from sirin.detection.judging.evolution import EvolutionPromptTrainer
+
+            lg.info('API judge: running Evolution prompt optimization during train()')
+            trainer = EvolutionPromptTrainer(self, evolution_config, training_args)
+            return trainer.run(train_data, val_data, metrics=metrics)
+
         lg.info("There is no training for API judges")
         return DetectionResult()
 

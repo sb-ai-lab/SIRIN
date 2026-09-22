@@ -251,8 +251,48 @@ class HfJudgeConfig(JudgeBaseConfig):
 
 
 @dataclass
+class PromptEvolutionConfig:
+    """Config for evolving an API judge's prompt during ``train()`` via Evolution.
+
+    When ``enabled``, ``OpenAIJudgeBase.train()`` runs the ``evo`` CLI on the training
+    data: it builds a project (tasks + skill = the judge prompt + pytest evaluator) and a
+    local bridge that exposes the judge's own model adapter, then promotes an improved
+    prompt back onto the judge config.
+    """
+
+    enabled: bool = False
+    # Path to the ``evo`` executable. None -> PATH, then known venv locations
+    # (e.g. ~/sirin_dialogs_bench/evo_env/bin/evo).
+    evo_bin: Optional[str] = None
+    # Where to build the Evolution project and save artifacts.
+    # None -> training_args.output_dir or ./evolution_judge.
+    work_dir: Optional[str] = None
+    # Model id passed to evo's solver/editor. The local bridge ignores the name and always
+    # calls the judge's model_adapter, so this is mostly informational.
+    model: Optional[str] = None
+    editor_model: Optional[str] = None  # None -> model
+    bridge_port: int = 8099
+    skill_name: str = 'judge-prompt'
+    # Which prompt(s) to evolve. 'both' evolves system_prompt and user_prompt.
+    target: Literal['system_prompt', 'user_prompt', 'both'] = 'system_prompt'
+    claims_per_task: int = 20
+    n_train_tasks: int = 4
+    n_val_tasks: int = 6
+    rounds: int = 3
+    trials: int = 2
+    seed: int = 42
+    max_tokens: int = 2048
+    timeout: float = 900.0
+    # Extra raw flags appended to ``evo evolve optimize`` (e.g. ['--manifest', 'm.json']).
+    extra_evo_args: List[str] = field(default_factory=list)
+
+
+@dataclass
 class OpenAIJudgeConfig(JudgeBaseConfig):
     """Base configuration for Open AI judges."""
+
+    # Prompt optimization with Evolution during train() (API judges have no fine-tuning).
+    prompt_evolution: PromptEvolutionConfig = field(default_factory=PromptEvolutionConfig)
 
     # Reasoning-era endpoints reject tiny completion budgets outright (GPT-5.x:
     # "Expected a value >= 16"), so API judges default higher than the base's strict
