@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -49,13 +50,17 @@ class LayerFeatureCacheSaver:
         save_dir: str,
         save_template: str = SAVE_FEAT_TEMPLATE,
         create_dir: bool = True,
+        identity: Optional[Dict] = None,
     ):
         self.model_name = model_name
         self.save_dir = Path(save_dir)
         self.save_template = save_template
+        identity_json = json.dumps(identity or {}, sort_keys=True, default=str)
+        self.identity_hash = hashlib.sha256(identity_json.encode()).hexdigest()
+        safe_model_name = model_name.replace('/', '--').replace('\\', '--')
 
         self.cache_base_dir = (
-            self.save_dir / 'feature_cache' / model_name
+            self.save_dir / 'feature_cache' / f'{safe_model_name}-{self.identity_hash[:16]}'
         )
         if create_dir:
             self.cache_base_dir.mkdir(parents=True, exist_ok=True)
@@ -63,7 +68,7 @@ class LayerFeatureCacheSaver:
     def get_sample_hash(self, sample: List[Dict]) -> str:
         # sample.append({'model_name' : self.model_name})
         sample_str = json.dumps(sample, sort_keys=True)
-        return hashlib.md5(sample_str.encode()).hexdigest()[:12]  # For readability
+        return hashlib.sha256(sample_str.encode()).hexdigest()
 
     def get_layer_cache_path(
         self, sample_hash: str, layer_idx: int, feature_type: str
@@ -91,7 +96,14 @@ class LayerFeatureCacheSaver:
         )
 
         cache_path = self.get_layer_cache_path(sample_hash, layer_idx, feature_type)
-        joblib.dump(cached_layer.to_dict(), cache_path)
+        temporary = cache_path.with_suffix(cache_path.suffix + f'.{os.getpid()}.tmp')
+        checksum_path = cache_path.with_suffix(cache_path.suffix + '.sha256')
+        checksum_temporary = checksum_path.with_suffix(checksum_path.suffix + f'.{os.getpid()}.tmp')
+        joblib.dump(cached_layer.to_dict(), temporary)
+        digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        checksum_temporary.write_text(digest + '\n', encoding='ascii')
+        os.replace(temporary, cache_path)
+        os.replace(checksum_temporary, checksum_path)
         lg.debug(f"Saved layer {layer_idx} features to {cache_path.name}")
 
     def load_layer_features(
@@ -102,6 +114,13 @@ class LayerFeatureCacheSaver:
 
         if cache_path.exists():
             try:
+                checksum_path = cache_path.with_suffix(cache_path.suffix + '.sha256')
+                if not checksum_path.is_file():
+                    raise ValueError('cache checksum is missing')
+                expected = checksum_path.read_text(encoding='ascii').strip()
+                actual = hashlib.sha256(cache_path.read_bytes()).hexdigest()
+                if actual != expected:
+                    raise ValueError('cache checksum mismatch')
                 data = joblib.load(cache_path)
                 return CachedLayerFeature.from_dict(data)
             except Exception as e:

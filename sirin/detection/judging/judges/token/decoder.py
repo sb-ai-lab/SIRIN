@@ -2,11 +2,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+from peft import PeftModel, get_peft_model
 from transformers import Trainer
 
 from sirin.definitions import INPUT_COL, TARGET_COL, DetectionLevel, DataCollatorType
-from sirin.detection.judging.judges.base import HfJudgeBase
+from sirin.detection.judging.judges.base import HfJudgeBase, JudgeAnnotationError
 from sirin.detection.judging.judges.utils import (
+    SpanAlignmentError,
+    align_span_annotation,
+    extract_answer_from_generation,
     format_dialogue_for_training,
     prepare_decoder_inputs_with_labels,
     build_prompt_messages,
@@ -32,15 +36,58 @@ class TokenDecoderJudge(HfJudgeBase):
     detection_level = DetectionLevel.TOKEN
     data_collator_type = DataCollatorType.TOKEN
     trainer = Trainer
+    span_markers = ('[SPAN]', '[/SPAN]')
 
     def __init__(self, config: HfJudgeConfig, model_adapter: ModelAdapterBase):
         super().__init__(config=config, model_adapter=model_adapter)
-        self.model_adapter.tokenizer.add_tokens(['[SPAN]', '[/SPAN]'], special_tokens=True)
-        self.model_adapter.model.resize_token_embeddings(len(self.model_adapter.tokenizer))
         self.assistant_prefix = get_assistant_prefix(self.model_adapter._model_name)
         self.class_token_ids = None
         self.last_generations: list[str] | None = None
         self.last_spans: list[list[tuple[int, int]]] | None = None
+        self.last_alignment: list[list[dict]] | None = None
+
+    def setup_model(self):
+        """Do not mutate a zero-shot tokenizer or wrap PEFT before training starts."""
+        self.class_token_ids = [
+            self.model_adapter.tokenizer.convert_tokens_to_ids(str(i))
+            for i in range(self.config.num_classification_heads)
+        ]
+
+    @property
+    def _uses_trained_span_markers(self) -> bool:
+        special = set(self.model_adapter.tokenizer.all_special_tokens)
+        return all(marker in special for marker in self.span_markers)
+
+    def _prepare_trainable_span_markers(self) -> None:
+        """Register markers exactly once, before PEFT wraps the embedding modules."""
+        tokenizer = self.model_adapter.tokenizer
+        existing = list(getattr(tokenizer, 'additional_special_tokens', []) or [])
+        merged = existing + [marker for marker in self.span_markers if marker not in existing]
+        added = tokenizer.add_special_tokens({'additional_special_tokens': merged})
+        if added:
+            self.model_adapter.model.resize_token_embeddings(len(tokenizer))
+
+        if self.config.peft_config is not None and not isinstance(
+            self.model_adapter.model, PeftModel
+        ):
+            modules = set(getattr(self.config.peft_config, 'modules_to_save', None) or [])
+            modules.update({'embed_tokens', 'lm_head'})
+            self.config.peft_config.modules_to_save = sorted(modules)
+            self.model_adapter.model = get_peft_model(
+                self.model_adapter.model, self.config.peft_config
+            )
+
+    def train(self, *args, **kwargs):
+        self._prepare_trainable_span_markers()
+        return super().train(*args, **kwargs)
+
+    @staticmethod
+    def _reference_answer(sample: Union[str, List[Dict]]) -> str:
+        if isinstance(sample, list):
+            for message in reversed(sample):
+                if isinstance(message, dict) and message.get('role') == 'assistant':
+                    return str(message.get('content', ''))
+        return str(sample)
 
     def detect(
         self, samples: Union[List[str], List[List[Dict]]], labels: Optional[np.ndarray] = None, **kwargs
@@ -52,6 +99,7 @@ class TokenDecoderJudge(HfJudgeBase):
         by multiple generations are marked as hallucinated.
         """
         samples, group_ids = self._split_context_samples(samples)
+        references = [self._reference_answer(sample) for sample in samples]
 
         self._check_truncation_warning(samples)
 
@@ -72,6 +120,9 @@ class TokenDecoderJudge(HfJudgeBase):
             do_sample=True,
             pad_token_id=self.model_adapter.tokenizer.eos_token_id,
             eos_token_id=self.model_adapter.tokenizer.eos_token_id,
+            preserve_special_tokens=(
+                list(self.span_markers) if self._uses_trained_span_markers else None
+            ),
             **kwargs
         )
         self.last_generations = list(generated_texts)
@@ -90,8 +141,32 @@ class TokenDecoderJudge(HfJudgeBase):
         all_char_probs = []
         all_char_preds = []
 
-        for generated_texts in all_generated_sequences:
-            sample_char_probs = calculate_character_probabilities(generated_texts)
+        self.last_alignment = []
+        for reference, generated_texts in zip(references, all_generated_sequences):
+            valid = []
+            diagnostics = []
+            for generated in generated_texts:
+                candidate = extract_answer_from_generation(generated, strip=False)
+                try:
+                    aligned = align_span_annotation(
+                        candidate, reference, self.config.span_alignment
+                    )
+                except SpanAlignmentError as error:
+                    diagnostics.append({'status': error.reason, 'repaired_whitespace': 0})
+                    continue
+                valid.append(candidate)
+                diagnostics.append({
+                    'status': aligned.status,
+                    'repaired_whitespace': aligned.repaired_whitespace,
+                })
+            self.last_alignment.append(diagnostics)
+            if not valid:
+                raise JudgeAnnotationError(
+                    'No decoder-judge generation could be aligned to the original response.'
+                )
+            sample_char_probs = calculate_character_probabilities(
+                valid, reference=reference, alignment=self.config.span_alignment
+            )
             sample_char_probs = torch.tensor(sample_char_probs)
             all_char_probs.append(sample_char_probs)
             all_char_preds.append((sample_char_probs > self.threshold).long())

@@ -151,8 +151,7 @@ class HfJudgeBase(JudgeBase):
         # Update model path to point to saved model
         adapter_config.model_path = str(model_path)
         
-        model_manager = ModelManager()
-        self.model_adapter = model_manager.load(
+        self.model_adapter = ModelManager.load_model(
             HfModelAdapter(config=adapter_config, model=str(model_path))
         )
         lg.info(f'Loaded model from {model_path}')
@@ -190,6 +189,7 @@ class HfJudgeBase(JudgeBase):
         train_data: Dataset,
         val_data: Optional[Dataset],
         metrics: Optional[List[ClassificationMetric]] = None,
+        resume_from_checkpoint: bool | str | Path = False,
         **kwargs,
     ) -> DetectionResult:
         self.metrics_to_compute = metrics or BASIC_METRICS
@@ -236,7 +236,7 @@ class HfJudgeBase(JudgeBase):
             **kwargs,
         )
 
-        train_result = trainer.train()  
+        train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         self.model_adapter.model = trainer.model
 
         if training_args.output_dir:
@@ -264,8 +264,7 @@ class OpenAIJudgeBase(JudgeBase):
         super()._load_config(load_dir)
         
         # Reload model adapter with saved config
-        model_manager = ModelManager()
-        self.model_adapter = model_manager.load(
+        self.model_adapter = ModelManager.load_model(
             OpenAIModelAdapter(
                 config=self._loaded_adapter_config, 
                 model=self._loaded_adapter_config.model_path or self._loaded_model_path

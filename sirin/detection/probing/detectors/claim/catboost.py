@@ -15,6 +15,7 @@ from sirin.detection.probing.detectors.utils.detection import (
     handle_binary_multiclass_probs,
 )
 from sirin.detection.probing.detectors.utils.training import (
+    catboost_snapshot_kwargs,
     calibrate_and_evaluate,
     preprocess_dataloader_to_numpy,
 )
@@ -152,6 +153,7 @@ class ClaimCatboostProbingDetector(ProbingDetectorBase):
             eval_set=(X_val_np, y_val_np),
             verbose=False,
             callbacks=callbacks,
+            **catboost_snapshot_kwargs(cfg, self),
         )
 
         val_probs_full = self.model.predict_proba(X_val_np)

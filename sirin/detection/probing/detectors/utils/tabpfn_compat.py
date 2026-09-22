@@ -25,6 +25,7 @@ if not hasattr(tabpfn_inference, 'ClassifierEvalMetrics'):
 sys.modules.setdefault('tabpfn.inference_tuning', tabpfn_inference)
 sys.modules.setdefault('tabpfn.preprocessing.definitions', tabpfn_preprocessing)
 
+_MISSING_LEGACY_STEP_MODULES = []
 for module_name in (
     'preprocessing_helpers',
     'remove_constant_features_step',
@@ -37,12 +38,18 @@ for module_name in (
     try:
         importlib.import_module(target)
         continue  # newer tabpfn (>= 6) ships this path natively — nothing to alias.
-    except ModuleNotFoundError:
-        pass
-    sys.modules.setdefault(
-        target,
-        importlib.import_module(f"tabpfn.preprocessors.{module_name}"),
-    )
+    except ModuleNotFoundError as exc:
+        if exc.name is None or not (exc.name == target or target.startswith(exc.name + '.')):
+            raise
+    legacy = f"tabpfn.preprocessors.{module_name}"
+    try:
+        module = importlib.import_module(legacy)
+    except ModuleNotFoundError as exc:
+        if exc.name is None or not (exc.name == legacy or legacy.startswith(exc.name + '.')):
+            raise
+        _MISSING_LEGACY_STEP_MODULES.append(target)
+        continue
+    sys.modules.setdefault(target, module)
 
 _SQUASHING_MODULE = 'tabpfn.preprocessing.steps.squashing_scaler_transformer'
 try:
@@ -99,6 +106,13 @@ def _filter_tabpfn_init_params(cls, params: dict) -> dict:
 
 
 def load_fitted_tabpfn_model_compat(path: Path | str, *, device: str | torch.device = 'cpu'):
+    if _MISSING_LEGACY_STEP_MODULES:
+        missing = ', '.join(_MISSING_LEGACY_STEP_MODULES)
+        raise RuntimeError(
+            'This fitted TabPFN artifact needs legacy preprocessing modules unavailable in '
+            f'the installed tabpfn build: {missing}. Retrain it with tabpfn==2.1.3 or use '
+            'an environment that provides those exact modules.'
+        )
     path = Path(path)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
