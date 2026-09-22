@@ -32,6 +32,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -113,6 +114,7 @@ def _resolve_evo(explicit: Optional[str]) -> Optional[str]:
     if found:
         return found
     for cand in (
+        Path(sys.executable).parent / 'evo',  # console script of the current venv
         Path.home() / 'sirin_dialogs_bench' / 'evo_env' / 'bin' / 'evo',
         Path.home() / 'evo_env' / 'bin' / 'evo',
         Path.home() / '.local' / 'bin' / 'evo',
