@@ -54,6 +54,7 @@ _JUDGE_ENV_VARS = (
     'SIRIN_JUDGE_CERT_FILE',
     'SIRIN_JUDGE_KEY_FILE',
     'SIRIN_JUDGE_VERIFY_SSL',
+    'PYTHONPATH',
 )
 
 # Written verbatim into every task workspace. Rebuilds the judge adapter from env and
@@ -380,6 +381,19 @@ class EvolutionPromptTrainer:
         os.environ['SIRIN_JUDGE_VERIFY_SSL'] = 'true' if adapter_cfg.get('verify_ssl') else 'false'
         if adapter_cfg.get('api_key'):
             os.environ['SIRIN_JUDGE_API_KEY'] = str(adapter_cfg['api_key'])
+
+        # The generated judge script runs in a *separate* sandbox process; an editable
+        # `sirin` install (PEP 660 finder) may not be visible there. Expose the directory
+        # that holds the `sirin` package on PYTHONPATH so the child can import it by path.
+        try:
+            import sirin as _sirin
+            root = str(Path(_sirin.__file__).resolve().parents[1])
+            parts = [p for p in (os.environ.get('PYTHONPATH') or '').split(os.pathsep) if p]
+            if root not in parts:
+                os.environ['PYTHONPATH'] = os.pathsep.join([root] + parts)
+                lg.info(f'Evolution: PYTHONPATH += {root} (for task subprocesses)')
+        except Exception as exc:  # noqa: BLE001
+            lg.warning(f'Evolution: could not add sirin to PYTHONPATH: {exc}')
 
     # ------------------------------------------------------------------ data
     def _to_records(self, data) -> List[Dict[str, Any]]:
