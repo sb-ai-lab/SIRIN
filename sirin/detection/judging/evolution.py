@@ -605,8 +605,14 @@ def test_claim(uid, gold):
         inputs = list(data[INPUT_COL])
         labels = np.asarray(list(data[TARGET_COL]), dtype=float)
         try:
-            probs, preds, _ = self.judge.detect(inputs, labels)
-        except Exception as exc:  # noqa: BLE001
+            # detect() batches via asyncio.run(); run off the (Jupyter) event loop thread.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                probs, preds, _ = pool.submit(
+                    lambda: self.judge.detect(inputs, labels)
+                ).result()
+        except Exception as exc:  # noqa: BLE001 - evaluation must never sink train()
             lg.warning(f'Evolution: post-train evaluate failed ({type(exc).__name__}: {exc})')
             return None
         probs = np.asarray(probs, dtype=float)
@@ -623,10 +629,15 @@ def test_claim(uid, gold):
         return out
 
     def _save_artifacts(self, work_dir: Path):
+        sys_field, usr_field = self.config.system_prompt_field, self.config.user_prompt_field
         payload = {
             'result': getattr(self._result, 'to_dict', lambda: str(self._result))(),
-            'system_prompt': getattr(self.judge.config, 'system_prompt', None),
-            'user_prompt': getattr(self.judge.config, 'user_prompt', None),
+            'system_prompt_field': sys_field,
+            'user_prompt_field': usr_field,
+            # Save the actual (possibly evolved) prompt fields, not the fixed names.
+            'prompt': getattr(self.judge.config, sys_field, None),
+            'system_prompt': getattr(self.judge.config, sys_field, None),
+            'user_prompt': getattr(self.judge.config, usr_field, None),
         }
         try:
             (work_dir / 'evolution_result.json').write_text(
