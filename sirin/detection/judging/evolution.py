@@ -149,30 +149,48 @@ class _AdapterBackend:
 
     seed_mode = 'forwarded'  # adapter ignores the seed; we accept it so the gate is happy
 
-    def __init__(self, adapter, max_tokens: int = 2048, temperature: float = 0.0):
+    def __init__(self, adapter, max_tokens: int = 2048, temperature: float = 0.0,
+                 max_retries: int = 6):
         self.adapter = adapter
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.max_retries = max_retries
 
     def _sample(self, messages: List[Dict[str, str]], system: Optional[str], max_tokens: int):
         from evolution.llm.backend import LLMResponse
+
+        import time
 
         full: List[Dict[str, str]] = []
         if system:
             full.append({'role': 'system', 'content': system})
         full.extend(messages)
-        try:
-            # use_async=False: force the plain synchronous HTTP path. The harness calls
-            # this backend from inside its own event loop, and the adapter's async path
-            # would nest asyncio.run()/share an AsyncClient across loops and break.
-            out = self.adapter.sample(
-                [full], max_tokens=max_tokens, temperature=self.temperature, use_async=False
-            )
-        except Exception:
-            lg.exception('Evolution backend: adapter.sample failed (see traceback above)')
-            raise
-        content = out[0] if isinstance(out, (list, tuple)) else str(out)
-        return LLMResponse(content=content)
+
+        def _is_rate_limit(exc: BaseException) -> bool:
+            msg = str(exc).lower()
+            return '429' in msg or 'too many requests' in msg or 'rate limit' in msg
+
+        last: Optional[BaseException] = None
+        for attempt in range(self.max_retries):
+            try:
+                # use_async=False: plain synchronous HTTP. The harness calls this backend
+                # from inside its own event loop, and the adapter's async path would nest
+                # asyncio.run()/share an AsyncClient across loops and break.
+                out = self.adapter.sample(
+                    [full], max_tokens=max_tokens, temperature=self.temperature, use_async=False
+                )
+                content = out[0] if isinstance(out, (list, tuple)) else str(out)
+                return LLMResponse(content=content)
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if _is_rate_limit(exc) and attempt + 1 < self.max_retries:
+                    wait = min(120.0, 5.0 * (2 ** attempt))
+                    lg.warning(f'Evolution backend: rate-limited (429); retry in {wait:.0f}s')
+                    time.sleep(wait)
+                    continue
+                lg.exception('Evolution backend: adapter.sample failed (see traceback above)')
+                raise
+        raise last  # pragma: no cover
 
     async def complete(self, messages, system=None, seed=None):
         import asyncio
