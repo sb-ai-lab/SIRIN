@@ -359,7 +359,7 @@ class EvolutionPromptTrainer:
         return records
 
     def _user_prompt(self, dialogue: str) -> str:
-        template = getattr(self.judge.config, 'user_prompt', None) or ''
+        template = getattr(self.judge.config, self.config.user_prompt_field, None) or ''
         try:
             return template.format(sample=dialogue)
         except (KeyError, IndexError):
@@ -367,7 +367,10 @@ class EvolutionPromptTrainer:
 
     def _seed_prompts(self) -> Tuple[str, str]:
         cfg = self.judge.config
-        return getattr(cfg, 'system_prompt', '') or '', getattr(cfg, 'user_prompt', '') or ''
+        return (
+            getattr(cfg, self.config.system_prompt_field, '') or '',
+            getattr(cfg, self.config.user_prompt_field, '') or '',
+        )
 
     # ------------------------------------------------------------------ project
     def _skill_md(self, system_prompt: str) -> str:
@@ -477,9 +480,9 @@ def test_claim(uid, gold):
     def _apply_evolved_prompt(self, active_md: str, seed_system: str):
         evolved = _extract_marked(active_md, _SYSTEM_MARK_OPEN, _SYSTEM_MARK_CLOSE)
         if evolved and evolved.strip():
-            self.judge.config.system_prompt = evolved
+            setattr(self.judge.config, self.config.system_prompt_field, evolved)
             lg.info(
-                f'Evolution: system_prompt updated '
+                f'Evolution: {self.config.system_prompt_field} updated '
                 f'(changed={evolved.strip() != seed_system.strip()})'
             )
         else:

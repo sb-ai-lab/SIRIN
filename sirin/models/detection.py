@@ -272,6 +272,11 @@ class PromptEvolutionConfig:
     model: Optional[str] = None
     editor_model: Optional[str] = None  # None -> model
     skill_name: str = 'judge-prompt'
+    # Which config attributes hold the prompts to evolve. Defaults fit
+    # OpenAIJudgeBase (system_prompt/user_prompt). For the verbalized judge use
+    # 'confidence_system_prompt'/'confidence_user_prompt'.
+    system_prompt_field: str = 'system_prompt'
+    user_prompt_field: str = 'user_prompt'
     # Extra env var names forwarded to task subprocesses (the judge helper reads
     # SIRIN_JUDGE_*; these are added automatically).
     pass_env: List[str] = field(default_factory=list)
