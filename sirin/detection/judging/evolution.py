@@ -478,18 +478,47 @@ class EvolutionPromptTrainer:
 
 В рабочем каталоге лежит `claims.json` — список объектов
 {{"uid": int, "dialogue": str, "user_prompt": str}}.
-Определи для каждого, подтверждается ли ответ (1 = недостоверно, 0 = достоверно).
+Для каждого определи, подтверждается ли утверждение (1 = не подтверждается, 0 = подтверждается).
 
 Системный промпт судьи — блок между `{sys_open}` и `{sys_close}` в подключённом skill
-(`{skill}`); используй его дословно.
+(`{skill}`). Вставь его в скрипт ДОСЛОВНО (без правок).
 
-Судья доступен как локальный helper `judge_client` (импортируется без установки):
-  import json, judge_client
-  answer = judge_client.judge(SYSTEM_PROMPT, item["user_prompt"])   # "0 87" / "1"
-Разбери метку из ответа и собери `verdicts.json` в корне рабочего каталога:
-{{"<uid>": {{"label": 0 или 1, "confidence": 0-100}}, ...}}
+Верни РОВНО один python-скрипт по шаблону ниже, ничего не добавляя и не меняя структуру
+(только подставь SYSTEM_PROMPT):
 
-Напиши ОДИН python-скрипт, который всё это делает (stdlib + `judge_client`).
+```python
+import json, os, re
+from sirin.inference.adapters import GigaChatConfig, GigaChatModelAdapter
+
+SYSTEM_PROMPT = """<СЮДА ДОСЛОВНО системный промпт из skill>"""
+
+adapter = GigaChatModelAdapter(config=GigaChatConfig(
+    model_path=os.environ["SIRIN_JUDGE_MODEL"],
+    base_url=os.environ["SIRIN_JUDGE_BASE_URL"],
+    cert_file=os.environ["SIRIN_JUDGE_CERT_FILE"],
+    key_file=os.environ["SIRIN_JUDGE_KEY_FILE"],
+    verify_ssl_certs=os.environ.get("SIRIN_JUDGE_VERIFY_SSL", "false").lower() == "true",
+    timeout=600,
+))
+adapter.load()
+
+claims = json.load(open("claims.json", encoding="utf-8"))
+out = {{}}
+for c in claims:
+    raw = adapter.sample(
+        [[{{"role": "system", "content": SYSTEM_PROMPT}},
+          {{"role": "user", "content": c["user_prompt"]}}]],
+        max_tokens=32, temperature=0.0,
+    )[0]
+    nums = re.findall(r"\\d+", str(raw))
+    label = 0
+    for i, n in enumerate(nums):
+        if n in ("0", "1"):
+            label = int(n); break
+    out[str(c["uid"])] = {{"label": label, "confidence": 0}}
+
+json.dump(out, open("verdicts.json", "w", encoding="utf-8"), ensure_ascii=False)
+```
 '''
 
     _EVAL = '''import json, os
@@ -524,7 +553,6 @@ def test_claim(uid, gold):
             (inputs / 'claims.json').write_text(
                 json.dumps(claims, ensure_ascii=False, indent=1), encoding='utf-8'
             )
-            (inputs / 'judge_client.py').write_text(_JUDGE_CLIENT_SRC, encoding='utf-8')
             if adapter_cfg.get('copy_files'):
                 # Guard blocks /home; copy TLS material next to the task so the child can read it.
                 cert_dst = inputs / 'judge_cert.pem'
