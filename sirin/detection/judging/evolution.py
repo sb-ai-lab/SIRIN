@@ -155,6 +155,8 @@ class _AdapterBackend:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_retries = max_retries
+        # Number of model calls made so far (progress counter surfaced by the trainer).
+        self.calls = 0
 
     def _sample(self, messages: List[Dict[str, str]], system: Optional[str], max_tokens: int):
         from evolution.llm.backend import LLMResponse
@@ -179,6 +181,8 @@ class _AdapterBackend:
                 out = self.adapter.sample(
                     [full], max_tokens=max_tokens, temperature=self.temperature, use_async=False
                 )
+                self.calls += 1
+                lg.info(f'Evolution: model call #{self.calls}')
                 content = out[0] if isinstance(out, (list, tuple)) else str(out)
                 return LLMResponse(content=content)
             except Exception as exc:  # noqa: BLE001
@@ -305,13 +309,34 @@ class EvolutionPromptTrainer:
         # which raises "cannot be called from a running event loop" inside Jupyter (the
         # kernel already runs a loop). A fresh thread has no running loop, so it works.
         import concurrent.futures
+        import threading
+        import time
 
+        expected = max(1, cfg.rounds) * max(1, len(val_names)) * max(1, trials)
+        start = time.monotonic()
+        stop = threading.Event()
+
+        def _heartbeat():
+            while not stop.wait(max(1.0, cfg.progress_every_s)):
+                lg.info(
+                    f'Evolution: {time.monotonic() - start:.0f}s elapsed, '
+                    f'model calls={backend.calls} (expected solver calls ~{expected})'
+                )
+
+        beat = threading.Thread(target=_heartbeat, daemon=True)
+        beat.start()
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 self._result = pool.submit(_call_optimize).result()
         except Exception as exc:  # noqa: BLE001 - surface a readable train() failure
             lg.error(f'Evolution optimization failed: {type(exc).__name__}: {exc}')
             raise
+        finally:
+            stop.set()
+            lg.info(
+                f'Evolution: done in {time.monotonic() - start:.0f}s, '
+                f'model calls={backend.calls}'
+            )
 
         active_md = (skill_dir / 'SKILL.md').read_text(encoding='utf-8')
         self._apply_evolved_prompt(active_md, seed_system)

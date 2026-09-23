@@ -290,6 +290,9 @@ class PromptEvolutionConfig:
     seed: int = 42
     max_tokens: int = 2048
     timeout: float = 900.0
+    # Period (seconds) for the "still running" heartbeat during train(): logs elapsed
+    # time and the number of model calls made so far.
+    progress_every_s: float = 30.0
     # Extra raw flags appended to ``evo evolve optimize`` (e.g. ['--manifest', 'm.json']).
     extra_evo_args: List[str] = field(default_factory=list)
 
