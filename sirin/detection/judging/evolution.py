@@ -382,18 +382,44 @@ class EvolutionPromptTrainer:
         if adapter_cfg.get('api_key'):
             os.environ['SIRIN_JUDGE_API_KEY'] = str(adapter_cfg['api_key'])
 
-        # The generated judge script runs in a *separate* sandbox process; an editable
-        # `sirin` install (PEP 660 finder) may not be visible there. Expose the directory
-        # that holds the `sirin` package on PYTHONPATH so the child can import it by path.
+        # The generated judge script runs in a *separate* sandbox process whose HOME is
+        # redirected by the guard. When `sirin`/deps live in the user site
+        # (~/.local/lib/...), that process loses them. Expose the real site-packages
+        # (and the directory holding the `sirin` package) via PYTHONPATH.
         try:
-            import sirin as _sirin
-            root = str(Path(_sirin.__file__).resolve().parents[1])
+            import site
+            import sysconfig
+
+            paths: List[str] = []
+            try:
+                import sirin as _sirin
+
+                paths.append(str(Path(_sirin.__file__).resolve().parents[1]))
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                user_site = site.getusersitepackages()
+                if user_site:
+                    paths.append(user_site)
+            except Exception:  # noqa: BLE001
+                pass
+            schemed = sysconfig.get_paths()
+            for key in ('purelib', 'platlib'):
+                if schemed.get(key):
+                    paths.append(schemed[key])
+            try:
+                paths.extend(site.getsitepackages())
+            except Exception:  # noqa: BLE001
+                pass
+
             parts = [p for p in (os.environ.get('PYTHONPATH') or '').split(os.pathsep) if p]
-            if root not in parts:
-                os.environ['PYTHONPATH'] = os.pathsep.join([root] + parts)
-                lg.info(f'Evolution: PYTHONPATH += {root} (for task subprocesses)')
+            for path in reversed([p for p in paths if p]):
+                if path not in parts:
+                    parts.insert(0, path)
+            os.environ['PYTHONPATH'] = os.pathsep.join(parts)
+            lg.info(f'Evolution: PYTHONPATH for task subprocesses = {os.environ["PYTHONPATH"]}')
         except Exception as exc:  # noqa: BLE001
-            lg.warning(f'Evolution: could not add sirin to PYTHONPATH: {exc}')
+            lg.warning(f'Evolution: could not build PYTHONPATH for tasks: {exc}')
 
     # ------------------------------------------------------------------ data
     def _to_records(self, data) -> List[Dict[str, Any]]:
