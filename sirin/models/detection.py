@@ -271,6 +271,14 @@ class PromptEvolutionConfig:
     # calls the judge's model_adapter, so this is mostly informational.
     model: Optional[str] = None
     editor_model: Optional[str] = None  # None -> model
+    # Optional SEPARATE editor backend (e.g. a stronger model such as DeepSeek) accessed
+    # over an OpenAI-compatible endpoint (mTLS or api key). If editor_base_url / certs are
+    # unset, the editor reuses the judge's own adapter.
+    editor_base_url: Optional[str] = None
+    editor_api_key: Optional[str] = None
+    editor_cert_file: Optional[str] = None
+    editor_key_file: Optional[str] = None
+    editor_verify_ssl: bool = False
     skill_name: str = 'judge-prompt'
     # Which config attributes hold the prompts to evolve. Defaults fit
     # OpenAIJudgeBase (system_prompt/user_prompt). For the verbalized judge use

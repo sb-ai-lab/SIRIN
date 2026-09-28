@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .base import ModelAdapterBase
-    from .gigachat_adapter import GigaChatConfig, GigaChatModelAdapter
+    from .gigachat_adapter import (
+        GigaChatConfig,
+        GigaChatModelAdapter,
+        MtlsOpenAIAdapter,
+        MtlsOpenAIConfig,
+    )
     from .hf_adapter import HfModelAdapter
     from .openai_adapter import OpenAIModelAdapter
     from .vllm_adapter import VllmModelAdapter
@@ -23,6 +28,8 @@ _EXPORTS = {
     'OpenAIModelAdapter': 'openai_adapter',
     'GigaChatModelAdapter': 'gigachat_adapter',
     'GigaChatConfig': 'gigachat_adapter',
+    'MtlsOpenAIAdapter': 'gigachat_adapter',
+    'MtlsOpenAIConfig': 'gigachat_adapter',
 }
 
 __all__ = [
@@ -32,6 +39,8 @@ __all__ = [
     'OpenAIModelAdapter',
     'GigaChatModelAdapter',
     'GigaChatConfig',
+    'MtlsOpenAIAdapter',
+    'MtlsOpenAIConfig',
 ]
 
 

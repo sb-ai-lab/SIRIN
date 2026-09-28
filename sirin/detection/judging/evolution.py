@@ -282,9 +282,20 @@ class EvolutionPromptTrainer:
         trials = max(cfg.trials, (4 + max(1, len(val_names)) - 1) // max(1, len(val_names)))
 
         backend = _AdapterBackend(self.judge.model_adapter, max_tokens=cfg.max_tokens)
+        editor_adapter = self._build_editor_adapter()
+        editor_backend = (
+            _AdapterBackend(editor_adapter, max_tokens=cfg.max_tokens)
+            if editor_adapter is not None
+            else backend
+        )
         self._prepare_env(adapter_cfg)
 
-        lg.info('Evolution (in-process): optimize_skill solver/editor via model_adapter')
+        lg.info(
+            'Evolution (in-process): solver={} editor={}'.format(
+                type(self.judge.model_adapter).__name__,
+                type(editor_adapter).__name__ if editor_adapter is not None else 'judge-adapter',
+            )
+        )
 
         def _call_optimize():
             return optimize_skill(
@@ -302,7 +313,7 @@ class EvolutionPromptTrainer:
                 max_tokens=cfg.max_tokens,
                 timeout=cfg.timeout,
                 solver_backend=backend,
-                editor_backend=backend,
+                editor_backend=editor_backend,
                 pass_env=list(cfg.pass_env or _JUDGE_ENV_VARS),
             )
 
@@ -371,6 +382,45 @@ class EvolutionPromptTrainer:
     @property
     def _model_adapter(self):
         return self.judge.model_adapter
+
+    def _build_editor_adapter(self):
+        """Build a separate editor model adapter, or None to reuse the judge's adapter.
+
+        Configured via PromptEvolutionConfig.editor_* (OpenAI-compatible endpoint, mTLS
+        certs or an API key). Lets a stronger model (e.g. DeepSeek) be the prompt editor
+        while the judge stays on GigaChat.
+        """
+        cfg = self.config
+        if not (cfg.editor_base_url or cfg.editor_cert_file or cfg.editor_api_key):
+            return None
+        try:
+            from sirin.inference.adapters import GigaChatConfig, GigaChatModelAdapter
+        except Exception as exc:  # noqa: BLE001
+            lg.warning(f'Evolution: editor adapter imports failed: {exc}')
+            return None
+        try:
+            adapter = GigaChatModelAdapter(config=GigaChatConfig(
+                model_path=cfg.editor_model or 'editor',
+                base_url=cfg.editor_base_url,
+                cert_file=cfg.editor_cert_file,
+                key_file=cfg.editor_key_file,
+                verify_ssl_certs=cfg.editor_verify_ssl,
+                api_key=cfg.editor_api_key,
+                timeout=600,
+                max_retries=5,
+            ))
+            adapter.load()
+            lg.info(
+                f'Evolution: editor adapter = {type(adapter).__name__} '
+                f'model={cfg.editor_model} base={cfg.editor_base_url}'
+            )
+            return adapter
+        except Exception as exc:  # noqa: BLE001
+            lg.warning(
+                f'Evolution: could not build editor adapter ({type(exc).__name__}: {exc}); '
+                'using the judge adapter as editor'
+            )
+            return None
 
     def _prepare_env(self, adapter_cfg: Dict[str, Any]):
         os.environ['SIRIN_JUDGE_KIND'] = adapter_cfg['kind']

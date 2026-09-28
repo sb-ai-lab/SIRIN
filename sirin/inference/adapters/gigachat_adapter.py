@@ -165,3 +165,19 @@ class GigaChatModelAdapter(OpenAIModelAdapter):
         supported = bool(logprobs and logprobs[0])
         lg.info(f'logprobs supported: {supported}')
         return supported
+
+
+class MtlsOpenAIConfig(GigaChatConfig):
+    """Config for ANY OpenAI-compatible endpoint over mTLS (e.g. DeepSeek on-prem).
+
+    Same fields as :class:`GigaChatConfig`; provided so call sites are not forced to name a
+    GigaChat type when the endpoint is not GigaChat.
+    """
+
+
+class MtlsOpenAIAdapter(GigaChatModelAdapter):
+    """Alias of :class:`GigaChatModelAdapter` for generic mTLS OpenAI-compatible endpoints.
+
+    mTLS mode builds httpx clients with ``cert=(cert_file, key_file)`` and talks the plain
+    OpenAI chat-completions protocol, so it works for any such gateway (DeepSeek, etc.).
+    """
